@@ -1455,7 +1455,7 @@ function showTab(k){
   $('view-'+(k==='fin'?'fin':k)).classList.add('active');
   const btn=$('tabbtn-'+k); if(btn) btn.classList.add('active');
   if(k==='painel') renderOps();
-  if(k==='cotacoes'){ refreshSaved(); calc(); updateApprovalUI(); }
+  if(k==='cotacoes'){ refreshSaved(); if(!state.items||!state.items.length) addItem(); else renderItems(); updateApprovalUI(); }
   if(k==='checklist') { fillOpSelect('chkOpSel'); renderChecklist(); }
   if(k==='docs') renderDocs();
   if(k==='frete') renderFrete();
@@ -2551,8 +2551,14 @@ const DEFAULT_EXPS = [
 ];
 
 function addItem(it){
-  it = it||{d:'',ncm:'',q:0,u:0,p:0,ii:10.8,ipi:0,c5291:false,mono:false};
-  state.items.push(it); renderItems();
+  it = it||{d:'',ncm:'',q:1,u:0,p:0,ii:10.8,ipi:0,c5291:false,mono:false};
+  state.items.push(it);
+  renderItems();
+  const idx = state.items.length - 1;
+  setTimeout(()=>{
+    const el = $('item_ncm_' + idx) || $('item_desc_' + idx);
+    if(el) el.focus();
+  }, 50);
 }
 function addExp(e){ state.exps.push(e||{l:'',v:0}); renderExps(); }
 
