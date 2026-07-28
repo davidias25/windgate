@@ -7,20 +7,27 @@ let ncmCache = null;
 let lastFetchTime = 0;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
 
-// Tabela de alíquotas estimadas por Capítulo / NCM (TEC / TIPI padrão importação)
+// Tabela de alíquotas por NCM e Capítulo (TEC / TIPI padrão importação)
+const NCM_SPECIFIC = {
+  '73089090': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84743100': { ii: 20.0, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84262000': { ii: 20.0, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84279000': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84271019': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84294000': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84295190': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84295900': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '85076000': { ii: 14.0, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+};
+
 const ALIQUOTAS_PADRAO = {
-  // Cap. 73 - Obras de ferro ou aço (Escoras, tubos, etc)
   '73': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
-  // Cap. 84 - Reatores nucleares, caldeiras, máquinas e aparelhos mecânicos
   '84': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
-  // Cap. 85 - Máquinas, aparelhos e materiais elétricos
   '85': { ii: 14.0, ipi: 3.25, pis: 2.1, cofins: 9.65 },
-  // Cap. 39 - Plásticos e suas obras
   '39': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65 },
-  // Cap. 95 - Brinquedos, jogos, artigos para entretenimento
   '95': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65 },
-  // Padrão de segurança importação
-  '_default': { ii: 10.0, ipi: 0, pis: 2.1, cofins: 9.65 }
+  '72': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '_default': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 }
 };
 
 /**
@@ -61,7 +68,7 @@ async function buscarNCM(codigoRaw) {
   const itemFound = nomenclaturas.find(n => n.Codigo.replace(/\D/g, '') === cleanCode);
   
   const cap = cleanCode.slice(0, 2);
-  const aliquotas = ALIQUOTAS_PADRAO[cap] || ALIQUOTAS_PADRAO['_default'];
+  const aliquotas = NCM_SPECIFIC[cleanCode] || ALIQUOTAS_PADRAO[cap] || ALIQUOTAS_PADRAO['_default'];
 
   if (itemFound) {
     return {

@@ -2561,13 +2561,13 @@ function renderItems(){
   state.items.forEach((it,i)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`
-      <td><input value="${esc(it.d)}" oninput="state.items[${i}].d=this.value"></td>
-      <td><input value="${esc(it.ncm)}" style="width:92px" maxlength="10" oninput="state.items[${i}].ncm=this.value;ncmAuto(${i},this.value);calc()"></td>
-      <td><input type="number" value="${it.q}" style="width:70px" oninput="state.items[${i}].q=+this.value||0;calc()"></td>
-      <td><input type="number" value="${it.u}" step="0.01" style="width:90px" oninput="state.items[${i}].u=+this.value||0;calc()"></td>
-      <td><input type="number" value="${it.p}" step="0.01" style="width:80px" oninput="state.items[${i}].p=+this.value||0;calc()"></td>
-      <td><input type="number" value="${it.ii}" step="0.1" style="width:64px" oninput="state.items[${i}].ii=+this.value||0;calc()"></td>
-      <td><input type="number" value="${it.ipi}" step="0.1" style="width:64px" oninput="state.items[${i}].ipi=+this.value||0;calc()"></td>
+      <td><input id="item_desc_${i}" value="${esc(it.d)}" oninput="state.items[${i}].d=this.value"></td>
+      <td><input id="item_ncm_${i}" value="${esc(it.ncm)}" style="width:92px" maxlength="10" oninput="state.items[${i}].ncm=this.value;ncmAuto(${i},this.value);calc()"></td>
+      <td><input type="number" id="item_q_${i}" value="${it.q}" style="width:70px" oninput="state.items[${i}].q=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_u_${i}" value="${it.u}" step="0.01" style="width:90px" oninput="state.items[${i}].u=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_p_${i}" value="${it.p}" step="0.01" style="width:80px" oninput="state.items[${i}].p=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_ii_${i}" value="${it.ii}" step="0.1" style="width:64px" oninput="state.items[${i}].ii=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_ipi_${i}" value="${it.ipi}" step="0.1" style="width:64px" oninput="state.items[${i}].ipi=+this.value||0;calc()"></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.c5291?'checked':''} onchange="state.items[${i}].c5291=this.checked;calc()"></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.mono?'checked':''} onchange="state.items[${i}].mono=this.checked;calc()"></td>
       <td class="r num item-total" id="fob_${i}">—</td>
@@ -2588,17 +2588,16 @@ function renderExps(){
   calc();
 }
 
-
 /* ===== Biblioteca NCM — auto-preenche II/IPI e flags; aprende com o uso ===== */
 const NCM_SEED={
-  '84743100':{d:'Betoneiras e misturadores de concreto',ii:20,ipi:null,c5291:true, mono:false},
-  '84262000':{d:'Guindastes de torre',ii:20,ipi:null,c5291:false,mono:false},
-  '84279000':{d:'Empilhadeiras — outras (entra no 52/91)',ii:null,ipi:null,c5291:true, mono:false},
-  '84271019':{d:'Empilhadeiras elétricas (NÃO entra no 52/91 — checar c/ despachante)',ii:null,ipi:null,c5291:false,mono:false},
-  '84294000':{d:'Rolos compactadores (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
-  '84295190':{d:'Pás carregadeiras (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
-  '84295900':{d:'Retro/escavadeiras — outras (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
-  '85076000':{d:'Baterias de lítio (não monofásico)',ii:null,ipi:null,c5291:false,mono:false}
+  '84743100':{d:'Betoneiras e misturadores de concreto',ii:20,ipi:0,c5291:true, mono:false},
+  '84262000':{d:'Guindastes de torre',ii:20,ipi:0,c5291:false,mono:false},
+  '84279000':{d:'Empilhadeiras — outras (entra no 52/91)',ii:12.6,ipi:0,c5291:true, mono:false},
+  '84271019':{d:'Empilhadeiras elétricas',ii:12.6,ipi:0,c5291:false,mono:false},
+  '84294000':{d:'Rolos compactadores (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
+  '84295190':{d:'Pás carregadeiras (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
+  '84295900':{d:'Retro/escavadeiras — outras (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
+  '85076000':{d:'Baterias de lítio',ii:14,ipi:3.25,c5291:false,mono:false}
 };
 function ncmLib(){ if(!DB.ncmlib) DB.ncmlib={}; return DB.ncmlib; }
 let _ncmT=null;
@@ -2609,11 +2608,37 @@ function ncmAuto(i,raw){
   const e=lib[ncm];
   const it=state.items[i];
   if(e){
-    if(e.ii!=null&&(!it.ii||it.ii===10.8)) it.ii=e.ii;
-    if(e.ipi!=null&&!it.ipi) it.ipi=e.ipi;
+    if(e.ii!=null) { it.ii=e.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=e.ii; }
+    if(e.ipi!=null) { it.ipi=e.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=e.ipi; }
     if(e.c5291!=null) it.c5291=e.c5291;
     if(e.mono!=null) it.mono=e.mono;
-    renderItems();
+    calc();
+    $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · II ${e.ii!=null?e.ii+'%':'confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
+  }
+  clearTimeout(_ncmT);
+  _ncmT=setTimeout(async()=>{
+    try{
+      const r=await fetch('/api/ncm/'+ncm);
+      if(r.ok){
+        const json=await r.json();
+        if(json.success && json.data){
+          const d=json.data;
+          // Atualiza impostos II, IPI e descrição no item diretamente no DOM
+          if(d.ii!=null) { it.ii=d.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=d.ii; }
+          if(d.ipi!=null) { it.ipi=d.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=d.ipi; }
+          if(d.descricao && (!it.d || it.d.startsWith('Item') || !it.d.trim())) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
+          // Atualiza campos de PIS e COFINS no formulário
+          if(d.pis!=null && $('pisS')) $('pisS').value=d.pis;
+          if(d.cofins!=null && $('cofS')) $('cofS').value=d.cofins;
+          calc();
+          $('ncmHint').innerHTML=`🌐 <b>Siscomex Classif API (Oficial):</b> ${esc(d.descricao)}<br>📊 <b>Tributos Importação Preenchidos:</b> II: <b style="color:#34C77C">${d.ii}%</b> · IPI: <b style="color:#34C77C">${d.ipi}%</b> · PIS: <b style="color:#34C77C">${d.pis}%</b> · COFINS: <b style="color:#34C77C">${d.cofins}%</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
+        }
+      }
+    }catch(e){
+      console.warn('Erro ao consultar NCM no Siscomex:', e);
+    }
+  },200);
+}
     $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · II ${e.ii!=null?e.ii+'%':'confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
   }
   clearTimeout(_ncmT);
