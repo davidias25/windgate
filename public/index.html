@@ -726,10 +726,18 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <section class="card">
         <h2>Dados da operação</h2>
         <div class="frow">
+          <div style="grid-column:span 2"><label>Tipo de operação</label><select id="tipoOp" onchange="tipoOpChanged()">
+            <option value="direta">Direta — cliente CONTRIBUINTE (SF/AL → cliente)</option>
+            <option value="triangular">Triangular via JeT — cliente NÃO contribuinte (SF/AL → JeT/ES → cliente)</option>
+          </select></div>
           <div><label>Nº da operação</label><input id="opNum" placeholder="OP24"></div>
-          <div style="grid-column:span 2"><label>Cliente</label><input id="cliente" placeholder="Nome do cliente"></div>
           <div><label>UF destino</label><select id="ufDestino" onchange="calc()"><option>CE</option><option>Outro (sem ST)</option></select></div>
         </div>
+        <div class="frow">
+          <div style="grid-column:span 2"><label>Cliente</label><input id="cliente" placeholder="Nome do cliente"></div>
+          <div id="servForaBox" style="display:none"><label>Serviço WindGate por fora (R$)</label><input type="number" id="servFora" value="0" oninput="calc()"></div>
+        </div>
+        <p class="note" id="triNote" style="display:none">Triangular: SF importa com benefício AL → vende à <b>JeT (ES)</b> com markup mínimo (campo Mark-up NF) → JeT vende ao cliente e recolhe o <b>DIFAL</b> + PIS/COFINS (Lucro Real, 9,25% sobre a margem). Marque por item: <b>52/91</b> (carga reduzida · DIFAL 4,8%) e <b>Mono</b> (PIS/COFINS monofásico — ex.: NCM 84.29). Regra da skill oficial — 1ª operação real: validar com a contadora.</p>
         <div class="frow">
           <div style="grid-column:span 2"><label>Mercadoria</label><input id="mercadoria" placeholder="Ex.: Escoras metálicas"></div>
           <div><label>Origem</label><input id="origem" placeholder="Ex.: Xangai/China"></div>
@@ -766,8 +774,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div style="overflow-x:auto">
           <table id="itemsTable">
             <thead><tr>
-              <th style="min-width:180px">Descrição</th><th>NCM</th><th class="r">Qtd</th>
+              <th style="min-width:170px">Descrição</th><th>NCM</th><th class="r">Qtd</th>
               <th class="r">Unit. USD</th><th class="r">Peso unit. (kg)</th><th class="r">II %</th><th class="r">IPI %</th>
+              <th title="Convênio 52/91 — só na triangular">52/91</th><th title="PIS/COFINS monofásico — só na triangular">Mono</th>
               <th class="r">FOB R$</th><th></th>
             </tr></thead>
             <tbody id="itemsBody"></tbody>
@@ -775,6 +784,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="addItem()">+ adicionar item</button>
         <div class="warn" id="warnNCM">⚠ Existe NCM com menos de 8 dígitos — confira antes de aprovar.</div>
+        <div class="note" id="ncmHint" style="margin-top:8px"></div>
       </section>
 
       <section class="card">
@@ -795,6 +805,24 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div id="expList"></div>
         <button class="btn btn-ghost btn-sm" onclick="addExp()">+ adicionar despesa</button>
       </section>
+
+      <section class="card" id="desemCard">
+        <h2>Cronograma de desembolso — cliente × fábrica <span class="spacer"></span><button class="btn btn-blue btn-sm" onclick="desemSugerir()">⚖ Sugerir distribuição</button></h2>
+        <div class="frow" style="grid-template-columns:1fr 1fr 1fr 1fr">
+          <div><label>Sinal à fábrica (%)</label><input type="number" id="fabSinal" value="30" min="0" max="100" oninput="calc()"></div>
+          <div style="grid-column:span 3"><p class="note" style="margin-top:16px">Padrão das fábricas: <b>30%</b> para iniciar a produção e <b>70%</b> na finalização. A regra WindGate: <b>o recebimento do cliente em cada etapa SEMPRE cobre a nossa saída</b> — e 30–40% da margem entra já nas duas primeiras parcelas.</p></div>
+        </div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Etapa</th><th class="r">Nossa saída (auto)</th><th class="r">Recebimento do cliente (R$)</th><th>Situação</th></tr></thead>
+          <tbody>
+            <tr><td><b>1 · Assinatura</b><div class="note">sinal à fábrica → produção</div></td><td class="r num" id="desO1">—</td><td><input type="number" id="desR1" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS1">—</td></tr>
+            <tr><td><b>2 · Produto pronto</b><div class="note">saldo à fábrica · pré-embarque</div></td><td class="r num" id="desO2">—</td><td><input type="number" id="desR2" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS2">—</td></tr>
+            <tr><td><b>3 · Chegada ao porto</b><div class="note">frete · impostos · despesas · entrega</div></td><td class="r num" id="desO3">—</td><td><input type="number" id="desR3" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS3">—</td></tr>
+          </tbody>
+        </table></div>
+        <div class="warn" id="desemErr" style="display:none"></div>
+        <div class="rulebox green" id="desemOk" style="display:none"><b>✓ Regra do desembolso atendida</b> — em todas as etapas o recebimento cobre a saída, e a soma fecha com o preço aprovado. Fluxo de caixa sempre positivo.</div>
+      </section>
     </div>
 
     <div class="summary-stick">
@@ -804,8 +832,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="sumline"><span class="lbl">2 · Impostos de nacionalização</span><span class="num" id="sImpostos">R$ 0,00</span></div>
         <div class="sumline"><span class="lbl">3 · Despesas de nacionalização</span><span class="num" id="sDespesas">R$ 0,00</span></div>
         <div class="sumline"><span class="lbl">Resultante saída (impostos − créditos)</span><span class="num" id="sResultante">R$ 0,00</span></div>
-        <div class="sumline cost"><span>Custo real WindGate</span><span class="num" id="sCustoReal">R$ 0,00</span></div>
-        <div class="sumline"><span class="lbl">ICMS ST (cliente CE)</span><span class="num" id="sST">R$ 0,00</span></div>
+        <div class="sumline cost"><span id="lblCusto">Custo real WindGate</span><span class="num" id="sCustoReal">R$ 0,00</span></div>
+        <div class="sumline" id="rowST"><span class="lbl">ICMS ST (cliente CE)</span><span class="num" id="sST">R$ 0,00</span></div>
+        <div id="triLines" style="display:none">
+          <div class="sumline"><span class="lbl">NF de compra da JeT (SF → JeT)</span><span class="num" id="sNFJT">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl">DIFAL (JeT → cliente)</span><span class="num" id="sDifal">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl">PIS/COFINS JeT (9,25% s/ margem)</span><span class="num" id="sPCJT">R$ 0,00</span></div>
+          <div class="sumline cost"><span>Custo total do grupo (SF + JeT)</span><span class="num" id="sCustoGrupo">R$ 0,00</span></div>
+        </div>
 
         <div class="apprbox">
           <h2 style="margin-bottom:8px">Margem WindGate</h2>
@@ -825,7 +859,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
           <div class="warn" id="warnMargem">⚠ Margem abaixo de 10% — confirmar com Samir se é estratégico.</div>
 
-          <div class="sumline big"><span>Preço ao cliente</span><span class="val num" id="sPreco">R$ 0,00</span></div>
+          <div class="sumline big"><span id="lblPreco">Preço ao cliente</span><span class="val num" id="sPreco">R$ 0,00</span></div>
           <div class="sumline"><span class="lbl">Margem % s/ preço</span><span class="num" id="sMargemRec">—</span></div>
 
           <button class="btn btn-blue" id="btnSend" onclick="sendApproval()">📨 Enviar para aprovação · Samir</button>
@@ -844,8 +878,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="hd-actions"><select id="chkOpSel" style="min-width:230px" onchange="renderChecklist()"></select></div>
   </div>
   <div class="card">
-    <h2>Progresso da operação <span class="spacer"></span><span class="note" id="chkPct"></span></h2>
+    <h2>Progresso da operação <span class="spacer"></span>
+      <button class="btn btn-ghost btn-sm" onclick="chkTogglePend()">👁 só pendentes</button>
+      <button class="btn btn-blue btn-sm" onclick="chkCobranca()">📨 copiar cobrança</button>
+      <span class="note" id="chkPct" style="margin-left:8px"></span></h2>
     <div class="chk-progress"><div id="chkBar" style="width:0%"></div></div>
+    <div id="chkFases" style="margin-top:10px"></div>
     <div style="margin-top:14px" class="rulebox blue"><b>Regra da dupla análise:</b> um documento só chega em <b>Aprovado</b> depois de Coletado (Ívina) e Revisado (Davi ou Samir). Quem revisa não pode ser quem coletou.</div>
   </div>
   <div class="card">
@@ -1266,6 +1304,7 @@ function defaultDB(){
     },
     ops:[
       {id:'OP10', nome:'Escoras',            cliente:'Escoras/Score',   status:'logistica',  prox:'Atualizar status', resp:'Matheus', obs:''},
+      {id:'OP11', nome:'Kauly Vietnam',    cliente:'Kauly',           status:'documentacao',prox:'Atualizar status', resp:'Davi', obs:'FCL'},
       {id:'OP13', nome:'Custódio',           cliente:'Custódio',        status:'documentacao',prox:'Atualizar status', resp:'Ívina', obs:''},
       {id:'OP14', nome:'Felipe',             cliente:'Felipe',          status:'documentacao',prox:'Atualizar status', resp:'Ívina', obs:''},
       {id:'OP15', nome:'Yoga',               cliente:'Luan',            status:'logistica',  prox:'Atualizar status', resp:'Matheus', obs:''},
@@ -1308,7 +1347,7 @@ function defaultDB(){
     ptax:null,          // {rate,date,source,ts}
     agendaTasks:[],     // {id,t,resp,prazo,prio,status,obs,por,doneAt}
     gestao:{},          // 'YYYY-MM' → {gestor,destaques,desafios,prox,metas:[{t,resp,prio,done}]}
-    settings:{criadoEm:new Date().toISOString(),schema:3}
+    settings:{criadoEm:new Date().toISOString(),schema:4}
   };
 }
 
@@ -1331,6 +1370,13 @@ function migrateDB(){
     if(!DB.agendaTasks) DB.agendaTasks=[];
     if(!DB.gestao) DB.gestao={};
     DB.settings.schema=3; ch=true;
+  }
+  if((DB.settings.schema||3)<4){
+    if(!DB.ops.find(o=>o.id==='OP11')) DB.ops.push({id:'OP11',nome:'Kauly Vietnam',cliente:'Kauly',status:'documentacao',prox:'Atualizar status',resp:'Davi',obs:'FCL',destinoPorto:'Pecém'});
+    if(!DB.ncmlib) DB.ncmlib={};
+    (DB.ops||[]).forEach(o=>{ if(o.posAtual===undefined) o.posAtual=''; });
+    Object.values(DB.checklists||{}).forEach(l=>l.forEach(it=>{ if(it.prazo===undefined) it.prazo=''; if(it.link===undefined) it.link=''; }));
+    DB.settings.schema=4; ch=true;
   }
   if(DB.ptax===undefined){ DB.ptax=null; ch=true; }
   (DB.fretes||[]).forEach(f=>{
@@ -1486,8 +1532,10 @@ function openOpModal(id){
       <div><label>Embarque</label><input type="date" id="m_opemb" value="${o&&o.embarque?o.embarque:''}"></div>
       <div><label>ETA (chegada)</label><input type="date" id="m_opeta" value="${o&&o.eta?o.eta:''}"></div>
       <div><label>Navio</label><input id="m_opnavio" value="${o?esc(o.navio||''):''}" placeholder="Ex.: MSC LORETO"></div>
-      <div><label>Link de rastreio (opcional)</label><input id="m_optrack" value="${o?esc(o.tracking||''):''}" placeholder="https://…"></div>
+      <div><label>Link de rastreio do armador</label><input id="m_optrack" value="${o?esc(o.tracking||''):''}" placeholder="https://msc.com/track…"></div>
+      <div><label>Posição atual (0–100%)</label><input type="number" id="m_oppos" min="0" max="100" value="${o&&o.posAtual!==''&&o.posAtual!=null?o.posAtual:''}" placeholder="auto pelo ETA"></div>
     </div>
+    <p class="note">🛰️ <b>Posição exata:</b> abra o link do armador, veja onde o navio está e digite o % do trajeto — o mapa espelha na hora (operações com o MESMO link/navio andam juntas no mapa, como um contêiner consolidado). Vazio = estimativa automática pelo cronograma.</p>
     <div class="modal-actions">
       ${o?'<button class="btn btn-danger" onclick="delOp(\''+esc(o.id)+'\')">Excluir</button>':''}
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -1499,7 +1547,7 @@ function saveOp(id){
   if(!nid){ toast('⚠ Informe o código da operação'); return; }
   let o=DB.ops.find(x=>x.id===nid);
   const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),status:V('m_opst'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
-    origemPorto:V('m_oporig'),destinoPorto:V('m_opdest'),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack')};
+    origemPorto:V('m_oporig'),destinoPorto:V('m_opdest'),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
   if(o) Object.assign(o,data); else DB.ops.push(data);
   if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
   saveDB(); closeModal(); renderOps(); toast('Operação salva ✓');
@@ -1516,20 +1564,34 @@ function fillOpSelect(selId,includeAll){
 /* ---------- CHECKLIST ---------- */
 const CHK_STATUS=[['pendente','Pendente','draft'],['coletado','Coletado','blue'],['revisado','Revisado','teal'],['aprovado','Aprovado','ok'],['na','N/A','draft']];
 function ensureChk(op){ if(!DB.checklists[op]) DB.checklists[op]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''})); return DB.checklists[op]; }
+let _chkSoPend=false;
+function chkTogglePend(){ _chkSoPend=!_chkSoPend; renderChecklist(); }
 function renderChecklist(){
   const op=$('chkOpSel').value; if(!op){ $('chkList').innerHTML='<div class="empty">Crie uma operação no Painel para gerar o checklist.</div>'; $('chkPct').textContent=''; $('chkBar').style.width='0%'; return; }
   const list=ensureChk(op);
+  // progresso por fase
+  const fases={}; list.forEach(it=>{ fases[it.fase]=fases[it.fase]||{t:0,d:0}; fases[it.fase].t++; if(it.status==='aprovado'||it.status==='na') fases[it.fase].d++; });
+  const fb=$('chkFases'); if(fb) fb.innerHTML=Object.entries(fases).map(([f,v])=>{
+    const pc=Math.round(v.d/v.t*100);
+    return `<span class="pill ${pc===100?'ok':pc>0?'blue':'draft'}" style="margin-right:6px">${esc(f)} ${v.d}/${v.t}</span>`;
+  }).join('');
   const done=list.filter(i=>i.status==='aprovado'||i.status==='na').length;
   const pct=list.length?Math.round(done/list.length*100):0;
   $('chkPct').textContent=`${done}/${list.length} concluídos · ${pct}%`;
   $('chkBar').style.width=pct+'%';
   const box=$('chkList'); box.innerHTML='';
   let lastFase='';
+  const hjISO=new Date().toISOString().slice(0,10);
   list.forEach((it,i)=>{
+    if(_chkSoPend && (it.status==='aprovado'||it.status==='na')) return;
     if(it.fase!==lastFase){ lastFase=it.fase; box.innerHTML+=`<div class="grouph" style="margin:14px 0 4px">${esc(it.fase)}</div>`; }
     const stMetaC=CHK_STATUS.find(s=>s[0]===it.status)||CHK_STATUS[0];
     box.innerHTML+=`<div class="chk-item">
-      <div><div class="ttl">${esc(it.titulo)}</div></div>
+      <div><div class="ttl">${esc(it.titulo)}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+          <input type="date" value="${it.prazo||''}" style="width:128px;padding:2px 6px;font-size:10.5px" onchange="chkSet(${i},'prazo',this.value)" title="prazo do documento">
+          ${it.prazo&&it.prazo<hjISO&&it.status!=='aprovado'&&it.status!=='na'?'<span class="pill red travada-tag">atrasado</span>':''}
+        </div></div>
       <div><select onchange="chkSet(${i},'status',this.value)">${CHK_STATUS.map(s=>`<option value="${s[0]}" ${it.status===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></div>
       <div><select onchange="chkSet(${i},'coletadoPor',this.value)"><option value="">—</option>${['Ívina','Davi','Matheus','Samir'].map(p=>`<option ${it.coletadoPor===p?'selected':''}>${p}</option>`).join('')}</select></div>
       <div><select onchange="chkSet(${i},'revisadoPor',this.value)"><option value="">—</option>${['Davi','Samir','Ívina'].map(p=>`<option ${it.revisadoPor===p?'selected':''}>${p}</option>`).join('')}</select></div>
@@ -1569,6 +1631,20 @@ function syncChkDoc(op,it){
   const ex=DB.docs.find(d=>d.op===op&&d.nome===it.titulo);
   if(ex){ ex.link=it.link; ex.status=map[it.status]||'recebido'; }
   else DB.docs.unshift({op,nome:it.titulo,cat:'Checklist',link:it.link,status:map[it.status]||'recebido',por:it.coletadoPor||(USER?USER.nome.split(' ')[0]:''),obs:'via checklist',data:hoje()});
+}
+function chkCobranca(){
+  const op=$('chkOpSel').value; if(!op) return;
+  const o=DB.ops.find(x=>x.id===op)||{};
+  const pend=ensureChk(op).filter(it=>it.status==='pendente'||it.status==='coletado');
+  if(!pend.length){ toast('🎉 Nada pendente nesta operação.'); return; }
+  const txt=`Olá! Tudo bem? Aqui é da WindGate — sobre a operação ${op}${o.nome?' ('+o.nome+')':''}.\n\nPara avançarmos sem atraso, estamos aguardando:\n`+
+    pend.map(it=>`• ${it.titulo}${it.prazo?' — até '+it.prazo.split('-').reverse().join('/'):''}`).join('\n')+
+    `\n\nPode nos enviar por aqui mesmo? Qualquer dúvida estou à disposição. Obrigada! — Ívina · WindGate`;
+  openModal(`<h3>📨 Cobrança pronta — <span>${esc(op)}</span></h3>
+    <p class="note" style="margin-bottom:8px">Mensagem para WhatsApp/e-mail do despachante, exportador ou cliente — só colar.</p>
+    <textarea rows="10" id="m_cobTxt">${txt.replace(/</g,'&lt;')}</textarea>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+    <button class="btn btn-mag" onclick="(async()=>{try{await navigator.clipboard.writeText($('m_cobTxt').value);toast('Copiado ✓');}catch(e){$('m_cobTxt').select();document.execCommand('copy');toast('Copiado ✓');}})()">📋 Copiar</button></div>`);
 }
 function addChkItem(){
   const op=$('chkOpSel').value; if(!op) return;
@@ -1736,7 +1812,7 @@ function renderFrete(skipLock){
     const cheg=f.chegada?f.chegada.split('-').reverse().slice(0,2).join('/')+'/'+f.chegada.slice(0,4):'—';
     return `<tr><td>${esc(f.data)}</td><td><b>${esc(f.op||'—')}</b></td>
       <td><b>${esc(f.empresa||'—')}</b>${f.contato?`<div style="font-size:9.5px;color:var(--mut2)">${esc(f.contato)}${f.fone?' · '+esc(f.fone):''}</div>`:''}</td>
-      <td>${esc(f.rota)}</td><td>${esc(f.modal)}</td>
+      <td>${esc(f.rota)}${f.fabContato||f.fabEmail||f.fabWhats?`<div style="font-size:9px;color:var(--mut2)">🏭 ${esc(f.fabContato||'')} ${esc(f.fabWhats||'')} ${esc(f.fabEmail||'')}</div>`:''}</td><td>${esc(f.modal)}</td>
       <td class="r num">${fmtUSD(f.usd)}</td><td class="r">${brlCell}</td>
       <td>${cheg}</td><td>${esc(f.validade||'—')}</td>
       <td><span class="pill ${p}">${esc(f.status)}</span></td><td>${esc(f.resp)}</td>
@@ -1779,8 +1855,14 @@ function openFreteModal(pref){
     </div>
     <div class="frow">
       <div style="grid-column:span 2"><label>Rota</label><input id="m_frota" value="${esc(pref.rota||'')}" placeholder="Ex.: Shanghai → Pecém"></div>
-      <div><label>Contato (pessoa)</label><input id="m_fcont" placeholder="Ex.: Ana"></div>
-      <div><label>Telefone / WhatsApp</label><input id="m_ffone" placeholder="+55 …"></div>
+      <div><label>Contato do agente (pessoa)</label><input id="m_fcont" placeholder="Ex.: Ana"></div>
+      <div><label>Telefone / WhatsApp do agente</label><input id="m_ffone" placeholder="+55 …"></div>
+    </div>
+    <div class="grouph">Origem (fábrica na China)</div>
+    <div class="frow">
+      <div><label>Contato na fábrica</label><input id="m_fabcont" placeholder="Ex.: Lily"></div>
+      <div><label>E-mail da fábrica</label><input id="m_fabmail" placeholder="lily@fabrica.cn"></div>
+      <div><label>WhatsApp / WeChat da fábrica</label><input id="m_fabwhats" placeholder="+86 …"></div>
     </div>
     <div class="frow">
       <div><label>Valor (USD)</label><input id="m_fusd" type="number" step="0.01" value="${pref.usd||''}" oninput="freteRefHint()"></div>
@@ -1834,7 +1916,8 @@ function saveFrete(){
     if(V('m_ffone')) DB.agentes[emp].fone=V('m_ffone');
   }
   DB.fretes.unshift({data:hoje(),op:V('m_fop'),empresa:emp,rota:V('m_frota'),modal:V('m_fmodal'),
-    contato:V('m_fcont'),fone:V('m_ffone'),usd:N('m_fusd'),chegada:V('m_fcheg'),validade:V('m_fval'),
+    contato:V('m_fcont'),fone:V('m_ffone'),fabContato:V('m_fabcont'),fabEmail:V('m_fabmail'),fabWhats:V('m_fabwhats'),
+    usd:N('m_fusd'),chegada:V('m_fcheg'),validade:V('m_fval'),
     status:V('m_fst'),resp:V('m_fresp'),ptaxLock:null});
   saveDB(); closeModal(); renderFrete(true); toast('Cotação de frete registrada ✓');
 }
@@ -2269,8 +2352,10 @@ function gerarGestaoPDF(){
   let my=160;
   (g.metas.length?g.metas:[{t:'— sem metas cadastradas —',resp:'',prio:'',done:false}]).slice(0,12).forEach(mt=>{
     doc.setFillColor(...(mt.done?[18,43,32]:CARD)); doc.roundedRect(36,my-14,770,30,8,8,'F');
+    doc.setFillColor(...(mt.done?[52,199,124]:[62,78,110]));
+    if(mt.done) doc.rect(50,my-5,10,10,'F'); else doc.rect(50,my-5,10,10,'S');
     doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...(mt.done?[52,199,124]:WHT));
-    doc.text((mt.done?'✔ ':'○ ')+mt.t.slice(0,70),50,my+5);
+    doc.text(mt.t.slice(0,70),68,my+4);
     doc.setFontSize(9); doc.setTextColor(...MUTP); doc.text((mt.resp||'')+(mt.prio?' · '+mt.prio:''),800,my+5,{align:'right'});
     my+=40;
   });
@@ -2299,9 +2384,10 @@ function opWhere(o){
   if(early.includes(o.status)) return fab?{lat:fab[0],lon:fab[1],modo:'🏭 Na fábrica · '+o.fabricaCidade}:(orig?{lat:orig[0],lon:orig[1],modo:'🏭 Região de origem'}:null);
   if(o.status==='embarcado'){
     if(!orig||!dest) return null;
-    let t=.5;
-    if(o.embarque&&o.eta){ const a=+new Date(o.embarque), b=+new Date(o.eta); if(b>a) t=Math.min(.95,Math.max(.05,((+hj)-a)/(b-a))); }
-    return {lat:orig[0]+(dest[0]-orig[0])*t, lon:orig[1]+(dest[1]-orig[1])*t, modo:'🚢 No mar · '+Math.round(t*100)+'% do trajeto', t, rota:[orig,dest]};
+    let t=.5, fonte='estimado pelo ETA';
+    if(o.posAtual!==''&&o.posAtual!=null&&!isNaN(+o.posAtual)){ t=Math.min(.98,Math.max(.02,(+o.posAtual)/100)); fonte='posição informada (rastreio)'; }
+    else if(o.embarque&&o.eta){ const a=+new Date(o.embarque), b=+new Date(o.eta); if(b>a) t=Math.min(.95,Math.max(.05,((+hj)-a)/(b-a))); }
+    return {lat:orig[0]+(dest[0]-orig[0])*t, lon:orig[1]+(dest[1]-orig[1])*t, modo:'🚢 No mar · '+Math.round(t*100)+'% · '+fonte, t, rota:[orig,dest]};
   }
   if(dest) return {lat:dest[0],lon:dest[1],modo:{chegada:'⚓ No porto · desembaraço',logistica:'🚚 Logística nacional',documentacao:'📄 Trâmite documental',entregue:'✅ Entregue',concluida:'✅ Concluída',travada:'⚠ Travada'}[o.status]||'No destino'};
   return null;
@@ -2312,12 +2398,21 @@ function renderMapa(){
   // portos base
   Object.entries(GEO.portos).forEach(([n,[la,lo]])=>{ inner+=`<circle class="map-port" cx="${gX(lo).toFixed(1)}" cy="${gY(la).toFixed(1)}" r="1.6" opacity=".55"/>`; });
   const rows=[];
-  DB.ops.filter(o=>!['entregue','concluida'].includes(o.status)).forEach((o,i)=>{
+  // agrupamento: mesmo link de rastreio (ou mesmo navio) = mesmo contêiner/navio → um ponto só com todas as OPs
+  const ativos=DB.ops.filter(o=>!['entregue','concluida'].includes(o.status));
+  const grupos={}; ativos.forEach(o=>{ const k=(o.tracking&&o.tracking.trim())||(o.navio&&nrm(o.navio))||('_'+o.id); (grupos[k]=grupos[k]||[]).push(o); });
+  const lider={}; Object.values(grupos).forEach(g=>{ const l=g.find(x=>opWhere(x))||g[0]; g.forEach(x=>lider[x.id]=l.id); });
+  const plotted=new Set();
+  ativos.forEach((o,i)=>{
     const w=opWhere(o); const m=stMeta(o.status);
     const hj=new Date();
     const dias=o.eta?Math.ceil((+new Date(o.eta)-(+hj))/86400000):null;
     rows.push({o,w,m,dias});
     if(!w) return;
+    if(lider[o.id]!==o.id) return;               // só o líder do grupo plota
+    if(plotted.has(o.id)) return; plotted.add(o.id);
+    const grupo=Object.values(grupos).find(g=>g.some(x=>x.id===o.id))||[o];
+    o._grupoLabel=grupo.map(x=>x.id).join('·');
     if(w.rota){
       const [a,b]=w.rota;
       const x1=gX(a[1]),y1=gY(a[0]),x2=gX(b[1]),y2=gY(b[0]);
@@ -2328,7 +2423,7 @@ function renderMapa(){
     inner+=`<g class="map-ship" style="cursor:pointer" onclick="mapPop(event,'${esc(o.id)}')">
       <circle class="map-pulse" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" fill="${m.c}33"/>
       <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.2" fill="${m.c}"/>
-      <text class="map-label" x="${(x+7).toFixed(1)}" y="${(y-6).toFixed(1)}" fill="#D7E0F2" font-weight="700">${esc(o.id)}</text></g>`;
+      <text class="map-label" x="${(x+7).toFixed(1)}" y="${(y-6).toFixed(1)}" fill="#D7E0F2" font-weight="700">${esc(o._grupoLabel||o.id)}</text></g>`;
   });
   svg.setAttribute('viewBox',_mapVB);
   svg.innerHTML=inner;
@@ -2340,15 +2435,17 @@ function renderMapa(){
       <td>${o.embarque?o.embarque.split('-').reverse().join('/'):'—'}</td>
       <td>${o.eta?o.eta.split('-').reverse().join('/'):'—'}</td>
       <td>${dias!=null?(dias>0?`<b style="color:#7FA6FF">${dias} dias</b>`:'<span class="pill ok">chegou</span>'):'—'}</td>
-      <td>${o.navio?esc(o.navio)+' · ':''}${vf?`<a href="${esc(vf)}" target="_blank" style="color:#7FA6FF">rastrear ↗</a>`:'—'}</td></tr>`;
+      <td>${o.navio?esc(o.navio)+' · ':''}${o.tracking?`<a href="${esc(o.tracking)}" target="_blank" style="color:#FF6EA8">armador ↗</a> · `:''}${vf?`<a href="${esc(vf)}" target="_blank" style="color:#7FA6FF">navio ↗</a>`:'—'}
+      ${o.status==='embarcado'?` · <input type="number" min="0" max="100" placeholder="%" value="${o.posAtual!==''&&o.posAtual!=null?o.posAtual:''}" style="width:62px;padding:3px 6px;font-size:11px" onchange="(function(v){o=DB.ops.find(x=>x.id==='${esc(o.id)}');o.posAtual=v;saveDB();renderMapa();})(this.value)" title="posição atual em % (do rastreio do armador)">`:''}</td></tr>`;
   }).join('');
 }
 function mapPop(ev,opId){
   ev.stopPropagation();
   const o=DB.ops.find(x=>x.id===opId); if(!o) return;
   const w=opWhere(o), m=stMeta(o.status);
+  const irmaos=DB.ops.filter(x=>x.id!==o.id && !['entregue','concluida'].includes(x.status) && ((o.tracking&&x.tracking===o.tracking)||(o.navio&&x.navio&&nrm(x.navio)===nrm(o.navio))));
   const pop=$('mapPop');
-  pop.innerHTML=`<b style="font-size:13px">${esc(o.id)} · ${esc(o.nome)}</b><br>
+  pop.innerHTML=`<b style="font-size:13px">${esc(o.id)}${irmaos.length?' · '+irmaos.map(x=>esc(x.id)).join(' · '):''} — ${esc(o.nome)}${irmaos.length?' (contêiner consolidado)':''}</b><br>
     <span class="pill" style="background:${m.c}22;color:${m.c};margin:6px 0;display:inline-block">${m.l}</span><br>
     <span class="note">${w?esc(w.modo):''}${o.eta?' · ETA '+o.eta.split('-').reverse().join('/'):''}</span><br>
     ${o.navio?`<a href="https://www.vesselfinder.com/vessels?name=${encodeURIComponent(o.navio)}" target="_blank" style="color:#7FA6FF;font-size:11px">🛰️ ver ${esc(o.navio)} ao vivo ↗</a>`:''}`;
@@ -2454,7 +2551,7 @@ const DEFAULT_EXPS = [
 ];
 
 function addItem(it){
-  it = it||{d:'',ncm:'',q:0,u:0,p:0,ii:10.8,ipi:0};
+  it = it||{d:'',ncm:'',q:0,u:0,p:0,ii:10.8,ipi:0,c5291:false,mono:false};
   state.items.push(it); renderItems();
 }
 function addExp(e){ state.exps.push(e||{l:'',v:0}); renderExps(); }
@@ -2465,12 +2562,14 @@ function renderItems(){
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td><input value="${esc(it.d)}" oninput="state.items[${i}].d=this.value"></td>
-      <td><input value="${esc(it.ncm)}" style="width:92px" maxlength="10" oninput="state.items[${i}].ncm=this.value;calc()"></td>
+      <td><input value="${esc(it.ncm)}" style="width:92px" maxlength="10" oninput="state.items[${i}].ncm=this.value;ncmAuto(${i},this.value);calc()"></td>
       <td><input type="number" value="${it.q}" style="width:70px" oninput="state.items[${i}].q=+this.value||0;calc()"></td>
       <td><input type="number" value="${it.u}" step="0.01" style="width:90px" oninput="state.items[${i}].u=+this.value||0;calc()"></td>
       <td><input type="number" value="${it.p}" step="0.01" style="width:80px" oninput="state.items[${i}].p=+this.value||0;calc()"></td>
       <td><input type="number" value="${it.ii}" step="0.1" style="width:64px" oninput="state.items[${i}].ii=+this.value||0;calc()"></td>
       <td><input type="number" value="${it.ipi}" step="0.1" style="width:64px" oninput="state.items[${i}].ipi=+this.value||0;calc()"></td>
+      <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.c5291?'checked':''} onchange="state.items[${i}].c5291=this.checked;calc()"></td>
+      <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.mono?'checked':''} onchange="state.items[${i}].mono=this.checked;calc()"></td>
       <td class="r num item-total" id="fob_${i}">—</td>
       <td><button class="del" onclick="state.items.splice(${i},1);renderItems();calc()">✕</button></td>`;
     tb.appendChild(tr);
@@ -2486,6 +2585,62 @@ function renderExps(){
       <button class="del" onclick="state.exps.splice(${i},1);renderExps();calc()">✕</button>`;
     box.appendChild(d);
   });
+  calc();
+}
+
+
+/* ===== Biblioteca NCM — auto-preenche II/IPI e flags; aprende com o uso ===== */
+const NCM_SEED={
+  '84743100':{d:'Betoneiras e misturadores de concreto',ii:20,ipi:null,c5291:true, mono:false},
+  '84262000':{d:'Guindastes de torre',ii:20,ipi:null,c5291:false,mono:false},
+  '84279000':{d:'Empilhadeiras — outras (entra no 52/91)',ii:null,ipi:null,c5291:true, mono:false},
+  '84271019':{d:'Empilhadeiras elétricas (NÃO entra no 52/91 — checar c/ despachante)',ii:null,ipi:null,c5291:false,mono:false},
+  '84294000':{d:'Rolos compactadores (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
+  '84295190':{d:'Pás carregadeiras (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
+  '84295900':{d:'Retro/escavadeiras — outras (monofásico 84.29)',ii:null,ipi:null,c5291:false,mono:true},
+  '85076000':{d:'Baterias de lítio (não monofásico)',ii:null,ipi:null,c5291:false,mono:false}
+};
+function ncmLib(){ if(!DB.ncmlib) DB.ncmlib={}; return DB.ncmlib; }
+let _ncmT=null;
+function ncmAuto(i,raw){
+  const ncm=String(raw||'').replace(/\D/g,'');
+  if(ncm.length!==8){ $('ncmHint').innerHTML=''; return; }
+  const lib={...NCM_SEED,...ncmLib()};
+  const e=lib[ncm];
+  const it=state.items[i];
+  if(e){
+    if(e.ii!=null&&(!it.ii||it.ii===10.8)) it.ii=e.ii;
+    if(e.ipi!=null&&!it.ipi) it.ipi=e.ipi;
+    if(e.c5291!=null) it.c5291=e.c5291;
+    if(e.mono!=null) it.mono=e.mono;
+    renderItems();
+    $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · ${e.ii!=null?('II '+e.ii+'%'):'II: confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> · monofásico: <b>${e.mono?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
+  } else {
+    $('ncmHint').innerHTML=`NCM <b>${ncm}</b> ainda não está na biblioteca — preencha II/IPI e <button class="btn btn-ghost btn-sm" onclick="ncmSave(${i})">salvar este NCM</button> para preencher sozinho da próxima vez. <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">consultar Siscomex ↗</a>`;
+  }
+  clearTimeout(_ncmT);
+  _ncmT=setTimeout(async()=>{ // descrição oficial online (BrasilAPI — dados públicos da NCM)
+    try{
+      const r=await fetch('https://brasilapi.com.br/api/ncm/v1/'+ncm,{signal:AbortSignal.timeout(6000)});
+      if(r.ok){ const d=await r.json(); if(d&&d.descricao) $('ncmHint').innerHTML+=`<br>🌐 Descrição oficial: <i>${esc(d.descricao)}</i>`; }
+    }catch(e){}
+  },400);
+}
+function ncmSave(i){
+  const it=state.items[i]; const ncm=String(it.ncm||'').replace(/\D/g,'');
+  if(ncm.length!==8){ toast('⚠ NCM precisa de 8 dígitos'); return; }
+  ncmLib()[ncm]={d:it.d||'salvo do uso',ii:+it.ii||null,ipi:+it.ipi||null,c5291:!!it.c5291,mono:!!it.mono};
+  saveDB(); toast('📚 NCM '+ncm+' salvo na biblioteca ✓');
+  ncmAuto(i,ncm);
+}
+function tipoOpChanged(){
+  const tri=V('tipoOp')==='triangular';
+  $('servForaBox').style.display=tri?'block':'none';
+  $('triNote').style.display=tri?'block':'none';
+  $('triLines').style.display=tri?'block':'none';
+  $('rowST').style.display=tri?'none':'flex';
+  $('lblCusto').textContent=tri?'Custo SF (nacionalização AL)':'Custo real WindGate';
+  $('lblPreco').textContent=tri?'Preço produtos ao cliente (NF JeT)':'Preço ao cliente';
   calc();
 }
 
@@ -2535,7 +2690,8 @@ function calc(){
   const st = (V('ufDestino')==='CE') ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
   const custoReal = compra + impostos + despesas + resultante;   // L113
 
-  R={compra,impostos,despesas,resultante,custoReal,st,nfSaida};
+  R={compra,impostos,despesas,resultante,custoReal,st,nfSaida,fob:fobBRLtot};
+  R.fobShares=[]; if(fobBRLtot>0) state.items.forEach(it=>R.fobShares.push({share:(it.q*it.u*txD)/fobBRLtot,c5291:!!it.c5291,mono:!!it.mono}));
   $('sCompra').textContent=fmt(compra);
   $('sImpostos').textContent=fmt(impostos);
   $('sDespesas').textContent=fmt(despesas);
@@ -2565,11 +2721,90 @@ function marginFromBRL(){
   updatePrice(m);
 }
 function updatePrice(m){
-  const preco=(R.custoReal||0)+(R.st||0)+m;
-  $('sPreco').textContent=fmt(preco);
-  $('sMargemRec').textContent=preco>0?((m/preco)*100).toFixed(1)+'% ':'—';
-  $('warnMargem').style.display=(N('margemPct')<10&&(R.custoReal||0)>0)?'block':'none';
-  R.margem=m; R.preco=preco;
+  const tri=($('tipoOp')&&V('tipoOp')==='triangular');
+  if(!tri){
+    const preco=(R.custoReal||0)+(R.st||0)+m;
+    $('sPreco').textContent=fmt(preco);
+    $('sMargemRec').textContent=preco>0?((m/preco)*100).toFixed(1)+'% ':'—';
+    $('warnMargem').style.display=(N('margemPct')<10&&(R.custoReal||0)>0)?'block':'none';
+    R.margem=m; R.preco=preco; R.tri=null;
+    desemCheck();
+    return;
+  }
+  /* ===== TRIANGULAR via JeT (regra da skill operacao-nao-contribuinte) =====
+     P = (1+mg)·(C0 + dEff·P + 9,25%·μ·(P − N))   →   resolvido em forma fechada
+     C0 = custo SF · N = NF compra JeT (saída SF) · dEff = Σ share·(4,8% ou 16%) · μ = share não-monofásico */
+  const mg=N('margemPct')/100;
+  const C0=R.custoReal||0, Nn=R.nfSaida||0;
+  let dEff=0, mu=0;
+  (R.fobShares||[]).forEach(s=>{ dEff+=s.share*(s.c5291?0.048:0.16); if(!s.mono) mu+=s.share; });
+  if(!(R.fobShares||[]).length){ dEff=0.16; mu=1; }
+  const pc=0.0925;
+  const den=1-(1+mg)*(dEff+pc*mu);
+  const P=den>0?((1+mg)*(C0-pc*mu*Nn))/den:0;
+  const difal=dEff*P;
+  const pcjt=Math.max(pc*(mu*P-mu*Nn),0);
+  const custoGrupo=C0+difal+pcjt;
+  const margemR=P-custoGrupo;
+  const servF=N('servFora');
+  $('sNFJT').textContent=fmt(Nn);
+  $('sDifal').textContent=fmt(difal)+(dEff<0.16?' ':'');
+  $('sPCJT').textContent=fmt(pcjt);
+  $('sCustoGrupo').textContent=fmt(custoGrupo);
+  $('sPreco').textContent=fmt(P+servF);
+  $('sMargemRec').textContent=(P+servF)>0?(((margemR+servF)/(P+servF))*100).toFixed(1)+'% ':'—';
+  $('margemBRL').value=(margemR+servF).toFixed(2);
+  $('warnMargem').style.display=(N('margemPct')<10&&C0>0)?'block':'none';
+  R.margem=margemR+servF; R.preco=P+servF; R.tri={P,difal,pcjt,custoGrupo,dEff,mu,servF};
+  desemCheck();
+}
+
+
+/* ===== Cronograma de desembolso — regra: recebimento cobre a saída em toda etapa ===== */
+function desemOuts(){
+  const fob=R.fob||0;
+  const sin=Math.min(100,Math.max(0,N('fabSinal')||30))/100;
+  const base=(R.tri?R.tri.custoGrupo:(R.custoReal||0)+(R.st||0));
+  const o1=fob*sin, o2=fob*(1-sin), o3=Math.max(base-fob,0);
+  return {o1,o2,o3,base};
+}
+function desemSugerir(){
+  if(!(R.preco>0)){ toast('⚠ Complete a cotação primeiro.'); return; }
+  const {o1,o2,o3}=desemOuts();
+  const M=Math.max((R.preco||0)-(o1+o2+o3),0);          // margem total
+  const r1=o1+M*0.21, r2=o2+M*0.14;                     // ~35% da margem nas 2 primeiras
+  const r3=(R.preco||0)-r1-r2;
+  $('desR1').value=r1.toFixed(2); $('desR2').value=r2.toFixed(2); $('desR3').value=r3.toFixed(2);
+  desemCheck(); toast('⚖ Distribuição sugerida: 35% da margem já nas parcelas 1 e 2.');
+}
+function desemErrors(){
+  const {o1,o2,o3}=desemOuts();
+  const r1=N('desR1'),r2=N('desR2'),r3=N('desR3');
+  const errs=[];
+  if(!(r1||r2||r3)) { errs.push('preencha o cronograma de desembolso (use ⚖ Sugerir).'); return errs; }
+  if(r1<o1-0.01) errs.push('Parcela 1 ('+fmt(r1)+') MENOR que a saída da etapa ('+fmt(o1)+') — o cliente precisa cobrir o sinal da fábrica.');
+  if(r2<o2-0.01) errs.push('Parcela 2 ('+fmt(r2)+') MENOR que o saldo da fábrica ('+fmt(o2)+').');
+  if(r3<o3-0.01) errs.push('Parcela 3 ('+fmt(r3)+') MENOR que os custos de chegada ('+fmt(o3)+').');
+  if(Math.abs((r1+r2+r3)-(R.preco||0))>0.05) errs.push('A soma das parcelas ('+fmt(r1+r2+r3)+') difere do preço aprovado ('+fmt(R.preco||0)+').');
+  return errs;
+}
+function desemCheck(){
+  if(!$('desO1')) return;
+  const {o1,o2,o3}=desemOuts();
+  $('desO1').textContent=fmt(o1); $('desO2').textContent=fmt(o2); $('desO3').textContent=fmt(o3);
+  const rs=[N('desR1'),N('desR2'),N('desR3')], os=[o1,o2,o3];
+  rs.forEach((r,i)=>{
+    const el=$('desS'+(i+1));
+    if(!r){ el.innerHTML='<span class="pill draft">—</span>'; return; }
+    el.innerHTML = r>=os[i]-0.01
+      ? '<span class="pill ok">cobre ✓ (+'+fmt(r-os[i])+')</span>'
+      : '<span class="pill red travada-tag">NÃO cobre</span>';
+  });
+  const errs=desemErrors();
+  const bloqueia=errs.length&&(rs[0]||rs[1]||rs[2]);
+  $('desemErr').style.display=bloqueia?'block':'none';
+  $('desemErr').innerHTML='⛔ <b>Bloqueado:</b> '+errs.join('<br>⛔ ');
+  $('desemOk').style.display=(!errs.length)?'block':'none';
 }
 
 /* ===== fluxo de aprovação (multiusuário) ===== */
@@ -2594,13 +2829,17 @@ function updateApprovalUI(){
     : 'Fluxo: <b>o Davi monta a cotação</b> → envia → <b>Samir revisa a margem e aprova</b> → proposta em PDF liberada. Nada sai sem aprovação.';
 }
 function sendApproval(){
-  if(!state.items.length||!(R.custoReal>0)){ toast('⚠ Preencha a cotação antes de enviar.'); }
+  if(!state.items.length||!(R.custoReal>0)){ toast('⚠ Preencha a cotação antes de enviar.'); return; }
+  const dErr=desemErrors();
+  if(dErr.length){ toast('⛔ <b>Não dá para enviar:</b> '+dErr[0]); $('desemCard').scrollIntoView({behavior:'smooth'}); return; }
   state.criadoPor=state.criadoPor||USER.nome.split(' ')[0];
   setStatus('wait'); saveQuote(true); try{updateNotifs();}catch(e){}
   toast('📨 Enviada para aprovação do <b>Samir</b>.');
 }
 function approve(){
   if(!USER.aprova){ toast('⚠ Somente o Samir aprova margem.'); return; }
+  const dErr=desemErrors();
+  if(dErr.length){ toast('⛔ <b>Não aprova com desembolso furado:</b> '+dErr[0]); return; }
   state.aprovadoPor=USER.nome.split(' ')[0];
   setStatus('ok'); saveQuote(true); try{updateNotifs();}catch(e){}
   toast('✓ Margem aprovada — proposta liberada.');
@@ -2630,7 +2869,7 @@ function criarOpDaCotacao(){
 
 /* ===== persistência de cotações (no DB central) ===== */
 function snapshot(){
-  const fields={}; ['opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','qtdCntr','prazo','validade',
+  const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','qtdCntr','prazo','validade',
     'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','mkp','aliqST',
     'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
@@ -2652,7 +2891,7 @@ function loadQuote(id){
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
   state.items=s.items||[]; state.exps=s.exps||[]; state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor;
-  renderItems(); renderExps(); setStatus(s.status||'draft');
+  renderItems(); renderExps(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
   msg('Cotação carregada.');
 }
 function delQuote(id){ delete DB.quotes[id]; DB.qindex=DB.qindex.filter(x=>x.id!==id); saveDB(); refreshSaved(); }
@@ -2670,7 +2909,7 @@ function refreshSaved(){
 function newQuote(){
   state={items:[],exps:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null};
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
-  $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB';
+  $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
   $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
   $('txFrete').value=5.30; $('txDesp').value=5.10; $('pctInv').value=70; $('icmsEnt').value=1.6;
   $('icmsDest').value=4; $('pisS').value=1.6; $('cofS').value=7.65; $('mkp').value=1; $('aliqST').value=16;
@@ -2713,11 +2952,11 @@ function pdfHeader(doc, sub, page){
   doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(185,196,226);
   doc.text(sub,559,66,{align:'right'});
 }
-function pdfFooter(doc,page){
+function pdfFooter(doc,page,total){
   doc.setDrawColor(221,228,234); doc.setLineWidth(.7); doc.line(36,800,559,800);
   doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
   doc.text('WINDGATE · IMPORTAÇÃO E TRADING · Good winds open doors.',36,812);
-  doc.text('Página '+page+' / 2',559,812,{align:'right'});
+  doc.text('Página '+page+' / '+(total||3),559,812,{align:'right'});
 }
 function bandPDF(doc,y,txt,color){
   doc.setFillColor(...color); doc.rect(36,y,523,20,'F');
@@ -2728,6 +2967,8 @@ function bandPDF(doc,y,txt,color){
 
 function gerarPropostaPDF(){
   if(state.status!=='ok'){ toast('🔒 A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.'); return; }
+  const dErr=desemErrors();
+  if(dErr.length){ toast('⛔ <b>Desembolso bloqueado:</b> '+dErr[0]); return; }
   if(!window.jspdf || !window.jspdf.jsPDF){ gerarPropostaPrint(); return; }
   try{
     const {jsPDF}=window.jspdf;
@@ -2799,9 +3040,54 @@ function gerarPropostaPDF(){
     doc.text(ytxt,44,y+25);
     pdfFooter(doc,1);
 
-    /* ===== PÁGINA 2 ===== */
+    /* ===== PÁGINA 2 — ETAPAS + DESEMBOLSO ===== */
     doc.addPage();
-    pdfHeader(doc,cliente+' · Condições · '+mesAno,2);
+    pdfHeader(doc,cliente+' · Etapas & Cronograma · '+mesAno,2);
+    let ye=bandPDF(doc,120,'COMO A OPERAÇÃO ACONTECE — DO PEDIDO À ENTREGA',PDF_NAVY);
+    const etapas=[
+      ['Contrato & OK','Aprovação da proposta e contrato em até 24h.'],
+      ['Pagamento inicial','Libera a produção na fábrica (Parcela 01).'],
+      ['Produção','Acompanhamento com fotos e relatórios da fábrica.'],
+      ['Saldo pré-embarque','Produto pronto e conferido; booking confirmado (Parcela 02).'],
+      ['Embarque & trânsito','Navegação com tracking informado ao cliente.'],
+      ['Chegada & desembaraço','Impostos, taxas e liberação — tudo pela WindGate (Parcela 03).'],
+      ['Logística nacional','Transporte terrestre até o endereço final.'],
+      ['Entrega & pós','Recebimento conferido + suporte de garantia do fabricante.']
+    ];
+    let yE=ye+22;
+    etapas.forEach((e,i)=>{
+      const col=i%2, row=Math.floor(i/2);
+      const x=36+col*268, yy=yE+row*46;
+      doc.setFillColor(...(i%2? [37,99,235]:PDF_MAG)); doc.circle(x+7,yy-3,7,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(255,255,255);
+      doc.text(String(i+1),x+7,yy,{align:'center'});
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(...PDF_NAVY);
+      doc.text(e[0],x+20,yy-4);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
+      doc.text(doc.splitTextToSize(e[1],235),x+20,yy+6);
+    });
+    let yD=yE+4*46+14;
+    yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
+    const recs=[[N('desR1'),'PARCELA 01','Assinatura · libera a produção'],
+                [N('desR2'),'PARCELA 02','Produto pronto · pré-embarque'],
+                [N('desR3'),'PARCELA 03','Chegada ao porto · liberação e entrega']];
+    let xD=36;
+    recs.forEach(r=>{
+      doc.setDrawColor(221,228,234); doc.setLineWidth(.8); doc.rect(xD,yD+14,167.7,64);
+      doc.setFillColor(...PDF_MAG); doc.rect(xD,yD+14,4,64,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY); doc.text(r[1],xD+14,yD+30);
+      doc.setFontSize(13); doc.setTextColor(...PDF_NAVY); doc.text(fmt(r[0]),xD+14,yD+48);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY);
+      doc.text(doc.splitTextToSize(r[2],145),xD+14,yD+60);
+      xD+=177.7;
+    });
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
+    doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. O serviço porta a porta está contemplado — sem custos ocultos.',36,yD+92);
+    pdfFooter(doc,2);
+
+    /* ===== PÁGINA 3 — DIFERENCIAIS + CTA ===== */
+    doc.addPage();
+    pdfHeader(doc,cliente+' · Condições · '+mesAno,3);
     let y2=bandPDF(doc,130,'POR QUE A OPERAÇÃO COM A WINDGATE VALE MAIS',PDF_MAG);
     const perks=[
       ['Preço competitivo no par','Cotação fechada com fábrica e frete negociados em conjunto, com preço ajustado à operação.'],
@@ -2818,14 +3104,15 @@ function gerarPropostaPDF(){
     y2+=26;
     perks.forEach((p,i)=>{
       const col=i%2, row=Math.floor(i/2);
-      const x=36+col*268, yy=y2+row*54;
+      const x=36+col*268, yy=y2+row*50;
+      doc.setFillColor(...PDF_MAG); doc.rect(x,yy-6.5,6.5,6.5,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(9.3); doc.setTextColor(...PDF_MAG);
-      doc.text('✓ '+p[0],x,yy);
+      doc.text(p[0],x+11,yy);
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
-      doc.text(doc.splitTextToSize(p[1],250),x,yy+11);
+      doc.text(doc.splitTextToSize(p[1],245),x+11,yy+11);
     });
     // CTA
-    const cy=y2+5*54+16;
+    const cy=y2+5*50+16;
     doc.setFillColor(...PDF_NAVY); doc.rect(36,cy,523,112,'F');
     doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.setTextColor(255,255,255);
     doc.text('Vamos começar?',297.5,cy+34,{align:'center'});
@@ -2837,7 +3124,7 @@ function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(143,163,204); doc.text(l,x,cy+82,{align:'center'});
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
-    pdfFooter(doc,2);
+    pdfFooter(doc,3);
 
     const nome='Proposta_WindGate_'+(cliente.replace(/[^\w\dÀ-ú]+/g,'_')||'Cliente')+(V('opNum')?'_'+V('opNum'):'')+'.pdf';
     doc.save(nome);
