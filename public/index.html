@@ -2594,33 +2594,76 @@ function renderExps(){
   calc();
 }
 
-/* ===== Biblioteca NCM — auto-preenche II/IPI e flags; aprende com o uso ===== */
-const NCM_SEED={
-  '84743100':{d:'Betoneiras e misturadores de concreto',ii:20,ipi:0,c5291:true, mono:false},
-  '84262000':{d:'Guindastes de torre',ii:20,ipi:0,c5291:false,mono:false},
-  '84279000':{d:'Empilhadeiras — outras (entra no 52/91)',ii:12.6,ipi:0,c5291:true, mono:false},
-  '84271019':{d:'Empilhadeiras elétricas',ii:12.6,ipi:0,c5291:false,mono:false},
-  '84294000':{d:'Rolos compactadores (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
-  '84295190':{d:'Pás carregadeiras (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
-  '84295900':{d:'Retro/escavadeiras — outras (monofásico 84.29)',ii:12.6,ipi:0,c5291:false,mono:true},
-  '85076000':{d:'Baterias de lítio',ii:14,ipi:3.25,c5291:false,mono:false}
-};
+/* ===== Biblioteca NCM & Motor Tributário TEC/TIPI ===== */
+function getNCMAliquotas(ncmCode){
+  const clean = String(ncmCode||'').replace(/\D/g,'');
+  if(clean.length < 2) return { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Mercadoria geral' };
+
+  const spec = {
+    '73089090': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Escoras e estruturas de ferro ou aço', c5291: true, mono: false },
+    '84743100': { ii: 20.0, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Betoneiras e misturadores de concreto', c5291: true, mono: false },
+    '84262000': { ii: 20.0, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Guindastes de torre', c5291: false, mono: false },
+    '84279000': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Empilhadeiras — outras', c5291: true, mono: false },
+    '84271019': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Empilhadeiras elétricas', c5291: false, mono: false },
+    '84294000': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Rolos compactadores', c5291: false, mono: true },
+    '84295190': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Pás carregadeiras', c5291: false, mono: true },
+    '84295900': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Retro/escavadeiras', c5291: false, mono: true },
+    '85076000': { ii: 14.0, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Baterias de íon de lítio', c5291: false, mono: false },
+    '39269090': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Obras de plásticos', c5291: false, mono: false },
+    '82055990': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Ferramentas manuais', c5291: false, mono: false },
+    '95030099': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65, desc: 'Outros brinquedos', c5291: false, mono: false }
+  };
+  if(spec[clean]) return spec[clean];
+
+  const cap = clean.slice(0, 2);
+  const capRules = {
+    '72': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Ferro fundido, ferro e aço' },
+    '73': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Obras de ferro ou aço (estruturas/tubos)' },
+    '84': { ii: 12.6, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Reatores, máquinas e aparelhos mecânicos' },
+    '85': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Máquinas, aparelhos e materiais elétricos' },
+    '39': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Plásticos e suas obras' },
+    '40': { ii: 12.6, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Borracha e suas obras' },
+    '82': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Ferramentas, cutelaria e talheres' },
+    '90': { ii: 12.6, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Instrumentos de óptica, medição e precisão' },
+    '95': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65, desc: 'Brinquedos, jogos e artigos para entretenimento' },
+    '68': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Obras de pedra, gesso ou cimento' },
+    '69': { ii: 12.6, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Produtos cerâmicos' },
+    '70': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Vidro e suas obras' }
+  };
+
+  return capRules[cap] || { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: `Mercadoria NCM Cap. ${cap}` };
+}
+
 function ncmLib(){ if(!DB.ncmlib) DB.ncmlib={}; return DB.ncmlib; }
 let _ncmT=null;
+
 function ncmAuto(i,raw){
   const ncm=String(raw||'').replace(/\D/g,'');
-  if(ncm.length!==8){ $('ncmHint').innerHTML=''; return; }
-  const lib={...NCM_SEED,...ncmLib()};
-  const e=lib[ncm];
+  if(ncm.length < 2){ $('ncmHint').innerHTML=''; return; }
+
   const it=state.items[i];
-  if(e){
-    if(e.ii!=null) { it.ii=e.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=e.ii; }
-    if(e.ipi!=null) { it.ipi=e.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=e.ipi; }
-    if(e.c5291!=null) it.c5291=e.c5291;
-    if(e.mono!=null) it.mono=e.mono;
-    calc();
-    $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · II ${e.ii!=null?e.ii+'%':'confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
-  }
+  const tax=getNCMAliquotas(ncm);
+
+  // Aplica as alíquotas dinâmicas imediatamente no objeto do item
+  it.ii = tax.ii;
+  it.ipi = tax.ipi;
+  if(tax.c5291 !== undefined) it.c5291 = tax.c5291;
+  if(tax.mono !== undefined) it.mono = tax.mono;
+  if(!it.d || it.d.startsWith('Item') || !it.d.trim()) it.d = tax.desc;
+
+  // Atualiza os inputs no DOM instantaneamente
+  if($('item_ii_'+i)) $('item_ii_'+i).value = tax.ii;
+  if($('item_ipi_'+i)) $('item_ipi_'+i).value = tax.ipi;
+  if($('item_desc_'+i) && (!$('item_desc_'+i).value || $('item_desc_'+i).value.startsWith('Item'))) $('item_desc_'+i).value = tax.desc;
+  if($('pisS')) $('pisS').value = tax.pis;
+  if($('cofS')) $('cofS').value = tax.cofins;
+
+  calc();
+  $('ncmHint').innerHTML=`📊 <b>Tributos NCM ${ncm}:</b> II: <b style="color:#34C77C">${tax.ii}%</b> · IPI: <b style="color:#34C77C">${tax.ipi}%</b> · PIS: <b style="color:#34C77C">${tax.pis}%</b> · COFINS: <b style="color:#34C77C">${tax.cofins}%</b> (${esc(tax.desc)}) &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
+
+  if(ncm.length < 8) return;
+
+  // Tenta consultar backend API para obter descrição oficial detalhada do Siscomex Classif
   clearTimeout(_ncmT);
   _ncmT=setTimeout(async()=>{
     try{
@@ -2629,20 +2672,14 @@ function ncmAuto(i,raw){
         const json=await r.json();
         if(json.success && json.data){
           const d=json.data;
-          // Atualiza impostos II, IPI e descrição no item diretamente no DOM
           if(d.ii!=null) { it.ii=d.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=d.ii; }
           if(d.ipi!=null) { it.ipi=d.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=d.ipi; }
-          if(d.descricao && (!it.d || it.d.startsWith('Item') || !it.d.trim())) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
-          // Atualiza campos de PIS e COFINS no formulário
-          if(d.pis!=null && $('pisS')) $('pisS').value=d.pis;
-          if(d.cofins!=null && $('cofS')) $('cofS').value=d.cofins;
+          if(d.descricao && (!it.d || it.d === tax.desc)) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
           calc();
           $('ncmHint').innerHTML=`🌐 <b>Siscomex Classif API (Oficial):</b> ${esc(d.descricao)}<br>📊 <b>Tributos Importação Preenchidos:</b> II: <b style="color:#34C77C">${d.ii}%</b> · IPI: <b style="color:#34C77C">${d.ipi}%</b> · PIS: <b style="color:#34C77C">${d.pis}%</b> · COFINS: <b style="color:#34C77C">${d.cofins}%</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
         }
       }
-    }catch(e){
-      console.warn('Erro ao consultar NCM no Siscomex:', e);
-    }
+    }catch(e){}
   },200);
 }
 function ncmSave(i){

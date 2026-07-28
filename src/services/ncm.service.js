@@ -18,16 +18,25 @@ const NCM_SPECIFIC = {
   '84295190': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
   '84295900': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
   '85076000': { ii: 14.0, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '39269090': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '82055990': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65 },
+  '95030099': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65 }
 };
 
 const ALIQUOTAS_PADRAO = {
-  '73': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
-  '84': { ii: 12.6, ipi: 0, pis: 2.1, cofins: 9.65 },
-  '85': { ii: 14.0, ipi: 3.25, pis: 2.1, cofins: 9.65 },
-  '39': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65 },
-  '95': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65 },
   '72': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
-  '_default': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 }
+  '73': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65 },
+  '84': { ii: 12.6, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '85': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65 },
+  '39': { ii: 11.2, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '40': { ii: 12.6, ipi: 5.0, pis: 2.1, cofins: 9.65 },
+  '82': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65 },
+  '90': { ii: 12.6, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '95': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65 },
+  '68': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '69': { ii: 12.6, ipi: 5.0, pis: 2.1, cofins: 9.65 },
+  '70': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65 },
+  '_default': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65 }
 };
 
 /**
