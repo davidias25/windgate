@@ -22,8 +22,34 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Servir o Front-End HTML estaticamente se colocado na pasta public
 app.use(express.static(path.join(__dirname, '../public')));
 
+const { buscarNCM, pesquisarNCMs } = require('./services/ncm.service');
+
 // Rotas da API REST
 app.use('/api/cotacoes', cotacoesRoutes);
+
+// Rotas de NCM (Siscomex Classif API Oficial)
+app.get('/api/ncm/pesquisa', async (req, res) => {
+  try {
+    const q = req.query.q || '';
+    const resultados = await pesquisarNCMs(q);
+    res.json({ success: true, count: resultados.length, data: resultados });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/ncm/:code', async (req, res) => {
+  try {
+    const code = req.params.code;
+    const ncmData = await buscarNCM(code);
+    if (!ncmData) {
+      return res.status(404).json({ success: false, message: 'NCM não encontrado' });
+    }
+    res.json({ success: true, data: ncmData });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Rota de Upload de Arquivos / Documentos com integração opcional Google Drive & Supabase Storage
 app.post('/api/upload', uploadMiddleware.single('arquivo'), async (req, res) => {

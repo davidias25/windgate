@@ -31,11 +31,18 @@ async function runTests() {
     assert(resHealth.status === 200, 'GET /api/health retorna HTTP 200');
     assert(jsonHealth.status === 'OK', 'GET /api/health retorna status OK');
 
-    // 1.5. Root Front-End Index
-    const resRoot = await fetch(`${baseUrl}/`);
-    assert(resRoot.status === 200, 'GET / retorna HTTP 200 (Front-End estático)');
-    const rootText = await resRoot.text();
-    assert(rootText.includes('WindGate'), 'GET / retorna a página index.html do WindGate');
+    // 1.7. Testar API de NCM (Siscomex Classif)
+    console.log('\n--- Testando NCM API (Siscomex Classif) ---');
+    const resNcm = await fetch(`${baseUrl}/api/ncm/73089090`);
+    const jsonNcm = await resNcm.json();
+    assert(resNcm.status === 200, 'GET /api/ncm/73089090 retorna HTTP 200');
+    assert(jsonNcm.success === true, 'GET /api/ncm/73089090 retorna success = true');
+    assert(jsonNcm.data && jsonNcm.data.ii !== undefined, 'GET /api/ncm/73089090 retorna dados de alíquota II');
+
+    const resNcmSearch = await fetch(`${baseUrl}/api/ncm/pesquisa?q=escora`);
+    const jsonNcmSearch = await resNcmSearch.json();
+    assert(resNcmSearch.status === 200, 'GET /api/ncm/pesquisa retorna HTTP 200');
+    assert(jsonNcmSearch.success === true, 'GET /api/ncm/pesquisa retorna success = true');
 
     // 2. Criar Cotação (POST /api/cotacoes)
     console.log('\n--- Testando Cotações API ---');

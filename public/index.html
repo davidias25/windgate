@@ -2614,17 +2614,27 @@ function ncmAuto(i,raw){
     if(e.c5291!=null) it.c5291=e.c5291;
     if(e.mono!=null) it.mono=e.mono;
     renderItems();
-    $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · ${e.ii!=null?('II '+e.ii+'%'):'II: confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> · monofásico: <b>${e.mono?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
-  } else {
-    $('ncmHint').innerHTML=`NCM <b>${ncm}</b> ainda não está na biblioteca — preencha II/IPI e <button class="btn btn-ghost btn-sm" onclick="ncmSave(${i})">salvar este NCM</button> para preencher sozinho da próxima vez. <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">consultar Siscomex ↗</a>`;
+    $('ncmHint').innerHTML=`📚 NCM <b>${ncm}</b> — ${esc(e.d||'na sua biblioteca')} · II ${e.ii!=null?e.ii+'%':'confirme'} · 52/91: <b>${e.c5291?'SIM':'não'}</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/classif/#/sumario?perfil=publico" target="_blank" style="color:#7FA6FF">conferir no Siscomex ↗</a>`;
   }
   clearTimeout(_ncmT);
-  _ncmT=setTimeout(async()=>{ // descrição oficial online (BrasilAPI — dados públicos da NCM)
+  _ncmT=setTimeout(async()=>{
     try{
-      const r=await fetch('https://brasilapi.com.br/api/ncm/v1/'+ncm,{signal:AbortSignal.timeout(6000)});
-      if(r.ok){ const d=await r.json(); if(d&&d.descricao) $('ncmHint').innerHTML+=`<br>🌐 Descrição oficial: <i>${esc(d.descricao)}</i>`; }
-    }catch(e){}
-  },400);
+      const r=await fetch('/api/ncm/'+ncm);
+      if(r.ok){
+        const json=await r.json();
+        if(json.success && json.data){
+          const d=json.data;
+          if(d.ii!=null && (!it.ii || it.ii===10.8 || it.ii===0)) it.ii=d.ii;
+          if(d.ipi!=null && (!it.ipi || it.ipi===0)) it.ipi=d.ipi;
+          if(d.descricao && !it.d) it.d=d.descricao;
+          renderItems();
+          $('ncmHint').innerHTML=`🌐 <b>Siscomex Classif API (Oficial):</b> ${esc(d.descricao)}<br>📊 <b>Tributos Importação:</b> II: <b>${d.ii}%</b> · IPI: <b>${d.ipi}%</b> · PIS: <b>${d.pis}%</b> · COFINS: <b>${d.cofins}%</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
+        }
+      }
+    }catch(e){
+      console.warn('Erro ao consultar NCM no Siscomex:', e);
+    }
+  },300);
 }
 function ncmSave(i){
   const it=state.items[i]; const ncm=String(it.ncm||'').replace(/\D/g,'');
