@@ -1378,6 +1378,80 @@ function defaultDB(){
   };
 }
 
+const SUPABASE_CONFIG = {
+  url: 'https://vzewuczgqinddcgqfzku.supabase.co',
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6ZXd1Y3pncWluZGRjZ3Fmemt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTMzNjgsImV4cCI6MjEwMDgyOTM2OH0.diDULhMDNZ4shVSgM_RctdTiJqS1Yxw_c60ibFO2YJY',
+  bucket: 'windgate-docs'
+};
+
+function getApiUrl(path) {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (window.location.protocol === 'file:') {
+    return 'http://localhost:3000' + path;
+  }
+  return path;
+}
+
+async function uploadFileUniversal(file) {
+  if (!file) return { success: false, message: 'Nenhum arquivo selecionado' };
+
+  try {
+    const fd = new FormData();
+    fd.append('arquivo', file);
+    const backendUrl = getApiUrl('/api/upload');
+    const res = await fetch(backendUrl, { method: 'POST', body: fd });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && (json.finalUrl || json.supabaseUrl || json.localUrl)) {
+        return {
+          success: true,
+          url: json.finalUrl || json.supabaseUrl || json.localUrl,
+          fileName: json.originalName || file.name,
+          source: json.supabaseUrl ? 'Supabase Storage' : 'Servidor'
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Backend local indisponível. Realizando upload direto para o Supabase Storage...');
+  }
+
+  try {
+    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `documentos/${Date.now()}_${cleanFileName}`;
+    const uploadEndpoint = `${SUPABASE_CONFIG.url}/storage/v1/object/${SUPABASE_CONFIG.bucket}/${filePath}`;
+
+    const resSupa = await fetch(uploadEndpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.key,
+        'Authorization': `Bearer ${SUPABASE_CONFIG.key}`,
+        'Content-Type': file.type || 'application/octet-stream',
+        'x-upsert': 'true'
+      },
+      body: file
+    });
+
+    if (resSupa.ok) {
+      const publicUrl = `${SUPABASE_CONFIG.url}/storage/v1/object/public/${SUPABASE_CONFIG.bucket}/${filePath}`;
+      console.log('✅ Upload direto Supabase concluído:', publicUrl);
+      return {
+        success: true,
+        url: publicUrl,
+        fileName: file.name,
+        source: 'Supabase Storage (Direto)'
+      };
+    } else {
+      const errTxt = await resSupa.text();
+      console.error('Erro no upload direto Supabase:', errTxt);
+    }
+  } catch (supaErr) {
+    console.error('Exceção ao enviar para Supabase:', supaErr);
+  }
+
+  return { success: false, message: 'Erro ao enviar arquivo para a nuvem.' };
+}
+
 let _saveT=null;
 function saveDB(){
   clearTimeout(_saveT);
@@ -1385,7 +1459,7 @@ function saveDB(){
     const ok=await store.set(DBKEY, JSON.stringify(DB));
     if(!ok) console.warn('persistência indisponível — usando memória');
     try {
-      await fetch('/api/db', {
+      await fetch(getApiUrl('/api/db'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(DB)
@@ -1396,7 +1470,7 @@ function saveDB(){
 
 async function loadDB(){
   try {
-    const res = await fetch('/api/db');
+    const res = await fetch(getApiUrl('/api/db'));
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.db) {
@@ -1414,7 +1488,7 @@ async function loadDB(){
 
 setInterval(async ()=>{
   try {
-    const res = await fetch('/api/db');
+    const res = await fetch(getApiUrl('/api/db'));
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.db) {
@@ -1835,27 +1909,19 @@ function openDocModal(){
 
 async function uploadDocFile(file){
   if(!file) return;
-  const st=$('m_upload_status');
-  st.style.color='#7FA6FF';
-  st.textContent='Enviando arquivo para o Supabase / Servidor...';
-  const fd=new FormData();
-  fd.append('arquivo',file);
-  try{
-    const res=await fetch('/api/upload',{method:'POST',body:fd});
-    const json=await res.json();
-    if(json.success){
-      $('m_dlink').value=json.finalUrl||json.supabaseUrl||json.localUrl;
-      if(!V('m_dnome')) $('m_dnome').value=json.originalName;
-      st.style.color='#34C77C';
-      const destName=json.supabaseUrl?'Supabase Storage':'Servidor Local';
-      st.textContent='✓ Arquivo salvo com sucesso ('+destName+')';
-    }else{
-      st.style.color='#FF5A6E';
-      st.textContent='⚠ '+(json.message||'Erro no upload');
-    }
-  }catch(e){
-    st.style.color='#FF5A6E';
-    st.textContent='⚠ Erro de conexão ao enviar arquivo';
+  const st = $('m_upload_status');
+  st.style.color = '#7FA6FF';
+  st.textContent = 'Enviando arquivo para o Supabase Storage...';
+
+  const res = await uploadFileUniversal(file);
+  if(res.success){
+    $('m_dlink').value = res.url;
+    if(!V('m_dnome')) $('m_dnome').value = res.fileName;
+    st.style.color = '#34C77C';
+    st.textContent = '✓ Arquivo salvo com sucesso (' + res.source + ')';
+  } else {
+    st.style.color = '#FF5A6E';
+    st.textContent = '⚠ ' + (res.message || 'Erro no upload');
   }
 }
 
@@ -2499,32 +2565,22 @@ async function uploadFinComprovante(file, idx){
   st.style.color = '#7FA6FF';
   st.textContent = 'Enviando comprovante para o Supabase Storage...';
 
-  const fd = new FormData();
-  fd.append('arquivo', file);
+  const res = await uploadFileUniversal(file);
+  if(res.success){
+    $('m_fin_link').value = res.url;
+    st.style.color = '#34C77C';
+    st.textContent = '✓ Comprovante salvo com sucesso (' + res.source + ')!';
 
-  try {
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
-    const json = await res.json();
-    if(json.success && (json.finalUrl || json.supabaseUrl || json.localUrl)){
-      const finalUrl = json.finalUrl || json.supabaseUrl || json.localUrl;
-      $('m_fin_link').value = finalUrl;
-      st.style.color = '#34C77C';
-      st.textContent = '✓ Arquivo salvo no Supabase Storage com sucesso!';
-
-      DB.fin[idx].comp = finalUrl;
-      if (DB.fin[idx].status === 'Previsto') {
-        DB.fin[idx].status = 'Realizado';
-      }
-      saveDB();
-      renderFin();
-      toast('Comprovante vinculado e status atualizado para Realizado ✓');
-    } else {
-      st.style.color = '#FF5A6E';
-      st.textContent = '⚠ ' + (json.message || 'Erro ao enviar arquivo');
+    DB.fin[idx].comp = res.url;
+    if (DB.fin[idx].status === 'Previsto') {
+      DB.fin[idx].status = 'Realizado';
     }
-  } catch(e){
+    saveDB();
+    renderFin();
+    toast('Comprovante vinculado e status atualizado para Realizado ✓');
+  } else {
     st.style.color = '#FF5A6E';
-    st.textContent = '⚠ Erro de conexão ao enviar arquivo';
+    st.textContent = '⚠ ' + (res.message || 'Erro ao enviar comprovante');
   }
 }
 
