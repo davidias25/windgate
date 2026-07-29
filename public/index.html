@@ -2361,6 +2361,15 @@ function renderFin(){
     const dDisp = l.data ? l.data.split('-').reverse().join('/') : '—';
     const isFixo = !!l.fixo;
 
+    const compCol = l.comp ? `
+      <div style="display:flex;align-items:center;gap:4px">
+        <a href="${esc(l.comp)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#7FA6FF" title="Abrir Comprovante">↗ Ver</a>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="if(${idx}>=0)anexarComprovanteModal(${idx})" title="Alterar Comprovante">✏️</button>
+      </div>
+    ` : `
+      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#34C77C;border-color:#34C77C66" onclick="if(${idx}>=0)anexarComprovanteModal(${idx})">📎 + Anexar</button>
+    `;
+
     return `<tr>
       <td><b>${vDisp}</b></td>
       <td class="note">${dDisp}</td>
@@ -2375,7 +2384,7 @@ function renderFin(){
           <option ${l.status === 'Realizado' ? 'selected' : ''}>Realizado</option>
         </select>
       </td>
-      <td>${l.comp ? `<a href="${esc(l.comp)}" target="_blank" style="color:#7FA6FF">↗</a>` : '—'}</td>
+      <td>${compCol}</td>
       <td>${esc(l.por)}</td>
       <td><button class="del" onclick="if(${idx}>=0){DB.fin.splice(${idx},1);saveDB();renderFin();}">✕</button></td>
     </tr>`;
@@ -2452,6 +2461,83 @@ function saveLanc(){
   closeModal();
   renderFin();
   toast('Lançamento financeiro registrado ✓');
+}
+
+function anexarComprovanteModal(idx){
+  const l = DB.fin[idx];
+  if(!l) return;
+
+  const vDisp = l.vencimento ? l.vencimento.split('-').reverse().join('/') : (l.data ? l.data.split('-').reverse().join('/') : '—');
+
+  openModal(`<h3>📎 Comprovante — <span>${esc(l.desc || l.op)}</span></h3>
+    <div style="background:#131B2E;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:12.5px">
+      <div><b>Operação:</b> ${esc(l.op)} &nbsp;·&nbsp; <b>Valor:</b> ${fmt(+l.valor||0)}</div>
+      <div><b>Vencimento:</b> ${vDisp} &nbsp;·&nbsp; <b>Descrição:</b> ${esc(l.desc||'—')}</div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3">
+        <label>📁 Selecionar Arquivo do Comprovante / NF (PDF, Imagem, XLSX)</label>
+        <input type="file" id="m_fin_file" style="background:#171f33;padding:8px" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.zip,.rar" onchange="uploadFinComprovante(this.files[0], ${idx})">
+        <div id="m_fin_upload_status" style="font-size:12px;margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="frow" style="margin-top:10px">
+      <div style="grid-column:span 3">
+        <label>Ou cole a URL direta do comprovante (Drive / WhatsApp / Supabase)</label>
+        <input id="m_fin_link" value="${esc(l.comp||'')}" placeholder="https://…">
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="salvarFinComprovanteLink(${idx})">Salvar Comprovante</button>
+    </div>`);
+}
+
+async function uploadFinComprovante(file, idx){
+  if(!file) return;
+  const st = $('m_fin_upload_status');
+  st.style.color = '#7FA6FF';
+  st.textContent = 'Enviando comprovante para o Supabase Storage...';
+
+  const fd = new FormData();
+  fd.append('arquivo', file);
+
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const json = await res.json();
+    if(json.success && (json.finalUrl || json.supabaseUrl || json.localUrl)){
+      const finalUrl = json.finalUrl || json.supabaseUrl || json.localUrl;
+      $('m_fin_link').value = finalUrl;
+      st.style.color = '#34C77C';
+      st.textContent = '✓ Arquivo salvo no Supabase Storage com sucesso!';
+
+      DB.fin[idx].comp = finalUrl;
+      if (DB.fin[idx].status === 'Previsto') {
+        DB.fin[idx].status = 'Realizado';
+      }
+      saveDB();
+      renderFin();
+      toast('Comprovante vinculado e status atualizado para Realizado ✓');
+    } else {
+      st.style.color = '#FF5A6E';
+      st.textContent = '⚠ ' + (json.message || 'Erro ao enviar arquivo');
+    }
+  } catch(e){
+    st.style.color = '#FF5A6E';
+    st.textContent = '⚠ Erro de conexão ao enviar arquivo';
+  }
+}
+
+function salvarFinComprovanteLink(idx){
+  const link = V('m_fin_link').trim();
+  DB.fin[idx].comp = link;
+  if(link && DB.fin[idx].status === 'Previsto'){
+    DB.fin[idx].status = 'Realizado';
+  }
+  saveDB();
+  closeModal();
+  renderFin();
+  toast('Comprovante salvo ✓');
 }
 
 /* ---------- CONFIG ---------- */
