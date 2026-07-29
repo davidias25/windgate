@@ -44,6 +44,22 @@ async function runTests() {
     assert(resNcmSearch.status === 200, 'GET /api/ncm/pesquisa retorna HTTP 200');
     assert(jsonNcmSearch.success === true, 'GET /api/ncm/pesquisa retorna success = true');
 
+    // 1.8. Testar API de Banco de Dados Centralizado (Sincronização Multi-usuário)
+    console.log('\n--- Testando Central DB API (Sincronização Multi-usuário) ---');
+    const resDbGet = await fetch(`${baseUrl}/api/db`);
+    const jsonDbGet = await resDbGet.json();
+    assert(resDbGet.status === 200, 'GET /api/db retorna HTTP 200');
+    assert(jsonDbGet.success === true, 'GET /api/db retorna success = true');
+
+    const resDbPost = await fetch(`${baseUrl}/api/db`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ops: [], docs: [{ op: 'OP10', nome: 'Invoice.pdf' }] })
+    });
+    const jsonDbPost = await resDbPost.json();
+    assert(resDbPost.status === 200, 'POST /api/db retorna HTTP 200');
+    assert(jsonDbPost.success === true, 'POST /api/db atualiza o banco central com sucesso');
+
     // 2. Criar Cotação (POST /api/cotacoes)
     console.log('\n--- Testando Cotações API ---');
     const mockCotacao = {

@@ -22,10 +22,46 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Servir o Front-End HTML estaticamente se colocado na pasta public
 app.use(express.static(path.join(__dirname, '../public')));
 
+const fs = require('fs');
+const DB_FILE_PATH = path.join(__dirname, '../data/db.json');
+
+if (!fs.existsSync(path.dirname(DB_FILE_PATH))) {
+  fs.mkdirSync(path.dirname(DB_FILE_PATH), { recursive: true });
+}
+
+let memoryDB = null;
+if (fs.existsSync(DB_FILE_PATH)) {
+  try {
+    memoryDB = JSON.parse(fs.readFileSync(DB_FILE_PATH, 'utf8'));
+  } catch (e) {}
+}
+
 const { buscarNCM, pesquisarNCMs } = require('./services/ncm.service');
 
 // Rotas da API REST
 app.use('/api/cotacoes', cotacoesRoutes);
+
+// Rotas do Banco Central Sincronizado (Multi-usuário)
+app.get('/api/db', (req, res) => {
+  if (memoryDB) {
+    return res.json({ success: true, db: memoryDB });
+  }
+  return res.json({ success: true, db: null });
+});
+
+app.post('/api/db', (req, res) => {
+  try {
+    const newDB = req.body;
+    if (!newDB || typeof newDB !== 'object') {
+      return res.status(400).json({ success: false, message: 'Dados de banco de dados inválidos.' });
+    }
+    memoryDB = newDB;
+    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(memoryDB, null, 2), 'utf8');
+    res.json({ success: true, message: 'Banco central sincronizado com sucesso!' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Rotas de NCM (Siscomex Classif API Oficial)
 app.get('/api/ncm/pesquisa', async (req, res) => {

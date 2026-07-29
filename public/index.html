@@ -1352,11 +1352,61 @@ function defaultDB(){
 }
 
 let _saveT=null;
-function saveDB(){ clearTimeout(_saveT); _saveT=setTimeout(async()=>{ const ok=await store.set(DBKEY, JSON.stringify(DB)); if(!ok) console.warn('persistência indisponível — usando memória'); },300); }
+function saveDB(){
+  clearTimeout(_saveT);
+  _saveT=setTimeout(async()=>{
+    const ok=await store.set(DBKEY, JSON.stringify(DB));
+    if(!ok) console.warn('persistência indisponível — usando memória');
+    try {
+      await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(DB)
+      });
+    } catch(e){}
+  },300);
+}
+
 async function loadDB(){
+  try {
+    const res = await fetch('/api/db');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.db) {
+        DB = json.db;
+        migrateDB();
+        await store.set(DBKEY, JSON.stringify(DB));
+        return;
+      }
+    }
+  } catch(e){}
+
   try{ const raw=await store.get(DBKEY); if(raw){ DB=JSON.parse(raw); migrateDB(); return; } }catch(e){}
   DB=defaultDB(); saveDB();
 }
+
+setInterval(async ()=>{
+  try {
+    const res = await fetch('/api/db');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.db) {
+        const curSig = JSON.stringify(DB);
+        const newSig = JSON.stringify(json.db);
+        if (curSig !== newSig) {
+          DB = json.db;
+          migrateDB();
+          await store.set(DBKEY, JSON.stringify(DB));
+          const activeTab = document.querySelector('.tab-btn.active');
+          if (activeTab && activeTab.id) {
+            const k = activeTab.id.replace('tabbtn-', '');
+            if (typeof showTab === 'function') showTab(k);
+          }
+        }
+      }
+    }
+  } catch(e){}
+}, 12000);
 function migrateDB(){
   const def=defaultDB(); let ch=false;
   if(!DB.agentes){ DB.agentes=def.agentes; ch=true; }
