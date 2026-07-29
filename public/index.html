@@ -2828,6 +2828,13 @@ function computeNotifs(){
 
       const venc = l.vencimento || l.data || hj;
 
+      // Contas vencendo hoje
+      if(venc === hj){
+        const val = (+l.valor||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const desc = esc(l.desc || l.op || 'Despesa');
+        n.push({tab:'fin',ic:'🚨',tx:`<b>${desc}</b> (${esc(l.op)}) — conta a pagar <b style="color:#FF5A6E">hoje</b> · ${val}`,tg:'Financeiro — Vence Hoje'});
+      }
+
       // Contas vencendo amanhã
       if(venc === amIso){
         const val = (+l.valor||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
