@@ -498,6 +498,14 @@ td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle;fon
 tr:hover td{background:rgba(255,255,255,.02)}
 .r{text-align:right}
 .pill{display:inline-block;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 10px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+
+/* Dashboard Financeiro */
+.fin-dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:18px}
+.fin-dash-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 4px 14px rgba(0,0,0,.18);transition:transform .15s ease}
+.fin-dash-card:hover{transform:translateY(-2px)}
+.fin-dash-card .c-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.fin-dash-card .c-val{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.fin-dash-card .c-sub{font-size:11px;color:var(--mut);margin-top:5px}
 .pill.draft{background:rgba(143,160,188,.15);color:var(--mut)}
 .pill.wait{background:var(--amber-soft);color:var(--amber)}
 .pill.ok{background:var(--green-soft);color:var(--green)}
@@ -1087,21 +1095,40 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <!-- ========== FINANCEIRO ========== -->
 <section class="view" id="view-fin">
   <div class="view-head">
-    <div><h1>Finan<span>ceiro</span></h1><p>Acesso restrito — Samir e Davi. Previsto × realizado por operação, alimentado pelas cotações aprovadas.</p></div>
-    <div class="hd-actions"><button class="btn btn-mag" onclick="openLancModal()">+ Lançamento</button></div>
+    <div><h1>Finan<span>ceiro</span></h1><p>Acesso restrito — Samir e Davi. Controle de vencimentos, contas a pagar/receber, despesas fixas recorrentes e fluxo de caixa.</p></div>
+    <div class="hd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:#94A3B8;margin:0">Filtrar Mês:</label>
+      <input type="month" id="finMesFiltro" style="width:160px" onchange="renderFin()">
+      <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('mesAtual')">Este Mês</button>
+      <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('proxMes')">Próximo Mês ↗</button>
+      <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('todos')">Todos</button>
+      <button class="btn btn-mag" onclick="openLancModal()">+ Novo Lançamento</button>
+    </div>
   </div>
-  <div class="fin-summary" id="finSummary"></div>
+
+  <!-- Dashboard de Cards Métricos (Solicitados pelo Usuário) -->
+  <div class="fin-dash-grid" id="finDashGrid"></div>
+
   <div class="card">
     <h2>Resultado por operação</h2>
     <div style="overflow-x:auto"><table><thead><tr><th>Operação</th><th class="r">Receita prevista</th><th class="r">Receita realizada</th><th class="r">Despesa prevista</th><th class="r">Despesa realizada</th><th class="r">Resultado real</th><th class="r">Margem</th></tr></thead><tbody id="finOpsBody"></tbody></table></div>
   </div>
+
   <div class="card">
-    <h2>Lançamentos <span class="spacer"></span><select id="finFilter" style="width:210px" onchange="renderFin()"></select></h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Operação</th><th>Tipo</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
-    <div class="empty" id="finEmpty" style="display:none">Nenhum lançamento. Ao aprovar uma cotação, o previsto entra aqui automaticamente.</div>
+    <h2>Lançamentos do Período <span class="spacer"></span>
+      <select id="finFilter" style="width:170px" onchange="renderFin()"></select> &nbsp;
+      <select id="finNatFiltro" style="width:150px" onchange="renderFin()">
+        <option value="">— Natureza (Todas) —</option>
+        <option value="fixo">Apenas Fixas</option>
+        <option value="pontual">Apenas Pontuais</option>
+      </select>
+    </h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
+    <div class="empty" id="finEmpty" style="display:none">Nenhum lançamento para o filtro selecionado.</div>
   </div>
+
   <div class="rulebox green"><b>Regra de ouro nº 1:</b> nenhum comprovante sem lançamento no mesmo dia; nenhum lançamento sem comprovante. O lançamento nasce do comprovante no grupo do WhatsApp.</div>
-  <div class="rulebox"><b>Regra de ouro nº 2:</b> a operação é sempre escolhida na <b>lista fechada</b> (dropdown) — nunca texto livre. Foi isso que gerou R$ 934 mil de divergência na planilha antiga.</div>
+  <div class="rulebox"><b>Regra de ouro nº 2:</b> contas e despesas fixas recorrentes (aluguel, contabilidade, softwares) devem ser lançadas como <b>Fixas Mensais</b> para serem projetadas no mesmo dia em cada mês automaticamente.</div>
   <div class="card">
     <h2 class="blue">Mutirão de correção da planilha antiga (Samir + Davi · ~2h)</h2>
     <div class="note" style="line-height:1.85" id="mutiraoList"></div>
@@ -2156,69 +2183,255 @@ function saveForn(){
 }
 
 /* ---------- FINANCEIRO ---------- */
-function finTotals(){
-  let rp=0,rr=0,dp=0,dr=0;
-  DB.fin.forEach(l=>{
-    const v=+l.valor||0;
-    if(l.tipo==='Receita'){ if(l.status==='Realizado') rr+=v; else rp+=v; }
-    else { if(l.status==='Realizado') dr+=v; else dp+=v; }
-  });
-  return {rp,rr,dp,dr};
+function setFinPeriod(mode){
+  const el = $('finMesFiltro');
+  const d = new Date();
+  if(mode === 'mesAtual'){
+    if(el) el.value = d.toISOString().slice(0, 7);
+  } else if(mode === 'proxMes'){
+    d.setMonth(d.getMonth() + 1);
+    if(el) el.value = d.toISOString().slice(0, 7);
+  } else if(mode === 'todos'){
+    if(el) el.value = '';
+  }
+  renderFin();
 }
+
+function getISOWeekBounds(){
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const monday = new Date(now);
+  if(day !== 1) monday.setDate(now.getDate() - (day - 1));
+  const mondayStr = monday.toISOString().slice(0, 10);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const sundayStr = sunday.toISOString().slice(0, 10);
+  return { mondayStr, sundayStr };
+}
+
 function renderFin(){
   if(!USER.fin){ return; }
-  fillOpSelect('finFilter',true);
-  const t=finTotals();
-  $('finSummary').innerHTML=`
-    <div class="fin-tile"><div class="v num" style="color:#34C77C">${fmt(t.rr)}</div><div class="l">Receita realizada</div></div>
-    <div class="fin-tile"><div class="v num" style="color:#7FA6FF">${fmt(t.rp)}</div><div class="l">Receita a realizar</div></div>
-    <div class="fin-tile"><div class="v num" style="color:#FF5A6E">${fmt(t.dr)}</div><div class="l">Despesa realizada</div></div>
-    <div class="fin-tile"><div class="v num" style="color:#F0B429">${fmt(t.dp)}</div><div class="l">Despesa a realizar</div></div>
-    <div class="fin-tile"><div class="v num" style="color:${t.rr-t.dr>=0?'#34C77C':'#FF5A6E'}">${fmt(t.rr-t.dr)}</div><div class="l">Resultado realizado</div></div>`;
-  const ops={};
-  DB.fin.forEach(l=>{
-    ops[l.op]=ops[l.op]||{rp:0,rr:0,dp:0,dr:0};
-    const v=+l.valor||0, o=ops[l.op];
-    if(l.tipo==='Receita'){ l.status==='Realizado'?o.rr+=v:o.rp+=v; } else { l.status==='Realizado'?o.dr+=v:o.dp+=v; }
+  fillOpSelect('finFilter', true);
+
+  const hjISO = new Date().toISOString().slice(0, 10);
+  const dTom = new Date(); dTom.setDate(dTom.getDate() + 1);
+  const amIso = dTom.toISOString().slice(0, 10);
+  const weekBounds = getISOWeekBounds();
+
+  const mesFiltroEl = $('finMesFiltro');
+  if(mesFiltroEl && !mesFiltroEl.value) {
+    mesFiltroEl.value = hjISO.slice(0, 7);
+  }
+  const targetMonth = mesFiltroEl ? mesFiltroEl.value : hjISO.slice(0, 7);
+
+  let pagHoje = 0, recHoje = 0, numPagHoje = 0, numRecHoje = 0;
+  let pagAman = 0, recAman = 0, numPagAman = 0, numRecAman = 0;
+  let pagSem = 0, recSem = 0;
+  let pagMes = 0, recMes = 0;
+
+  const effectiveItems = [];
+
+  DB.fin.forEach(l => {
+    if (!l.vencimento) l.vencimento = l.data || hjISO;
+    if (l.fixo === undefined) l.fixo = false;
+
+    const val = +l.valor || 0;
+    const isFixo = !!l.fixo;
+    let vencCalc = l.vencimento;
+
+    if (isFixo && targetMonth) {
+      const origDay = l.vencimento.slice(8, 10) || '01';
+      const dayNum = parseInt(origDay, 10);
+      const [yStr, mStr] = targetMonth.split('-');
+      const maxDays = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
+      const actualDay = Math.min(dayNum, maxDays);
+      vencCalc = `${targetMonth}-${String(actualDay).padStart(2, '0')}`;
+    }
+
+    const itemObj = { ...l, vencimentoCalc: vencCalc };
+    effectiveItems.push(itemObj);
+
+    const isPending = l.status !== 'Realizado';
+
+    if (vencCalc === hjISO) {
+      if (l.tipo === 'Despesa') { pagHoje += val; if (isPending) numPagHoje++; }
+      else { recHoje += val; if (isPending) numRecHoje++; }
+    }
+
+    if (vencCalc === amIso) {
+      if (l.tipo === 'Despesa') { pagAman += val; if (isPending) numPagAman++; }
+      else { recAman += val; if (isPending) numRecAman++; }
+    }
+
+    if (vencCalc >= weekBounds.mondayStr && vencCalc <= weekBounds.sundayStr) {
+      if (l.tipo === 'Despesa') pagSem += val;
+      else recSem += val;
+    }
+
+    if (!targetMonth || vencCalc.startsWith(targetMonth)) {
+      if (l.tipo === 'Despesa') pagMes += val;
+      else recMes += val;
+    }
   });
-  $('finOpsBody').innerHTML=Object.entries(ops).map(([op,o])=>{
-    const res=o.rr-o.dr, mg=o.rr>0?(res/o.rr*100).toFixed(1)+'%':'—';
-    return `<tr><td><b>${esc(op)}</b></td><td class="r num">${fmt(o.rp+o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
-      <td class="r num">${fmt(o.dp+o.dr)}</td><td class="r num" style="color:#FF5A6E">${fmt(o.dr)}</td>
-      <td class="r num" style="font-weight:800;color:${res>=0?'#34C77C':'#FF5A6E'}">${fmt(res)}</td><td class="r num">${mg}</td></tr>`;
-  }).join('')||'<tr><td colspan="7" class="note">Sem lançamentos ainda.</td></tr>';
-  const f=$('finFilter').value;
-  const rows=DB.fin.filter(l=>!f||l.op===f);
-  $('finEmpty').style.display=rows.length?'none':'block';
-  $('finBody').innerHTML=rows.map(l=>{
-    const idx=DB.fin.indexOf(l);
-    return `<tr><td>${esc(l.data)}</td><td><b>${esc(l.op)}</b></td>
-      <td><span class="pill ${l.tipo==='Receita'?'ok':'red'}">${esc(l.tipo)}</span></td><td>${esc(l.desc)}</td>
-      <td class="r num" style="font-weight:700">${fmt(+l.valor||0)}</td>
-      <td><select style="width:110px" onchange="DB.fin[${idx}].status=this.value;saveDB();renderFin()"><option ${l.status==='Previsto'?'selected':''}>Previsto</option><option ${l.status==='Realizado'?'selected':''}>Realizado</option></select></td>
-      <td>${l.comp?`<a href="${esc(l.comp)}" target="_blank" style="color:#7FA6FF">↗</a>`:'—'}</td><td>${esc(l.por)}</td>
-      <td><button class="del" onclick="DB.fin.splice(${idx},1);saveDB();renderFin()">✕</button></td></tr>`;
+
+  const saldoPrevistoMes = recMes - pagMes;
+  const mesExtenso = targetMonth ? new Date(targetMonth + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : 'Todos os Períodos';
+
+  $('finDashGrid').innerHTML = `
+    <div class="fin-dash-card" style="border-top:3px solid #FF5A6E">
+      <div class="c-label" style="color:#FF5A6E">🔴 Contas a Pagar Hoje</div>
+      <div class="c-val" style="color:#FF5A6E">${fmt(pagHoje)}</div>
+      <div class="c-sub">${numPagHoje} pendente(s)</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #34C77C">
+      <div class="c-label" style="color:#34C77C">🟢 Contas a Receber Hoje</div>
+      <div class="c-val" style="color:#34C77C">${fmt(recHoje)}</div>
+      <div class="c-sub">${numRecHoje} a receber</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #F0B429">
+      <div class="c-label" style="color:#F0B429">🟠 Contas a Pagar Amanhã</div>
+      <div class="c-val" style="color:#F0B429">${fmt(pagAman)}</div>
+      <div class="c-sub">${numPagAman} a vencer</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #7FA6FF">
+      <div class="c-label" style="color:#7FA6FF">🔵 Contas a Receber Amanhã</div>
+      <div class="c-val" style="color:#7FA6FF">${fmt(recAman)}</div>
+      <div class="c-sub">${numRecAman} a receber</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #E91E63">
+      <div class="c-label" style="color:#E91E63">📅 Contas a Pagar na Semana</div>
+      <div class="c-val" style="color:#E91E63">${fmt(pagSem)}</div>
+      <div class="c-sub">Segunda a Domingo</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #22B8CF">
+      <div class="c-label" style="color:#22B8CF">📈 Contas a Receber na Semana</div>
+      <div class="c-val" style="color:#22B8CF">${fmt(recSem)}</div>
+      <div class="c-sub">Segunda a Domingo</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #FF5A6E">
+      <div class="c-label" style="color:#FF5A6E">🗓️ Contas a Pagar no Mês</div>
+      <div class="c-val" style="color:#FF5A6E">${fmt(pagMes)}</div>
+      <div class="c-sub">${mesExtenso}</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #34C77C">
+      <div class="c-label" style="color:#34C77C">📊 Contas a Receber no Mês</div>
+      <div class="c-val" style="color:#34C77C">${fmt(recMes)}</div>
+      <div class="c-sub">${mesExtenso}</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid ${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'};background:#111A2E">
+      <div class="c-label" style="color:${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'}">💰 Saldo Previsto do Período</div>
+      <div class="c-val" style="color:${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(saldoPrevistoMes)}</div>
+      <div class="c-sub">Receitas − Despesas (${mesExtenso})</div>
+    </div>
+  `;
+
+  const ops = {};
+  effectiveItems.forEach(l => {
+    if (targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return;
+    ops[l.op] = ops[l.op] || { rp: 0, rr: 0, dp: 0, dr: 0 };
+    const v = +l.valor || 0, o = ops[l.op];
+    if (l.tipo === 'Receita') { l.status === 'Realizado' ? o.rr += v : o.rp += v; }
+    else { l.status === 'Realizado' ? o.dr += v : o.dp += v; }
+  });
+
+  $('finOpsBody').innerHTML = Object.entries(ops).map(([op, o]) => {
+    const res = o.rr - o.dr, mg = o.rr > 0 ? (res / o.rr * 100).toFixed(1) + '%' : '—';
+    return `<tr><td><b>${esc(op)}</b></td><td class="r num">${fmt(o.rp + o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
+      <td class="r num">${fmt(o.dp + o.dr)}</td><td class="r num" style="color:#FF5A6E">${fmt(o.dr)}</td>
+      <td class="r num" style="font-weight:800;color:${res >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(res)}</td><td class="r num">${mg}</td></tr>`;
+  }).join('') || '<tr><td colspan="7" class="note">Sem lançamentos para este período.</td></tr>';
+
+  const opFilter = $('finFilter') ? $('finFilter').value : '';
+  const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
+
+  const rows = effectiveItems.filter(l => {
+    if (targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
+    if (opFilter && l.op !== opFilter) return false;
+    if (natFilter === 'fixo' && !l.fixo) return false;
+    if (natFilter === 'pontual' && l.fixo) return false;
+    return true;
+  });
+
+  $('finEmpty').style.display = rows.length ? 'none' : 'block';
+  $('finBody').innerHTML = rows.map(l => {
+    const idx = DB.fin.indexOf(l);
+    const vDisp = l.vencimentoCalc ? l.vencimentoCalc.split('-').reverse().join('/') : '—';
+    const dDisp = l.data ? l.data.split('-').reverse().join('/') : '—';
+    const isFixo = !!l.fixo;
+
+    return `<tr>
+      <td><b>${vDisp}</b></td>
+      <td class="note">${dDisp}</td>
+      <td><b>${esc(l.op)}</b></td>
+      <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
+      <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? '📌 Fixa' : 'Pontual'}</span></td>
+      <td>${esc(l.desc)}</td>
+      <td class="r num" style="font-weight:700">${fmt(+l.valor || 0)}</td>
+      <td>
+        <select style="width:110px" onchange="if(${idx}>=0){DB.fin[${idx}].status=this.value;saveDB();renderFin();}">
+          <option ${l.status === 'Previsto' ? 'selected' : ''}>Previsto</option>
+          <option ${l.status === 'Realizado' ? 'selected' : ''}>Realizado</option>
+        </select>
+      </td>
+      <td>${l.comp ? `<a href="${esc(l.comp)}" target="_blank" style="color:#7FA6FF">↗</a>` : '—'}</td>
+      <td>${esc(l.por)}</td>
+      <td><button class="del" onclick="if(${idx}>=0){DB.fin.splice(${idx},1);saveDB();renderFin();}">✕</button></td>
+    </tr>`;
   }).join('');
-  $('mutiraoList').innerHTML=DB.mutirao.map((m,i)=>`<label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:12.5px;color:${m.done?'#34C77C':'var(--mut)'}">
-    <input type="checkbox" style="width:auto;margin-top:2px" ${m.done?'checked':''} onchange="DB.mutirao[${i}].done=this.checked;saveDB();renderFin()"> <span style="${m.done?'text-decoration:line-through':''}">${esc(m.t)}</span></label>`).join('');
+
+  $('mutiraoList').innerHTML = DB.mutirao.map((m, i) => `<label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400;font-size:12.5px;color:${m.done ? '#34C77C' : 'var(--mut)'}">
+    <input type="checkbox" style="width:auto;margin-top:2px" ${m.done ? 'checked' : ''} onchange="DB.mutirao[${i}].done=this.checked;saveDB();renderFin()"> <span style="${m.done ? 'text-decoration:line-through' : ''}">${esc(m.t)}</span></label>`).join('');
 }
+
 function openLancModal(pref){
   if(!DB.ops.length){ toast('Crie uma operação primeiro.'); return; }
-  openModal(`<h3>Novo <span>lançamento</span></h3>
+  const hjIso = new Date().toISOString().slice(0,10);
+  openModal(`<h3>Novo <span>lançamento financeiro</span></h3>
     <div class="frow">
-      <div><label>Operação (lista fechada)</label><select id="m_lop">${DB.ops.map(o=>`<option value="${esc(o.id)}" ${pref&&pref.op===o.id?'selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}</select></div>
-      <div><label>Tipo</label><select id="m_ltipo"><option>Receita</option><option>Despesa</option></select></div>
-      <div><label>Status</label><select id="m_lst"><option>Previsto</option><option>Realizado</option></select></div>
+      <div><label>Operação</label><select id="m_lop">${DB.ops.map(o=>`<option value="${esc(o.id)}" ${pref&&pref.op===o.id?'selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}</select></div>
+      <div><label>Tipo</label><select id="m_ltipo"><option value="Receita">Receita (Contas a Receber)</option><option value="Despesa">Despesa (Contas a Pagar)</option></select></div>
+      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="$('m_fixo_hint').style.display=this.value==='true'?'block':'none'"><option value="false">Pontual / Variável</option><option value="true">Fixa Mensal (Recorrente)</option></select></div>
     </div>
-    <div class="frow"><div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: 1ª parcela cliente / Frete internacional"></div>
-    <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01"></div></div>
-    <div class="frow"><div><label>Link do comprovante</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp export)"></div></div>
+    <div class="frow">
+      <div><label>Data de Vencimento</label><input type="date" id="m_lvenc" value="${hjIso}"></div>
+      <div><label>Data de Lançamento</label><input type="date" id="m_ldata" value="${hjIso}"></div>
+      <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01" placeholder="0.00"></div>
+    </div>
+    <div class="frow">
+      <div><label>Status</label><select id="m_lst"><option>Previsto</option><option>Realizado</option></select></div>
+      <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: Aluguel / Proforma client / Contabilidade / Frete"></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>Link do comprovante / Nota Fiscal</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
+    </div>
+    <div id="m_fixo_hint" class="note" style="display:none;color:#7FA6FF;margin-top:6px">📌 <b>Despesa/Receita Fixa:</b> ao marcar como Fixa Mensal, o lançamento é fixado no dia selecionado em todos os meses no dashboard!</div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveLanc()">Lançar</button></div>`);
 }
+
 function saveLanc(){
-  if(!N('m_lval')){ toast('⚠ Valor'); return; }
-  DB.fin.unshift({data:hoje(),op:V('m_lop'),tipo:V('m_ltipo'),desc:V('m_ldesc'),valor:N('m_lval'),status:V('m_lst'),comp:V('m_lcomp'),por:USER.nome.split(' ')[0]});
-  saveDB(); closeModal(); renderFin(); toast('Lançamento registrado ✓');
+  if(!N('m_lval')){ toast('⚠ Informe o valor do lançamento'); return; }
+  const hjIso = new Date().toISOString().slice(0,10);
+  const dataLanc = V('m_ldata') || hjIso;
+  const vencLanc = V('m_lvenc') || dataLanc;
+  const isFixo = V('m_lfixo') === 'true';
+
+  DB.fin.unshift({
+    data: dataLanc,
+    vencimento: vencLanc,
+    op: V('m_lop'),
+    tipo: V('m_ltipo'),
+    fixo: isFixo,
+    desc: V('m_ldesc'),
+    valor: N('m_lval'),
+    status: V('m_lst'),
+    comp: V('m_lcomp'),
+    por: USER.nome.split(' ')[0]
+  });
+
+  saveDB();
+  closeModal();
+  renderFin();
+  toast('Lançamento financeiro registrado ✓');
 }
 
 /* ---------- CONFIG ---------- */
