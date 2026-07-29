@@ -1444,10 +1444,53 @@ function enterApp(){
     b.onclick=()=>showTab(t.k);
     nav.appendChild(b);
   });
-  $('userChip').innerHTML=`<div class="avatar" style="background:${USER.cor}">${USER.nome[0]}</div><div><div class="nm">${esc(USER.nome.split(' ')[0])}</div><div class="rl">${esc(USER.papel)}</div></div><button title="Sair" onclick="logout()">⏻</button>`;
+  $('userChip').innerHTML=`<div class="avatar" style="background:${USER.cor}">${USER.nome[0]}</div><div><div class="nm">${esc(USER.nome.split(' ')[0])}</div><div class="rl">${esc(USER.papel)}</div></div><button title="Uso de Memória & Banco" onclick="mostrarUsoMemoria()" style="margin-right:6px">💾</button><button title="Sair" onclick="logout()">⏻</button>`;
   showTab(USER.tabs[0]);
   updateNotifs();
   toast(`Bem-vindo(a), <b>${esc(USER.nome.split(' ')[0])}</b>! 👋`);
+}
+
+function mostrarUsoMemoria(){
+  const dbBytes = JSON.stringify(DB).length;
+  const dbKB = (dbBytes / 1024).toFixed(1);
+  let ramInfo = 'Não suportado no navegador atual';
+  if(performance && performance.memory){
+    const usedMB = (performance.memory.usedJSHeapSize / 1048576).toFixed(1);
+    const totalMB = (performance.memory.jsHeapSizeLimit / 1048576).toFixed(0);
+    const pct = ((performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit)*100).toFixed(1);
+    ramInfo = `<b>${usedMB} MB</b> de ${totalMB} MB (${pct}%)`;
+  }
+
+  const finLen = (DB.fin||[]).length;
+  const qLen = (DB.qindex||[]).length;
+  const opLen = (DB.ops||[]).length;
+  const fornLen = (DB.fornecedores||[]).length;
+  const chkLen = Object.keys(DB.checklists||{}).length;
+
+  openModal(`<h3>💾 Uso de <span>Memória & Armazenamento</span></h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0">
+      <div style="background:#1B2A5B22;border:1px solid #1B2A5B66;padding:12px;border-radius:8px">
+        <div style="font-size:11px;color:#7FA6FF;font-weight:700">MEMÓRIA RAM (NAVEGADOR)</div>
+        <div style="font-size:16px;font-weight:800;color:#fff;margin-top:4px">${ramInfo}</div>
+        <div style="font-size:10px;color:#94A3B8;margin-top:4px">Espaço ocupado pelos scripts e interface</div>
+      </div>
+      <div style="background:#B5106B22;border:1px solid #B5106B66;padding:12px;border-radius:8px">
+        <div style="font-size:11px;color:#FF6EA8;font-weight:700">BANCO DE DADOS LOCAL (DB)</div>
+        <div style="font-size:16px;font-weight:800;color:#fff;margin-top:4px"><b>${dbKB} KB</b> (${dbBytes} bytes)</div>
+        <div style="font-size:10px;color:#94A3B8;margin-top:4px">Armazenamento local das operações</div>
+      </div>
+    </div>
+    <h4 style="margin:12px 0 8px;font-size:12px;color:#94A3B8;text-transform:uppercase">📊 Detalhamento de Registros por Aba</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12px">
+      <div style="background:#131B2E;padding:8px 10px;border-radius:6px">💰 <b>Financeiro:</b> ${finLen} lançamentos</div>
+      <div style="background:#131B2E;padding:8px 10px;border-radius:6px">🧮 <b>Cotações:</b> ${qLen} cotações salvas</div>
+      <div style="background:#131B2E;padding:8px 10px;border-radius:6px">🗼 <b>Painel:</b> ${opLen} operações</div>
+      <div style="background:#131B2E;padding:8px 10px;border-radius:6px">🔍 <b>Sourcing:</b> ${fornLen} fornecedores</div>
+      <div style="background:#131B2E;padding:8px 10px;border-radius:6px">✅ <b>Checklists:</b> ${chkLen} listas de tarefas</div>
+    </div>
+    <div class="modal-actions" style="margin-top:18px">
+      <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+    </div>`);
 }
 function showTab(k){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
