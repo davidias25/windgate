@@ -1675,8 +1675,10 @@ function saveOp(id){
 }
 function delOp(id){ DB.ops=DB.ops.filter(x=>x.id!==id); saveDB(); closeModal(); renderOps(); toast('Operação excluída'); }
 function fillOpSelect(selId,includeAll){
-  const s=$(selId); const cur=s.value;
-  s.innerHTML=(includeAll?'<option value="">— todas as operações —</option>':'')+DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+  const s=$(selId); if(!s) return; const cur=s.value;
+  s.innerHTML=(includeAll?'<option value="">— todas as operações —</option>':'')+
+    '<option value="WindGate">🏢 WindGate (Estrutura Fixa)</option>'+
+    DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
   if(cur) s.value=cur;
 }
 </script>
@@ -2383,14 +2385,31 @@ function renderFin(){
     <input type="checkbox" style="width:auto;margin-top:2px" ${m.done ? 'checked' : ''} onchange="DB.mutirao[${i}].done=this.checked;saveDB();renderFin()"> <span style="${m.done ? 'text-decoration:line-through' : ''}">${esc(m.t)}</span></label>`).join('');
 }
 
+function toggleNatLanc(isFixoStr){
+  const isFixo = isFixoStr === 'true';
+  const hint = $('m_fixo_hint');
+  if(hint) hint.style.display = isFixo ? 'block' : 'none';
+  const opSel = $('m_lop');
+  if(opSel){
+    if(isFixo){
+      opSel.value = 'WindGate';
+      opSel.disabled = true;
+    } else {
+      opSel.disabled = false;
+    }
+  }
+}
+
 function openLancModal(pref){
-  if(!DB.ops.length){ toast('Crie uma operação primeiro.'); return; }
   const hjIso = new Date().toISOString().slice(0,10);
+  const opOptions = `<option value="WindGate">🏢 WindGate (Estrutura Fixa)</option>` +
+    DB.ops.map(o=>`<option value="${esc(o.id)}" ${pref&&pref.op===o.id?'selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+
   openModal(`<h3>Novo <span>lançamento financeiro</span></h3>
     <div class="frow">
-      <div><label>Operação</label><select id="m_lop">${DB.ops.map(o=>`<option value="${esc(o.id)}" ${pref&&pref.op===o.id?'selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}</select></div>
-      <div><label>Tipo</label><select id="m_ltipo"><option value="Receita">Receita (Contas a Receber)</option><option value="Despesa">Despesa (Contas a Pagar)</option></select></div>
-      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="$('m_fixo_hint').style.display=this.value==='true'?'block':'none'"><option value="false">Pontual / Variável</option><option value="true">Fixa Mensal (Recorrente)</option></select></div>
+      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="toggleNatLanc(this.value)"><option value="false">Pontual / Operacional</option><option value="true">Fixa Mensal (WindGate)</option></select></div>
+      <div><label>Vínculo / Operação</label><select id="m_lop">${opOptions}</select></div>
+      <div><label>Tipo</label><select id="m_ltipo"><option value="Despesa">Despesa (Contas a Pagar)</option><option value="Receita">Receita (Contas a Receber)</option></select></div>
     </div>
     <div class="frow">
       <div><label>Data de Vencimento</label><input type="date" id="m_lvenc" value="${hjIso}"></div>
@@ -2399,12 +2418,12 @@ function openLancModal(pref){
     </div>
     <div class="frow">
       <div><label>Status</label><select id="m_lst"><option>Previsto</option><option>Realizado</option></select></div>
-      <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: Aluguel / Proforma client / Contabilidade / Frete"></div>
+      <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
     </div>
     <div class="frow">
       <div style="grid-column:span 3"><label>Link do comprovante / Nota Fiscal</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
     </div>
-    <div id="m_fixo_hint" class="note" style="display:none;color:#7FA6FF;margin-top:6px">📌 <b>Despesa/Receita Fixa:</b> ao marcar como Fixa Mensal, o lançamento é fixado no dia selecionado em todos os meses no dashboard!</div>
+    <div id="m_fixo_hint" class="note" style="display:none;color:#7FA6FF;margin-top:6px">🏢 <b>Despesa Fixa WindGate:</b> Não é vinculada a nenhuma operação. Atribuída diretamente à estrutura da WindGate e fixada no dia selecionado (${hjIso.slice(8,10)}) para todos os meses!</div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveLanc()">Lançar</button></div>`);
 }
 
@@ -2414,11 +2433,12 @@ function saveLanc(){
   const dataLanc = V('m_ldata') || hjIso;
   const vencLanc = V('m_lvenc') || dataLanc;
   const isFixo = V('m_lfixo') === 'true';
+  const opFinal = isFixo ? 'WindGate' : V('m_lop');
 
   DB.fin.unshift({
     data: dataLanc,
     vencimento: vencLanc,
-    op: V('m_lop'),
+    op: opFinal,
     tipo: V('m_ltipo'),
     fixo: isFixo,
     desc: V('m_ldesc'),
