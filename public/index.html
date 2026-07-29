@@ -1760,8 +1760,28 @@ function renderDocs(){
     return `<tr><td><b>${esc(d.op)}</b></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
       <td>${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF">abrir ↗</a>`:'—'}</td>
       <td><span class="pill ${stP}">${esc(d.status)}</span></td><td>${esc(d.por)}</td><td class="note">${esc(d.obs||'')}</td>
-      <td><button class="del" onclick="DB.docs.splice(${idx},1);saveDB();renderDocs()">✕</button></td></tr>`;
+      <td><button class="del" onclick="deleteDoc(${idx})">✕</button></td></tr>`;
   }).join('');
+}
+async function deleteDoc(idx){
+  const d = DB.docs[idx];
+  if(!d) return;
+
+  const targetLink = d.link;
+  DB.docs.splice(idx, 1);
+  saveDB();
+  renderDocs();
+  toast('Documento removido');
+
+  if(targetLink && (targetLink.includes('supabase.co') || targetLink.includes('/uploads/'))){
+    try {
+      await fetch('/api/upload', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetLink })
+      });
+    } catch(e){}
+  }
 }
 function openDocModal(){
   if(!DB.ops.length){ toast('Crie uma operação primeiro.'); return; }

@@ -147,6 +147,17 @@ async function runTests() {
     assert(resUploadInvalid.status === 400, 'POST /api/upload (arquivo não permitido) retorna HTTP 400');
     assert(jsonUploadInvalid.success === false, 'POST /api/upload retorna success = false');
 
+    // 9. Testar Deletar Arquivo do Supabase / Storage (DELETE /api/upload)
+    console.log('\n--- Testando Deletar Arquivo (DELETE /api/upload) ---');
+    const resDelete = await fetch(`${baseUrl}/api/upload`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: jsonUploadValid.finalUrl || jsonUploadValid.localUrl })
+    });
+    const jsonDelete = await resDelete.json();
+    assert(resDelete.status === 200, 'DELETE /api/upload retorna HTTP 200');
+    assert(jsonDelete.success === true, 'DELETE /api/upload remove o arquivo com sucesso');
+
   } catch (err) {
     console.error('❌ Erro inesperado durante execução dos testes:', err);
     failures++;

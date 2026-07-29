@@ -7,7 +7,7 @@ const uploadMiddleware = require('./middlewares/upload.middleware');
 const cotacoesRoutes = require('./routes/cotacoes.routes');
 const { criarTarefaOperacao } = require('./integrations/clickup.service');
 const { uploadParaGoogleDrive } = require('./integrations/drive.service');
-const { uploadParaSupabase } = require('./integrations/supabase.service');
+const { uploadParaSupabase, deletarDoSupabase } = require('./integrations/supabase.service');
 
 const app = express();
 
@@ -123,6 +123,41 @@ app.post('/api/upload', uploadMiddleware.single('arquivo'), async (req, res) => 
       fileName: req.file.filename,
       originalName: req.file.originalname,
       driveLink: driveResult ? driveResult.webViewLink : null
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Rota para Deletar Arquivos / Documentos do Supabase Storage e Servidor Local
+app.delete('/api/upload', async (req, res) => {
+  try {
+    const targetUrl = (req.body && req.body.url) || req.query.url;
+    if (!targetUrl) {
+      return res.status(400).json({ success: false, message: 'URL do arquivo não informada.' });
+    }
+
+    let supaDeleted = false;
+    let localDeleted = false;
+
+    try {
+      supaDeleted = await deletarDoSupabase(targetUrl);
+    } catch (e) {}
+
+    try {
+      const cleanName = path.basename(targetUrl);
+      const localFilePath = path.join(__dirname, '../uploads', cleanName);
+      if (fs.existsSync(localFilePath)) {
+        fs.unlinkSync(localFilePath);
+        localDeleted = true;
+      }
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      message: 'Arquivo deletado com sucesso do servidor e Supabase storage!',
+      supaDeleted,
+      localDeleted
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

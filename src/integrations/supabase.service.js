@@ -54,4 +54,36 @@ async function uploadParaSupabase(filePath, fileName, mimeType = 'application/pd
   }
 }
 
-module.exports = { uploadParaSupabase };
+async function deletarDoSupabase(fileUrlOrPath) {
+  const supabase = getSupabaseClient();
+  const bucketName = process.env.SUPABASE_BUCKET || 'windgate-docs';
+
+  if (!supabase || !fileUrlOrPath) return false;
+
+  try {
+    let storagePath = fileUrlOrPath;
+    if (fileUrlOrPath.includes(bucketName)) {
+      const parts = fileUrlOrPath.split(`${bucketName}/`);
+      if (parts.length > 1) {
+        storagePath = decodeURIComponent(parts[1]);
+      }
+    }
+
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .remove([storagePath]);
+
+    if (error) {
+      console.error('❌ Erro ao deletar arquivo do Supabase Storage:', error.message);
+      return false;
+    }
+
+    console.log('✅ Arquivo deletado com sucesso do Supabase Storage:', storagePath);
+    return true;
+  } catch (error) {
+    console.error('❌ Exceção ao deletar do Supabase Storage:', error.message);
+    return false;
+  }
+}
+
+module.exports = { uploadParaSupabase, deletarDoSupabase };
