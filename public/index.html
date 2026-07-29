@@ -1123,7 +1123,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="pontual">Apenas Pontuais</option>
       </select>
     </h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Nota Fiscal</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
     <div class="empty" id="finEmpty" style="display:none">Nenhum lançamento para o filtro selecionado.</div>
   </div>
 
@@ -2436,6 +2436,15 @@ function renderFin(){
       <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#34C77C;border-color:#34C77C66" onclick="if(${idx}>=0)anexarComprovanteModal(${idx})">📎 + Anexar</button>
     `;
 
+    const nfCol = l.nf ? `
+      <div style="display:flex;align-items:center;gap:4px">
+        <a href="${esc(l.nf)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#F0B429" title="Abrir NF">↗ NF</a>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="if(${idx}>=0)anexarNFModal(${idx})" title="Alterar NF">✏️</button>
+      </div>
+    ` : `
+      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#F0B429;border-color:#F0B42966" onclick="if(${idx}>=0)anexarNFModal(${idx})">🧾 + NF</button>
+    `;
+
     return `<tr>
       <td><b>${vDisp}</b></td>
       <td class="note">${dDisp}</td>
@@ -2451,6 +2460,7 @@ function renderFin(){
         </select>
       </td>
       <td>${compCol}</td>
+      <td>${nfCol}</td>
       <td>${esc(l.por)}</td>
       <td><button class="del" onclick="deleteFin(${idx})" title="Remover lançamento">✕</button></td>
     </tr>`;
@@ -2511,7 +2521,10 @@ function openLancModal(pref){
       <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
     </div>
     <div class="frow">
-      <div style="grid-column:span 3"><label>Link do comprovante / Nota Fiscal</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
+      <div style="grid-column:span 3"><label>Link do comprovante (Pagamento / Transferência / Boleto)</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>🧾 Link da Nota Fiscal (opcional)</label><input id="m_lnf" placeholder="https://… (NF-e / NFS-e / XML / Drive)"></div>
     </div>
     <div id="m_fixo_hint" class="note" style="display:none;color:#7FA6FF;margin-top:6px">🏢 <b>Despesa Fixa WindGate:</b> Não é vinculada a nenhuma operação. Atribuída diretamente à estrutura da WindGate e fixada no dia selecionado (${hjIso.slice(8,10)}) para todos os meses!</div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveLanc()">Lançar</button></div>`);
@@ -2537,6 +2550,7 @@ function saveLanc(){
     valor: N('m_lval'),
     status: V('m_lst'),
     comp: V('m_lcomp'),
+    nf: V('m_lnf') || '',
     por: uName
   });
 
@@ -2611,6 +2625,68 @@ function salvarFinComprovanteLink(idx){
   closeModal();
   renderFin();
   toast('Comprovante salvo ✓');
+}
+
+function anexarNFModal(idx){
+  const l = DB.fin[idx];
+  if(!l) return;
+  const vDisp = l.vencimento ? l.vencimento.split('-').reverse().join('/') : (l.data ? l.data.split('-').reverse().join('/') : '—');
+
+  openModal(`<h3>🧾 Nota Fiscal — <span>${esc(l.desc || l.op)}</span></h3>
+    <div style="background:#131B2E;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:12.5px">
+      <div><b>Operação:</b> ${esc(l.op)} &nbsp;·&nbsp; <b>Valor:</b> ${fmt(+l.valor||0)}</div>
+      <div><b>Vencimento:</b> ${vDisp} &nbsp;·&nbsp; <b>Descrição:</b> ${esc(l.desc||'—')}</div>
+      ${l.nf ? `<div style="margin-top:6px"><b>NF atual:</b> <a href="${esc(l.nf)}" target="_blank" style="color:#F0B429">Ver NF atual ↗</a></div>` : ''}
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3">
+        <label>📁 Selecionar Arquivo da Nota Fiscal (PDF, XML, Imagem)</label>
+        <input type="file" id="m_fin_nf_file" style="background:#171f33;padding:8px" accept=".pdf,.xml,.png,.jpg,.jpeg,.xlsx,.csv,.zip" onchange="uploadFinNF(this.files[0], ${idx})">
+        <div id="m_fin_nf_status" style="font-size:12px;margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="frow" style="margin-top:10px">
+      <div style="grid-column:span 3">
+        <label>Ou cole a URL da Nota Fiscal (NF-e / NFS-e / Drive / XML)</label>
+        <input id="m_fin_nf_link" value="${esc(l.nf||'')}" placeholder="https://… (Portal NF-e / SEFAZ / Drive)">
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      ${l.nf ? `<button class="btn btn-danger" onclick="if(${idx}>=0){DB.fin[${idx}].nf='';saveDB();closeModal();renderFin();toast('Nota Fiscal removida')}">Remover NF</button>` : ''}
+      <button class="btn btn-mag" style="background:#D97706" onclick="salvarFinNFLink(${idx})">Salvar Nota Fiscal</button>
+    </div>`);
+}
+
+async function uploadFinNF(file, idx){
+  if(!file) return;
+  const st = $('m_fin_nf_status');
+  st.style.color = '#F0B429';
+  st.textContent = 'Enviando Nota Fiscal para o Supabase Storage...';
+
+  const res = await uploadFileUniversal(file);
+  if(res.success){
+    $('m_fin_nf_link').value = res.url;
+    st.style.color = '#34C77C';
+    st.textContent = '✓ Nota Fiscal salva com sucesso (' + res.source + ')!';
+    DB.fin[idx].nf = res.url;
+    saveDB();
+    renderFin();
+    toast('Nota Fiscal vinculada ✓');
+  } else {
+    st.style.color = '#FF5A6E';
+    st.textContent = '⚠ ' + (res.message || 'Erro ao enviar Nota Fiscal');
+  }
+}
+
+function salvarFinNFLink(idx){
+  const link = V('m_fin_nf_link').trim();
+  if(!link){ toast('⚠ Informe a URL ou faça o upload da NF'); return; }
+  DB.fin[idx].nf = link;
+  saveDB();
+  closeModal();
+  renderFin();
+  toast('Nota Fiscal salva ✓');
 }
 
 /* ---------- CONFIG ---------- */
