@@ -2808,7 +2808,44 @@ function computeNotifs(){
   });
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
   DB.ops.filter(o=>o.status==='travada').forEach(o=>n.push({tab:'painel',ic:'⚠️',tx:`Operação <b>${esc(o.id)}</b> está <b style="color:var(--red)">travada</b>`,tg:'Painel'}));
-  return n.filter(x=>USER.tabs.includes(x.tab));
+
+  /* ---- Notificações Financeiras (Contas a Pagar — status Previsto) ---- */
+  if(USER.fin && (DB.fin||[]).length > 0){
+    const dTom = new Date(); dTom.setDate(dTom.getDate()+1);
+    const amIso = dTom.toISOString().slice(0,10);
+
+    // Semana: segunda a domingo
+    const now = new Date();
+    const wd = now.getDay() || 7;
+    const mon = new Date(now); if(wd!==1) mon.setDate(now.getDate()-(wd-1));
+    const sun = new Date(mon); sun.setDate(sun.getDate()+6);
+    const monStr = mon.toISOString().slice(0,10);
+    const sunStr = sun.toISOString().slice(0,10);
+
+    (DB.fin||[]).forEach(l => {
+      if(l.tipo !== 'Despesa') return;
+      if(l.status === 'Realizado') return;  // já paga, ignora
+
+      const venc = l.vencimento || l.data || hj;
+
+      // Contas vencendo amanhã
+      if(venc === amIso){
+        const val = (+l.valor||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const desc = esc(l.desc || l.op || 'Despesa');
+        n.push({tab:'fin',ic:'🔴',tx:`<b>${desc}</b> (${esc(l.op)}) — conta a pagar <b>amanhã</b> · ${val}`,tg:'Financeiro — Vence Amanhã'});
+      }
+
+      // Contas vencendo na semana (exceto amanhã e hoje, para não duplicar)
+      if(venc > amIso && venc >= monStr && venc <= sunStr){
+        const val = (+l.valor||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        const desc = esc(l.desc || l.op || 'Despesa');
+        const dateDisp = venc.split('-').reverse().join('/');
+        n.push({tab:'fin',ic:'🗓️',tx:`<b>${desc}</b> (${esc(l.op)}) — conta a pagar no dia <b>${dateDisp}</b> · ${val}`,tg:'Financeiro — Esta Semana'});
+      }
+    });
+  }
+
+  return n.filter(x=>USER.tabs.includes(x.tab)||x.tab==='fin');
 }
 function updateNotifs(){
   if(!USER||!$('bellCount')) return;
@@ -2817,9 +2854,13 @@ function updateNotifs(){
   // bolinha por aba
   document.querySelectorAll('.tab-btn .dot').forEach(d=>d.remove());
   [...new Set(n.map(x=>x.tab))].forEach(t=>{ const b=$('tabbtn-'+t); if(b) b.insertAdjacentHTML('beforeend',' <span class="dot"></span>'); });
+  // Se houver notificações financeiras, adicionar bolinha na aba fin
+  const hasFin = n.some(x=>x.tab==='fin');
+  if(hasFin){ const bFin=$('tabbtn-fin'); if(bFin && !bFin.querySelector('.dot')) bFin.insertAdjacentHTML('beforeend',' <span class="dot"></span>'); }
   $('bellPanel').innerHTML = n.length
     ? `<div style="font-size:11px;font-weight:800;color:var(--mag);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px">Pendências de ${esc(USER.nome.split(' ')[0])} · ${n.length}</div>`+
-      n.map(x=>`<div class="notif" onclick="showTab('${x.tab}');$('bellPanel').classList.remove('show')"><div class="ic">${x.ic}</div><div><div class="tx">${x.tx}</div><div class="tg">${x.tg} →</div></div></div>`).join('')
+      n.map(x=>`<div class="notif" onclick="showTab('${x.tab}');$('bellPanel').classList.remove('show')" style="${x.tab==='fin'?'border-left:3px solid #F0B429;margin-left:4px;border-radius:8px;':''}">`+
+        `<div class="ic">${x.ic}</div><div><div class="tx">${x.tx}</div><div class="tg">${x.tg} →</div></div></div>`).join('')
     : '<div class="notif"><div class="ic">🎉</div><div class="tx">Nenhuma pendência para você agora.</div></div>';
 }
 function toggleBell(ev){ ev.stopPropagation(); updateNotifs(); $('bellPanel').classList.toggle('show'); }
