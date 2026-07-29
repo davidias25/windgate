@@ -1253,8 +1253,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
    ============================================================ */
 const fmt = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const fmt0 = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{maximumFractionDigits:0});
-const N = id => parseFloat(document.getElementById(id).value)||0;
-const V = id => document.getElementById(id).value||'';
+const N = id => { const el=document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
+const V = id => { const el=document.getElementById(id); return el ? (el.value||'') : ''; };
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const hoje = () => new Date().toLocaleDateString('pt-BR');
@@ -2531,33 +2531,49 @@ function openLancModal(pref){
 }
 
 function saveLanc(){
-  if(!N('m_lval')){ toast('⚠ Informe o valor do lançamento'); return; }
-  const hjIso = new Date().toISOString().slice(0,10);
-  const dataLanc = V('m_ldata') || hjIso;
-  const vencLanc = V('m_lvenc') || dataLanc;
-  const isFixo = V('m_lfixo') === 'true';
-  const opFinal = isFixo ? 'WindGate' : V('m_lop');
+  try {
+    const rawVal = N('m_lval');
+    if(!rawVal || rawVal <= 0){
+      toast('⚠ Informe um valor maior que zero no lançamento');
+      return;
+    }
+    const hjIso = new Date().toISOString().slice(0,10);
+    const dataLanc = V('m_ldata') || hjIso;
+    const vencLanc = V('m_lvenc') || dataLanc;
+    const isFixo = V('m_lfixo') === 'true';
+    const opFinal = isFixo ? 'WindGate' : (V('m_lop') || 'WindGate');
+    const uName = (window.USER && window.USER.nome) ? window.USER.nome.split(' ')[0] : 'Operador';
+    const desc = V('m_ldesc') || '';
+    const tipo = V('m_ltipo') || 'Despesa';
+    const status = V('m_lst') || 'Previsto';
+    const comp = V('m_lcomp') || '';
+    const nf = V('m_lnf') || '';
 
-  const uName = (window.USER && window.USER.nome) ? window.USER.nome.split(' ')[0] : 'Operador';
+    if(!vencLanc){ toast('⚠ Informe a data de vencimento'); return; }
 
-  DB.fin.unshift({
-    data: dataLanc,
-    vencimento: vencLanc,
-    op: opFinal,
-    tipo: V('m_ltipo'),
-    fixo: isFixo,
-    desc: V('m_ldesc'),
-    valor: N('m_lval'),
-    status: V('m_lst'),
-    comp: V('m_lcomp'),
-    nf: V('m_lnf') || '',
-    por: uName
-  });
+    DB.fin.unshift({
+      data: dataLanc,
+      vencimento: vencLanc,
+      op: opFinal,
+      tipo: tipo,
+      fixo: isFixo,
+      desc: desc,
+      valor: rawVal,
+      status: status,
+      comp: comp,
+      nf: nf,
+      por: uName
+    });
 
-  saveDB();
-  closeModal();
-  renderFin();
-  toast('Lançamento financeiro registrado ✓');
+    saveDB();
+    closeModal();
+    renderFin();
+    updateNotifs();
+    toast('Lançamento financeiro registrado ✓');
+  } catch(err){
+    console.error('Erro ao lançar financeiro:', err);
+    toast('⚠ Erro ao salvar lançamento: ' + (err.message || 'verifique os campos'));
+  }
 }
 
 function anexarComprovanteModal(idx){
