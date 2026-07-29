@@ -5,10 +5,10 @@ const fs = require('fs');
  * Serviço de Integração com o Supabase Storage
  */
 function getSupabaseClient() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || 'https://vzewuczgqinddcgqfzku.supabase.co';
+  const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6ZXd1Y3pncWluZGRjZ3Fmemt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTMzNjgsImV4cCI6MjEwMDgyOTM2OH0.diDULhMDNZ4shVSgM_RctdTiJqS1Yxw_c60ibFO2YJY';
 
-  if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('sua-url') || supabaseKey.includes('sua-chave')) {
+  if (!supabaseUrl || !supabaseKey) {
     return null;
   }
   return createClient(supabaseUrl, supabaseKey);

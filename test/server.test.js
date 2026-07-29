@@ -133,11 +133,10 @@ async function runTests() {
       if (fs.existsSync(uploadedFile)) fs.unlinkSync(uploadedFile);
     }
 
-    // 8. Testar Upload de Arquivo Não Suportado (ex: .exe ou .txt sem mimetype correto)
     console.log('\n--- Testando Upload Middleware (Validação de Tipo Inválido) ---');
-    const txtBlob = new Blob(['unsupported file content'], { type: 'text/plain' });
+    const exeBlob = new Blob(['unsupported file content'], { type: 'application/x-msdownload' });
     const formDataInvalid = new FormData();
-    formDataInvalid.append('arquivo', txtBlob, 'invalid.txt');
+    formDataInvalid.append('arquivo', exeBlob, 'invalid.exe');
 
     const resUploadInvalid = await fetch(`${baseUrl}/api/upload`, {
       method: 'POST',
