@@ -1452,8 +1452,24 @@ async function uploadFileUniversal(file) {
   return { success: false, message: 'Erro ao enviar arquivo para a nuvem.' };
 }
 
+function ensureDBStructure(){
+  if (!DB) DB = defaultDB();
+  if (!Array.isArray(DB.fin)) DB.fin = [];
+  if (!Array.isArray(DB.ops)) DB.ops = [];
+  if (!Array.isArray(DB.docs)) DB.docs = [];
+  if (!Array.isArray(DB.fretes)) DB.fretes = [];
+  if (!Array.isArray(DB.fornecedores)) DB.fornecedores = [];
+  if (!Array.isArray(DB.qindex)) DB.qindex = [];
+  if (!Array.isArray(DB.agendaTasks)) DB.agendaTasks = [];
+  if (!DB.checklists) DB.checklists = {};
+  if (!DB.agentes) DB.agentes = {};
+  if (!DB.gestao) DB.gestao = {};
+}
+const migrateDB = ensureDBStructure;
+
 let _saveT=null;
 function saveDB(){
+  ensureDBStructure();
   clearTimeout(_saveT);
   _saveT=setTimeout(async()=>{
     const ok=await store.set(DBKEY, JSON.stringify(DB));
@@ -1475,14 +1491,14 @@ async function loadDB(){
       const json = await res.json();
       if (json.success && json.db) {
         DB = json.db;
-        migrateDB();
+        ensureDBStructure();
         await store.set(DBKEY, JSON.stringify(DB));
         return;
       }
     }
   } catch(e){}
 
-  try{ const raw=await store.get(DBKEY); if(raw){ DB=JSON.parse(raw); migrateDB(); return; } }catch(e){}
+  try{ const raw=await store.get(DBKEY); if(raw){ DB=JSON.parse(raw); ensureDBStructure(); return; } }catch(e){}
   DB=defaultDB(); saveDB();
 }
 
@@ -2549,7 +2565,7 @@ function saveLanc(){
     const comp = V('m_lcomp') || '';
     const nf = V('m_lnf') || '';
 
-    if(!vencLanc){ toast('⚠ Informe a data de vencimento'); return; }
+    if (!DB || !Array.isArray(DB.fin)) ensureDBStructure();
 
     DB.fin.unshift({
       data: dataLanc,
