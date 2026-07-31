@@ -2884,7 +2884,9 @@ function renderFin(){
       vencCalc = `${targetMonth}-${String(actualDay).padStart(2, '0')}`;
     }
 
-    const itemObj = { ...l, _realIdx: realIdx, vencimentoCalc: vencCalc };
+    // o _id acompanha a cópia: as linhas mensais de uma conta fixa apontam
+    // todas para o mesmo lançamento de origem
+    const itemObj = { ...l, vencimentoCalc: vencCalc };
     effectiveItems.push(itemObj);
 
     const isPending = l.status !== 'Realizado';
@@ -2990,7 +2992,7 @@ function renderFin(){
 
   $('finEmpty').style.display = rows.length ? 'none' : 'block';
   $('finBody').innerHTML = rows.map(l => {
-    const idx = (l._realIdx !== undefined && l._realIdx >= 0) ? l._realIdx : DB.fin.indexOf(l);
+    const id = esc(l._id || '');
     const vDisp = l.vencimentoCalc ? l.vencimentoCalc.split('-').reverse().join('/') : '—';
     const dDisp = l.data ? l.data.split('-').reverse().join('/') : '—';
     const isFixo = !!l.fixo;
@@ -2998,19 +3000,19 @@ function renderFin(){
     const compCol = l.comp ? `
       <div style="display:flex;align-items:center;gap:4px">
         <a href="${esc(l.comp)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#7FA6FF" title="Abrir Comprovante">↗ Ver</a>
-        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="if(${idx}>=0)anexarComprovanteModal(${idx})" title="Alterar Comprovante">✏️</button>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="anexarComprovanteModal('${id}')" title="Alterar Comprovante">✏️</button>
       </div>
     ` : `
-      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#34C77C;border-color:#34C77C66" onclick="if(${idx}>=0)anexarComprovanteModal(${idx})">📎 + Anexar</button>
+      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#34C77C;border-color:#34C77C66" onclick="anexarComprovanteModal('${id}')">📎 + Anexar</button>
     `;
 
     const nfCol = l.nf ? `
       <div style="display:flex;align-items:center;gap:4px">
         <a href="${esc(l.nf)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#F0B429" title="Abrir NF">↗ NF</a>
-        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="if(${idx}>=0)anexarNFModal(${idx})" title="Alterar NF">✏️</button>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="anexarNFModal('${id}')" title="Alterar NF">✏️</button>
       </div>
     ` : `
-      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#F0B429;border-color:#F0B42966" onclick="if(${idx}>=0)anexarNFModal(${idx})">🧾 + NF</button>
+      <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:#F0B429;border-color:#F0B42966" onclick="anexarNFModal('${id}')">🧾 + NF</button>
     `;
 
     return `<tr>
@@ -3022,7 +3024,7 @@ function renderFin(){
       <td>${esc(l.desc)}</td>
       <td class="r num" style="font-weight:700">${fmt(+l.valor || 0)}</td>
       <td>
-        <select style="width:110px" onchange="if(${idx}>=0){DB.fin[${idx}].status=this.value;saveDB();renderFin();}">
+        <select style="width:110px" onchange="setFinStatus('${id}',this.value)">
           <option ${l.status === 'Previsto' ? 'selected' : ''}>Previsto</option>
           <option ${l.status === 'Realizado' ? 'selected' : ''}>Realizado</option>
         </select>
@@ -3030,7 +3032,10 @@ function renderFin(){
       <td>${compCol}</td>
       <td>${nfCol}</td>
       <td>${esc(l.por)}</td>
-      <td><button class="del" onclick="deleteFin(${idx})" title="Remover lançamento">✕</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" style="padding:2px 6px" onclick="openLancModal('${id}')" title="Editar lançamento">✏️</button>
+        <button class="del" onclick="deleteFin('${id}')" title="Remover lançamento">✕</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -3038,17 +3043,27 @@ function renderFin(){
     <input type="checkbox" style="width:auto;margin-top:2px" ${m.done ? 'checked' : ''} onchange="DB.mutirao[${i}].done=this.checked;saveDB();renderFin()"> <span style="${m.done ? 'text-decoration:line-through' : ''}">${esc(m.t)}</span></label>`).join('');
 }
 
-function deleteFin(idx){
-  if(idx === undefined || idx === null || idx < 0 || idx >= DB.fin.length){
-    toast('⚠ Lançamento não encontrado');
-    return;
-  }
+/* Lançamentos são localizados pelo `_id`, não pela posição: a sincronização
+   reordena a lista quando traz registros de outro usuário, e um índice velho
+   apagaria ou alteraria o lançamento errado. */
+const finPorId = id => DB.fin.find(l => l && l._id === id);
+
+function setFinStatus(id, status){
+  const l = finPorId(id);
+  if(!l){ toast('⚠ Lançamento não encontrado'); renderFin(); return; }
+  l.status = status; saveDB(); renderFin(); updateNotifs();
+}
+
+function deleteFin(id){
+  const idx = DB.fin.findIndex(l => l && l._id === id);
+  if(idx < 0){ toast('⚠ Lançamento não encontrado'); return; }
   const item = DB.fin[idx];
-  const desc = item ? (item.desc || item.op || 'este lançamento') : 'este lançamento';
+  const desc = item.desc || item.op || 'este lançamento';
   if(confirm(`Deseja remover o lançamento "${desc}"?`)){
     DB.fin.splice(idx, 1);
     saveDB();
     renderFin();
+    updateNotifs();
     toast('Lançamento removido ✓');
   }
 }
@@ -3068,37 +3083,48 @@ function toggleNatLanc(isFixoStr){
   }
 }
 
-function openLancModal(pref){
-  const hjIso = new Date().toISOString().slice(0,10);
-  const opOptions = `<option value="WindGate">🏢 WindGate (Estrutura Fixa)</option>` +
-    (DB.ops || []).map(o=>`<option value="${esc(o.id)}" ${pref&&pref.op===o.id?'selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+/* Sem argumento cria um lançamento; com o `_id` de um lançamento, edita. */
+function openLancModal(id){
+  const l = (typeof id === 'string' && id) ? finPorId(id) : null;
+  if(typeof id === 'string' && id && !l){ toast('⚠ Lançamento não encontrado'); return; }
 
-  openModal(`<h3>Novo <span>lançamento financeiro</span></h3>
+  const hjIso = new Date().toISOString().slice(0,10);
+  const opAtual = l ? l.op : '';
+  const opOptions = `<option value="WindGate"${opAtual==='WindGate'?' selected':''}>🏢 WindGate (Estrutura Fixa)</option>` +
+    (DB.ops || []).map(o=>`<option value="${esc(o.id)}"${opAtual===o.id?' selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+  const sel = (a,b) => a===b ? ' selected' : '';
+  const fixo = l ? !!l.fixo : false;
+
+  openModal(`<h3>${l?'Editar':'Novo'} <span>lançamento financeiro</span></h3>
     <div class="frow">
-      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="toggleNatLanc(this.value)"><option value="false">Pontual / Operacional</option><option value="true">Fixa Mensal (WindGate)</option></select></div>
+      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="toggleNatLanc(this.value)"><option value="false"${fixo?'':' selected'}>Pontual / Operacional</option><option value="true"${fixo?' selected':''}>Fixa Mensal (WindGate)</option></select></div>
       <div><label>Vínculo / Operação</label><select id="m_lop">${opOptions}</select></div>
-      <div><label>Tipo</label><select id="m_ltipo"><option value="Despesa">Despesa (Contas a Pagar)</option><option value="Receita">Receita (Contas a Receber)</option></select></div>
+      <div><label>Tipo</label><select id="m_ltipo"><option value="Despesa"${sel(l&&l.tipo,'Despesa')}>Despesa (Contas a Pagar)</option><option value="Receita"${sel(l&&l.tipo,'Receita')}>Receita (Contas a Receber)</option></select></div>
     </div>
     <div class="frow">
-      <div><label>Data de Vencimento</label><input type="date" id="m_lvenc" value="${hjIso}"></div>
-      <div><label>Data de Lançamento</label><input type="date" id="m_ldata" value="${hjIso}"></div>
-      <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01" placeholder="0.00"></div>
+      <div><label>Data de Vencimento</label><input type="date" id="m_lvenc" value="${l?esc(l.vencimento||l.data||hjIso):hjIso}"></div>
+      <div><label>Data de Lançamento</label><input type="date" id="m_ldata" value="${l?esc(l.data||hjIso):hjIso}"></div>
+      <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01" value="${l?(+l.valor||0):''}" placeholder="0.00"></div>
     </div>
     <div class="frow">
-      <div><label>Status</label><select id="m_lst"><option>Previsto</option><option>Realizado</option></select></div>
-      <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
+      <div><label>Status</label><select id="m_lst"><option${sel(l&&l.status,'Previsto')}>Previsto</option><option${sel(l&&l.status,'Realizado')}>Realizado</option></select></div>
+      <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" value="${l?esc(l.desc||''):''}" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
     </div>
     <div class="frow">
-      <div style="grid-column:span 3"><label>Link do comprovante (Pagamento / Transferência / Boleto)</label><input id="m_lcomp" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
+      <div style="grid-column:span 3"><label>Link do comprovante (Pagamento / Transferência / Boleto)</label><input id="m_lcomp" value="${l?esc(l.comp||''):''}" placeholder="https://… (Drive/WhatsApp/Supabase)"></div>
     </div>
     <div class="frow">
-      <div style="grid-column:span 3"><label>🧾 Link da Nota Fiscal (opcional)</label><input id="m_lnf" placeholder="https://… (NF-e / NFS-e / XML / Drive)"></div>
+      <div style="grid-column:span 3"><label>🧾 Link da Nota Fiscal (opcional)</label><input id="m_lnf" value="${l?esc(l.nf||''):''}" placeholder="https://… (NF-e / NFS-e / XML / Drive)"></div>
     </div>
-    <div id="m_fixo_hint" class="note" style="display:none;color:#7FA6FF;margin-top:6px">🏢 <b>Despesa Fixa WindGate:</b> Não é vinculada a nenhuma operação. Atribuída diretamente à estrutura da WindGate e fixada no dia selecionado (${hjIso.slice(8,10)}) para todos os meses!</div>
-    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveLanc()">Lançar</button></div>`);
+    <div id="m_fixo_hint" class="note" style="display:${fixo?'block':'none'};color:#7FA6FF;margin-top:6px">🏢 <b>Despesa Fixa WindGate:</b> Não é vinculada a nenhuma operação. Atribuída diretamente à estrutura da WindGate e fixada no dia selecionado para todos os meses!</div>
+    ${l?`<p class="note" style="margin-top:8px">Lançado por <b>${esc(l.por||'—')}</b>. Editar não altera esse registro.</p>`:''}
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="saveLanc(${l?`'${esc(l._id)}'`:'null'})">${l?'Salvar':'Lançar'}</button>
+    </div>`);
 }
 
-function saveLanc(){
+function saveLanc(id){
   try {
     const rawVal = N('m_lval');
     if(!rawVal || rawVal <= 0){
@@ -3119,7 +3145,7 @@ function saveLanc(){
 
     if (!DB || !Array.isArray(DB.fin)) ensureDBStructure();
 
-    DB.fin.unshift({
+    const campos = {
       data: dataLanc,
       vencimento: vencLanc,
       op: opFinal,
@@ -3129,24 +3155,33 @@ function saveLanc(){
       valor: rawVal,
       status: status,
       comp: comp,
-      nf: nf,
-      por: uName
-    });
+      nf: nf
+    };
+
+    const existente = id ? finPorId(id) : null;
+    if(id && !existente){ toast('⚠ Lançamento não encontrado'); return; }
+
+    if(existente){
+      // mantém _id e quem lançou: é o mesmo registro, corrigido
+      Object.assign(existente, campos);
+    } else {
+      DB.fin.unshift(Object.assign({_id: novoId(), por: uName}, campos));
+    }
 
     saveDB();
     closeModal();
     renderFin();
     updateNotifs();
-    toast('Lançamento financeiro registrado ✓');
+    toast(existente ? 'Lançamento atualizado ✓' : 'Lançamento financeiro registrado ✓');
   } catch(err){
     console.error('Erro ao lançar financeiro:', err);
     toast('⚠ Erro ao salvar lançamento: ' + (err.message || 'verifique os campos'));
   }
 }
 
-function anexarComprovanteModal(idx){
-  const l = DB.fin[idx];
-  if(!l) return;
+function anexarComprovanteModal(id){
+  const l = finPorId(id);
+  if(!l){ toast("⚠ Lançamento não encontrado"); return; }
 
   const vDisp = l.vencimento ? l.vencimento.split('-').reverse().join('/') : (l.data ? l.data.split('-').reverse().join('/') : '—');
 
@@ -3158,7 +3193,7 @@ function anexarComprovanteModal(idx){
     <div class="frow">
       <div style="grid-column:span 3">
         <label>📁 Selecionar Arquivo do Comprovante / NF (PDF, Imagem, XLSX)</label>
-        <input type="file" id="m_fin_file" style="background:#171f33;padding:8px" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.zip,.rar" onchange="uploadFinComprovante(this.files[0], ${idx})">
+        <input type="file" id="m_fin_file" style="background:#171f33;padding:8px" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.zip,.rar" onchange="uploadFinComprovante(this.files[0], '${esc(l._id)}')">
         <div id="m_fin_upload_status" style="font-size:12px;margin-top:6px"></div>
       </div>
     </div>
@@ -3170,11 +3205,11 @@ function anexarComprovanteModal(idx){
     </div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-mag" onclick="salvarFinComprovanteLink(${idx})">Salvar Comprovante</button>
+      <button class="btn btn-mag" onclick="salvarFinComprovanteLink('${esc(l._id)}')">Salvar Comprovante</button>
     </div>`);
 }
 
-async function uploadFinComprovante(file, idx){
+async function uploadFinComprovante(file, id){
   if(!file) return;
   const st = $('m_fin_upload_status');
   st.style.color = '#7FA6FF';
@@ -3186,10 +3221,10 @@ async function uploadFinComprovante(file, idx){
     st.style.color = '#34C77C';
     st.textContent = '✓ Comprovante salvo com sucesso (' + res.source + ')!';
 
-    DB.fin[idx].comp = res.url;
-    if (DB.fin[idx].status === 'Previsto') {
-      DB.fin[idx].status = 'Realizado';
-    }
+    const l = finPorId(id);
+    if(!l){ toast('⚠ Lançamento não encontrado'); return; }
+    l.comp = res.url;
+    if (l.status === 'Previsto') l.status = 'Realizado';
     saveDB();
     renderFin();
     toast('Comprovante vinculado e status atualizado para Realizado ✓');
@@ -3199,21 +3234,21 @@ async function uploadFinComprovante(file, idx){
   }
 }
 
-function salvarFinComprovanteLink(idx){
+function salvarFinComprovanteLink(id){
   const link = V('m_fin_link').trim();
-  DB.fin[idx].comp = link;
-  if(link && DB.fin[idx].status === 'Previsto'){
-    DB.fin[idx].status = 'Realizado';
-  }
+  const l = finPorId(id);
+  if(!l){ toast('⚠ Lançamento não encontrado'); return; }
+  l.comp = link;
+  if(link && l.status === 'Previsto') l.status = 'Realizado';
   saveDB();
   closeModal();
   renderFin();
   toast('Comprovante salvo ✓');
 }
 
-function anexarNFModal(idx){
-  const l = DB.fin[idx];
-  if(!l) return;
+function anexarNFModal(id){
+  const l = finPorId(id);
+  if(!l){ toast("⚠ Lançamento não encontrado"); return; }
   const vDisp = l.vencimento ? l.vencimento.split('-').reverse().join('/') : (l.data ? l.data.split('-').reverse().join('/') : '—');
 
   openModal(`<h3>🧾 Nota Fiscal — <span>${esc(l.desc || l.op)}</span></h3>
@@ -3225,7 +3260,7 @@ function anexarNFModal(idx){
     <div class="frow">
       <div style="grid-column:span 3">
         <label>📁 Selecionar Arquivo da Nota Fiscal (PDF, XML, Imagem)</label>
-        <input type="file" id="m_fin_nf_file" style="background:#171f33;padding:8px" accept=".pdf,.xml,.png,.jpg,.jpeg,.xlsx,.csv,.zip" onchange="uploadFinNF(this.files[0], ${idx})">
+        <input type="file" id="m_fin_nf_file" style="background:#171f33;padding:8px" accept=".pdf,.xml,.png,.jpg,.jpeg,.xlsx,.csv,.zip" onchange="uploadFinNF(this.files[0], '${esc(l._id)}')">
         <div id="m_fin_nf_status" style="font-size:12px;margin-top:6px"></div>
       </div>
     </div>
@@ -3237,12 +3272,12 @@ function anexarNFModal(idx){
     </div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      ${l.nf ? `<button class="btn btn-danger" onclick="if(${idx}>=0){DB.fin[${idx}].nf='';saveDB();closeModal();renderFin();toast('Nota Fiscal removida')}">Remover NF</button>` : ''}
-      <button class="btn btn-mag" style="background:#D97706" onclick="salvarFinNFLink(${idx})">Salvar Nota Fiscal</button>
+      ${l.nf ? `<button class="btn btn-danger" onclick="removerFinNF('${esc(l._id)}')">Remover NF</button>` : ''}
+      <button class="btn btn-mag" style="background:#D97706" onclick="salvarFinNFLink('${esc(l._id)}')">Salvar Nota Fiscal</button>
     </div>`);
 }
 
-async function uploadFinNF(file, idx){
+async function uploadFinNF(file, id){
   if(!file) return;
   const st = $('m_fin_nf_status');
   st.style.color = '#F0B429';
@@ -3253,7 +3288,9 @@ async function uploadFinNF(file, idx){
     $('m_fin_nf_link').value = res.url;
     st.style.color = '#34C77C';
     st.textContent = '✓ Nota Fiscal salva com sucesso (' + res.source + ')!';
-    DB.fin[idx].nf = res.url;
+    const l = finPorId(id);
+    if(!l){ toast('⚠ Lançamento não encontrado'); return; }
+    l.nf = res.url;
     saveDB();
     renderFin();
     toast('Nota Fiscal vinculada ✓');
@@ -3263,14 +3300,23 @@ async function uploadFinNF(file, idx){
   }
 }
 
-function salvarFinNFLink(idx){
+function salvarFinNFLink(id){
   const link = V('m_fin_nf_link').trim();
   if(!link){ toast('⚠ Informe a URL ou faça o upload da NF'); return; }
-  DB.fin[idx].nf = link;
+  const l = finPorId(id);
+  if(!l){ toast('⚠ Lançamento não encontrado'); return; }
+  l.nf = link;
   saveDB();
   closeModal();
   renderFin();
   toast('Nota Fiscal salva ✓');
+}
+
+function removerFinNF(id){
+  const l = finPorId(id);
+  if(!l){ toast('⚠ Lançamento não encontrado'); return; }
+  l.nf = '';
+  saveDB(); closeModal(); renderFin(); toast('Nota Fiscal removida');
 }
 
 /* ---------- CONFIG ---------- */
