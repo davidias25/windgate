@@ -712,6 +712,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
   <div id="clickupAviso" style="display:none;background:#FF5A6E22;border:1px solid #FF5A6E66;color:#FFB4BE;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
   <div class="stats-row" id="opStats"></div>
+  <div class="card" id="docsSemOp" style="display:none;margin-bottom:14px"></div>
   <div class="ops-grid" id="opsGrid"></div>
   <div class="empty" id="opsEmpty" style="display:none">Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.</div>
 </section>
@@ -908,23 +909,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
 </section>
 
-<!-- ========== DOCUMENTAÇÃO ========== -->
-<section class="view" id="view-docs">
-  <div class="view-head">
-    <div><h1>Documenta<span>ção</span></h1><p>Registro central de documentos por operação — com link (Drive/ClickUp/e-mail) e status. Fonte única, nada se perde.</p></div>
-    <div class="hd-actions">
-      <button class="btn btn-ghost" onclick="abrirRecuperacaoStorage()">📥 Recuperar do Supabase</button>
-      <button class="btn btn-mag" onclick="openDocModal()">+ Registrar documento</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Arquivo geral <span class="spacer"></span><select id="docFilter" style="width:210px" onchange="renderDocs()"></select></h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Operação</th><th>Documento</th><th>Categoria</th><th>Link</th><th>Status</th><th>Registrado por</th><th>Obs</th><th></th></tr></thead><tbody id="docsBody"></tbody></table></div>
-    <div class="empty" id="docsEmpty" style="display:none">Nenhum documento registrado ainda. Use <b>+ Registrar documento</b>.</div>
-  </div>
-  <div class="rulebox"><b>Como usar:</b> todo documento que chegar (WhatsApp, e-mail, despachante) é registrado aqui no mesmo dia, com o link de onde ele está guardado. O checklist da operação marca o andamento; aqui fica o arquivo permanente.</div>
-</section>
-
 <!-- ========== FRETES ========== -->
 <section class="view" id="view-frete">
   <div class="view-head">
@@ -1111,6 +1095,21 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('todos')">Todos</button>
       <button class="btn btn-mag" onclick="openLancModal()">+ Novo Lançamento</button>
     </div>
+  </div>
+
+  <!-- Planilha de custos geral da empresa (Google Sheets embutido) -->
+  <div class="card">
+    <h2>📊 Planilha de custos <span class="spacer"></span>
+      <button class="btn btn-ghost btn-sm" onclick="togglePlanilhaGeral()">⚙️ Link</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirRecuperacaoStorage()">📥 Recuperar do Supabase</button>
+    </h2>
+    <div id="planilhaGeralBox" style="display:none" class="frow">
+      <div style="grid-column:span 3"><label>Link do Google Sheets</label>
+        <input id="planilhaGeralUrl" placeholder="https://docs.google.com/spreadsheets/d/…" onchange="salvarPlanilhaGeral(this.value)">
+        <p class="note" style="margin-top:6px">A planilha precisa estar compartilhada (“qualquer pessoa com o link”) para aparecer aqui.</p>
+      </div>
+    </div>
+    <div id="planilhaGeralView"></div>
   </div>
 
   <!-- Dashboard de Cards Métricos (Solicitados pelo Usuário) -->
@@ -1328,13 +1327,13 @@ function defaultDB(){
   return {
     users:{
       samir:  {nome:'Samir Fernandes', papel:'Fundador · Direção Geral',      pin:'2012', cor:'#E91E63', fin:true,  aprova:true,  config:true,
-               tabs:['painel','mapa','cotacoes','checklist','docs','frete','sourcing','agenda','gestao','fin','org','config']},
+               tabs:['painel','mapa','cotacoes','checklist','frete','sourcing','agenda','gestao','fin','org','config']},
       davi:   {nome:'Davi',            papel:'Líder Operacional · Pricing & NF', pin:'2020', cor:'#2563EB', fin:true,  aprova:false, config:false,
-               tabs:['painel','mapa','cotacoes','checklist','docs','frete','sourcing','agenda','gestao','fin','org']},
+               tabs:['painel','mapa','cotacoes','checklist','frete','sourcing','agenda','gestao','fin','org']},
       ivina:  {nome:'Ívina',           papel:'Comunicação · Docs & Atendimento', pin:'2026', cor:'#E91E63', fin:false, aprova:false, config:false,
-               tabs:['painel','mapa','checklist','docs','frete','sourcing','agenda','gestao','org']},
+               tabs:['painel','mapa','checklist','frete','sourcing','agenda','gestao','org']},
       matheus:{nome:'Matheus',         papel:'Estagiário · Frete & Tracking', pin:'2025', cor:'#34C77C', fin:false, aprova:false, config:false,
-               tabs:['painel','mapa','frete','checklist','docs','agenda','gestao','org']}
+               tabs:['painel','mapa','frete','checklist','agenda','gestao','org']}
     },
     ops:[
       {id:'OP10', nome:'Escoras',            cliente:'Escoras/Score',   status:'logistica',  prox:'Atualizar status', resp:'Matheus', obs:''},
@@ -1654,6 +1653,22 @@ function migrateDB(){
     Object.values(DB.checklists || {}).forEach(l => (l || []).forEach(it => { if (it.prazo === undefined) it.prazo = ''; if (it.link === undefined) it.link = ''; }));
     DB.settings.schema = 4; ch = true;
   }
+  if ((DB.settings.schema || 4) < 5) {
+    // A aba Docs deixou de existir: os documentos passam a viver dentro da
+    // operação, divididos em blocos. Classifica o que já estava lançado.
+    (DB.docs || []).forEach(d => {
+      if (!d || d.grupo) return;
+      const m = DOC_CAT_LEGADO[d.cat];
+      if (m) { d.grupo = m[0]; d.cat = m[1]; }
+      else d.grupo = 'outros';
+    });
+    // Tira 'docs' da barra de abas de quem já tinha o perfil salvo, senão o
+    // botão apontaria para uma tela que não existe mais.
+    Object.values(DB.users || {}).forEach(u => {
+      if (u && Array.isArray(u.tabs)) u.tabs = u.tabs.filter(t => t !== 'docs');
+    });
+    DB.settings.schema = 5; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -1725,7 +1740,6 @@ const TABS=[
   {k:'mapa',     ic:'🗺️', l:'Mapa'},
   {k:'cotacoes', ic:'🧮', l:'Cotações'},
   {k:'checklist',ic:'✅', l:'Checklist'},
-  {k:'docs',     ic:'📁', l:'Docs'},
   {k:'frete',    ic:'🚢', l:'Fretes'},
   {k:'sourcing', ic:'🔍', l:'Sourcing'},
   {k:'agenda',   ic:'📅', l:'Agenda'},
@@ -1800,7 +1814,6 @@ function showTab(k){
   if(k==='painel') renderOps();
   if(k==='cotacoes'){ refreshSaved(); if(!state.items||!state.items.length) addItem(); else renderItems(); updateApprovalUI(); }
   if(k==='checklist') { fillOpSelect('chkOpSel'); renderChecklist(); }
-  if(k==='docs') renderDocs();
   if(k==='frete') renderFrete();
   if(k==='sourcing') renderForn();
   if(k==='fin') renderFin();
@@ -1843,6 +1856,7 @@ function renderOps(){
       const m=stMeta(o.status)||STATUS_OP[0];
       const d=document.createElement('div'); d.className='op-card'; d.style.setProperty('--stc',m.c||'#2563EB');
       const pct = opPct(o.id);
+      const nDocs = docsDaOp(o.id).length;
       d.innerHTML=`<div class="oh"><div><div class="oid">${esc(o.id||'OP')}</div><div class="onm">${esc(o.nome||'Operação')}</div></div>
         <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span></div>
         <div class="od">
@@ -1851,13 +1865,45 @@ function renderOps(){
           <span>🧑‍💼 Resp.: <b>${esc(o.resp||'—')}</b>${o.obs?` &nbsp;·&nbsp; 📝 ${esc(o.obs)}`:''}</span>
           ${o.clickupUrl?`<span>🔗 ClickUp: <a href="${esc(o.clickupUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7FA6FF">${esc(o.statusClickUp||'abrir tarefa')}</a></span>`:''}
         </div>
-        <div class="op-prog"><div class="tr"><div style="width:${pct}%"></div></div><span>${pct}% docs</span></div>`;
+        <div class="op-prog"><div class="tr"><div style="width:${pct}%"></div></div><span>${pct}% docs</span></div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openOpDocsModal('${esc(o.id)}')">📁 Documentos (${nDocs})</button>
+          ${o.planilhaUrl?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openOpDocsModal('${esc(o.id)}')">📊 Custos</button>`:''}
+        </div>`;
       d.onclick=()=>openOpModal(o.id);
       g.appendChild(d);
     });
+    renderDocsSemOp();
   } catch(err) {
     console.error('Erro ao renderizar Torre de Controle:', err);
   }
+}
+
+/* Documentos que não estão vinculados a nenhuma operação ficariam invisíveis
+   agora que a aba Docs não existe. Aparecem aqui até serem vinculados. */
+function renderDocsSemOp(){
+  const box=$('docsSemOp'); if(!box) return;
+  const soltos=(DB.docs||[]).filter(d=>d && !d.op);
+  if(!soltos.length){ box.style.display='none'; return; }
+  box.style.display='block';
+  box.innerHTML=`<h2>📎 Documentos sem operação <span class="spacer"></span><span class="note">${soltos.length} — escolha a operação de cada um</span></h2>
+    ${soltos.map(d=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#131B2E;border-radius:6px;margin-top:5px">
+      <span style="flex:1;font-size:12px">${esc(d.nome||'(sem nome)')}</span>
+      ${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF;font-size:11px">abrir ↗</a>`:''}
+      <select style="width:190px;padding:3px 6px;font-size:11px" onchange="vincularDocOp('${esc(d._id)}',this.value)">
+        ${opcoesOperacaoDoc('')}
+      </select>
+      <button class="del" title="excluir" onclick="deleteDoc('${esc(d._id)}')">✕</button>
+    </div>`).join('')}`;
+}
+
+function vincularDocOp(id,op){
+  if(!op) return;
+  const d=DB.docs.find(x=>x && x._id===id);
+  if(!d) return;
+  d.op=op;
+  if(!d.grupo) d.grupo='outros';
+  saveDB(); renderOps(); toast(`Documento vinculado a <b>${esc(op)}</b> ✓`);
 }
 function opPct(opId){
   if(!DB || !DB.checklists) return 0;
@@ -2063,7 +2109,7 @@ function syncChkDoc(op,it){
   const map={coletado:'recebido',revisado:'revisado',aprovado:'aprovado',pendente:'pendente',na:'pendente'};
   const ex=DB.docs.find(d=>d.op===op&&d.nome===it.titulo);
   if(ex){ ex.link=it.link; ex.status=map[it.status]||'recebido'; }
-  else DB.docs.unshift({_id:novoId(),op,nome:it.titulo,cat:'Checklist',link:it.link,status:map[it.status]||'recebido',por:it.coletadoPor||(USER?USER.nome.split(' ')[0]:''),obs:'via checklist',data:hoje()});
+  else DB.docs.unshift({_id:novoId(),op,grupo:'outros',nome:it.titulo,cat:it.titulo,link:it.link,status:map[it.status]||'recebido',por:it.coletadoPor||(USER?USER.nome.split(' ')[0]:''),obs:'via checklist',data:hoje()});
 }
 function chkCobranca(){
   const op=$('chkOpSel').value; if(!op) return;
@@ -2088,23 +2134,147 @@ function addChkItem(){
 }
 
 /* ---------- DOCUMENTAÇÃO ---------- */
-const DOC_CATS=['Contrato','Invoice','Packing List','BL','Seguro','Câmbio','DI/DUIMP','NF','ICMS/GNRE','Frete','Outros'];
-function renderDocs(){
-  fillOpSelect('docFilter',true);
-  const f=$('docFilter').value;
-  const rows=DB.docs.filter(d=>!f||d.op===f);
-  $('docsEmpty').style.display=rows.length?'none':'block';
-  $('docsBody').innerHTML=rows.map((d,i)=>{
-    const stP={pendente:'draft',recebido:'blue',revisado:'teal',aprovado:'ok'}[d.status]||'draft';
-    const opRot = d.op==='WindGate' ? '🏢 WindGate' : (d.op || '— sem operação —');
-    return `<tr><td><b>${esc(opRot)}</b></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
-      <td>${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF">abrir ↗</a>`:'—'}</td>
-      <td><span class="pill ${stP}">${esc(d.status)}</span></td><td>${esc(d.por)}</td><td class="note">${esc(d.obs||'')}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" title="editar" onclick="openDocModal('${esc(d._id||'')}')">✏️</button>
-        <button class="del" title="excluir" onclick="deleteDoc('${esc(d._id||'')}')">✕</button>
-      </td></tr>`;
+/* Documentos vivem dentro da operação, organizados em dois blocos com os tipos
+   padrão. Cada tipo aceita mais de um arquivo, e cada bloco aceita documentos
+   avulsos com nome livre. "Outros" existe para o que não pertence a nenhum dos
+   dois blocos — é onde caem os documentos antigos que não tinham essa divisão. */
+const DOC_GRUPOS=[
+  {k:'embarque', l:'Docs de embarque', ic:'📦', tipos:['Invoice','Packing List','BL']},
+  {k:'chegada',  l:'Docs de chegada',  ic:'🛬', tipos:['DUIMP','AFRMM','NF de Entrada','NF de Saída']},
+  {k:'outros',   l:'Outros documentos',ic:'📎', tipos:[]}
+];
+const grupoMeta = k => DOC_GRUPOS.find(g=>g.k===k) || DOC_GRUPOS[2];
+
+/* Categorias antigas → bloco e tipo novos, para nenhum documento já lançado
+   ficar órfão quando a aba Docs deixa de existir. */
+const DOC_CAT_LEGADO={
+  'Invoice':['embarque','Invoice'],
+  'Packing List':['embarque','Packing List'],
+  'BL':['embarque','BL'],
+  'DI/DUIMP':['chegada','DUIMP'],
+  'DUIMP':['chegada','DUIMP'],
+  'AFRMM':['chegada','AFRMM'],
+  'NF':['chegada','NF de Entrada']
+};
+const docsDaOp = op => DB.docs.filter(d=>d && d.op===op);
+
+/* A migração grava `grupo` em cada documento, mas ela roda no navegador de cada
+   usuário. Enquanto alguém ainda não abriu a versão nova, o bloco é deduzido da
+   categoria antiga — assim uma Invoice nunca aparece em "Outros" por um tempo. */
+const grupoDoDoc = d => (d && d.grupo) || (DOC_CAT_LEGADO[d && d.cat] || [])[0] || 'outros';
+const PILL_ST = {pendente:'draft',recebido:'blue',revisado:'teal',aprovado:'ok'};
+
+/* Uma linha de documento dentro do painel da operação. */
+function linhaDoc(d){
+  return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#131B2E;border-radius:6px;margin-top:4px">
+    <span style="flex:1;font-size:12px;color:#E7ECF7">${esc(d.nome||'(sem nome)')}</span>
+    <span class="pill ${PILL_ST[d.status]||'draft'}">${esc(d.status||'pendente')}</span>
+    <span style="font-size:10px;color:var(--mut2);white-space:nowrap">${esc(d.por||'—')} · ${esc(d.data||'')}</span>
+    ${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF;font-size:11px">abrir ↗</a>`:'<span class="note" style="font-size:10px">sem arquivo</span>'}
+    <button class="btn btn-ghost btn-sm" title="editar" onclick="openDocModal('${esc(d._id)}')">✏️</button>
+    <button class="del" title="excluir" onclick="deleteDoc('${esc(d._id)}')">✕</button>
+  </div>`;
+}
+
+/* Painel de documentos de uma operação: blocos fixos, tipos padrão que aceitam
+   vários arquivos, documentos avulsos com nome livre e a planilha de custos. */
+function openOpDocsModal(op){
+  const o = DB.ops.find(x=>x && x.id===op);
+  const todos = docsDaOp(op);
+
+  const blocos = DOC_GRUPOS.map(g=>{
+    const doGrupo = todos.filter(d=>grupoDoDoc(d)===g.k);
+    // tipos padrão + os nomes avulsos que já existem neste bloco
+    const avulsos = [...new Set(doGrupo.map(d=>d.cat).filter(c=>c && !g.tipos.includes(c)))];
+    const tipos = [...g.tipos, ...avulsos];
+    if(g.k==='outros' && !tipos.length && !doGrupo.length) return '';
+
+    const linhas = tipos.map(t=>{
+      const docs = doGrupo.filter(d=>d.cat===t);
+      const padrao = g.tipos.includes(t);
+      return `<div style="margin-top:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <b style="font-size:12px;color:${docs.length?'#fff':'var(--mut2)'}">${esc(t)}</b>
+          ${padrao?'':'<span class="pill draft" style="font-size:9px">avulso</span>'}
+          <span style="font-size:10px;color:var(--mut2)">${docs.length?docs.length+' arquivo(s)':'nenhum arquivo'}</span>
+          <span class="spacer"></span>
+          <button class="btn btn-ghost btn-sm" onclick="openDocModal(null,'${esc(op)}','${g.k}',${JSON.stringify(t).replace(/"/g,'&quot;')})">+ anexar</button>
+        </div>
+        ${docs.map(linhaDoc).join('')}
+      </div>`;
+    }).join('');
+
+    return `<div class="grouph" style="margin-top:16px">${g.ic} ${g.l.toUpperCase()}</div>
+      ${linhas || '<p class="note">Nenhum documento neste bloco.</p>'}
+      <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="novoTipoDoc('${esc(op)}','${g.k}')">+ outro documento</button></div>`;
   }).join('');
+
+  const url = o && o.planilhaUrl;
+  const emb = url ? urlPlanilhaEmbed(url) : '';
+
+  openModal(`<h3>📁 Documentos — <span>${esc(op||'sem operação')}</span>${o?` · ${esc(o.nome||'')}`:''}</h3>
+    ${blocos}
+    <div class="grouph" style="margin-top:18px">📊 PLANILHA DE CUSTOS</div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>Link do Google Sheets desta operação</label>
+        <input id="m_planilha" value="${esc(url||'')}" placeholder="https://docs.google.com/spreadsheets/d/…">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost btn-sm" onclick="salvarPlanilhaOp('${esc(op)}')">Salvar link</button>
+      ${url?`<a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank">abrir no Google ↗</a>`:''}
+    </div>
+    ${emb?`<iframe src="${esc(emb)}" style="width:100%;height:420px;border:1px solid #23304F;border-radius:8px;margin-top:10px;background:#fff"></iframe>`
+         :url?'<p class="note" style="margin-top:8px">⚠ Link não reconhecido como Google Sheets.</p>':''}
+    <div class="modal-actions" style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+}
+
+/* Planilha de custos geral — a do financeiro, uma para a empresa toda. */
+function togglePlanilhaGeral(){
+  const b=$('planilhaGeralBox'); if(!b) return;
+  b.style.display = b.style.display==='none' ? 'grid' : 'none';
+}
+function salvarPlanilhaGeral(url){
+  DB.settings=DB.settings||{};
+  DB.settings.planilhaCustosUrl=String(url||'').trim();
+  saveDB(); renderPlanilhaGeral(); toast('Planilha de custos vinculada ✓');
+}
+function renderPlanilhaGeral(){
+  const box=$('planilhaGeralView'); if(!box) return;
+  const url=(DB.settings&&DB.settings.planilhaCustosUrl)||'';
+  const inp=$('planilhaGeralUrl'); if(inp && !inp.value) inp.value=url;
+  if(!url){ box.innerHTML='<p class="note">Nenhuma planilha vinculada. Clique em <b>⚙️ Link</b> e cole o endereço do Google Sheets.</p>'; return; }
+  const emb=urlPlanilhaEmbed(url);
+  box.innerHTML = emb
+    ? `<iframe src="${esc(emb)}" style="width:100%;height:560px;border:1px solid #23304F;border-radius:8px;background:#fff"></iframe>
+       <p class="note" style="margin-top:6px"><a href="${esc(url)}" target="_blank" style="color:#7FA6FF">abrir no Google Sheets ↗</a></p>`
+    : `<p class="note">⚠ O link informado não é uma planilha do Google Sheets.</p>`;
+}
+
+/* Google Sheets só embute pela URL de preview; a de edição é bloqueada. */
+function urlPlanilhaEmbed(url){
+  const u=String(url||'').trim();
+  if(!/docs\.google\.com\/spreadsheets/.test(u)) return '';
+  if(/\/pubhtml|\/preview|widget=true/.test(u)) return u;
+  const m=u.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if(!m) return '';
+  const gid=(u.match(/[#&?]gid=(\d+)/)||[])[1];
+  return `https://docs.google.com/spreadsheets/d/${m[1]}/preview${gid?'?gid='+gid:''}`;
+}
+
+function salvarPlanilhaOp(op){
+  const o=DB.ops.find(x=>x && x.id===op);
+  if(!o){ toast('⚠ Operação não encontrada'); return; }
+  o.planilhaUrl=V('m_planilha').trim();
+  saveDB(); openOpDocsModal(op); toast('Planilha vinculada ✓');
+}
+
+/* Documento avulso: o usuário dá o nome do tipo e o fluxo segue igual. */
+function novoTipoDoc(op,grupo){
+  const nome=prompt('Nome do documento (ex.: Certificado de Origem):');
+  if(!nome || !nome.trim()) return;
+  // aspas quebrariam o handler inline montado no painel
+  openDocModal(null,op,grupo,nome.trim().replace(/["'\\]/g,''));
 }
 
 /* Opções de operação de um documento. Além das OPs, existe a WindGate —
@@ -2192,14 +2362,14 @@ function importarArquivosStorage(){
     if(!c || !c.checked) return;
     const op=$('recop_'+i) ? $('recop_'+i).value : '';
     DB.docs.unshift({
-      _id:novoId(), op, nome:a.nomeOriginal, cat:'Recuperado', link:a.url,
+      _id:novoId(), op, grupo:'outros', nome:a.nomeOriginal, cat:a.nomeOriginal, link:a.url,
       status:'recebido', por:USER?USER.nome.split(' ')[0]:'', obs:'recuperado do Supabase Storage',
       data:a.enviadoEm?a.enviadoEm.slice(0,10):hoje()
     });
     n++;
   });
   if(!n){ toast('⚠ Nenhum arquivo selecionado'); return; }
-  saveDB(); closeModal(); renderDocs();
+  saveDB(); closeModal(); renderOps();
   toast(`<b>${n}</b> documento(s) recuperado(s) do Supabase ✓`);
 }
 
@@ -2210,11 +2380,12 @@ async function deleteDoc(id){
   const d = DB.docs[idx];
   if(!d) return;
 
-  const targetLink = d.link;
+  const targetLink = d.link, opDoc = d.op;
   DB.docs.splice(idx, 1);
   saveDB();
-  renderDocs();
   toast('Documento removido');
+  if(opDoc) openOpDocsModal(opDoc);
+  renderOps();
 
   if(targetLink && (targetLink.includes('supabase.co') || targetLink.includes('/uploads/'))){
     try {
@@ -2226,21 +2397,28 @@ async function deleteDoc(id){
     } catch(e){}
   }
 }
-/* Serve para registrar (sem id) e para editar (com o _id do documento). */
-function openDocModal(id){
+/* Registrar (sem id, recebendo operação/bloco/tipo do painel) ou editar (com id). */
+function openDocModal(id, op, grupo, tipo){
   const d = id ? DB.docs.find(x=>x && x._id===id) : null;
   if(id && !d){ toast('⚠ Documento não encontrado'); return; }
 
-  const cats = DOC_CATS.includes(d&&d.cat) || !d || !d.cat ? DOC_CATS : [d.cat, ...DOC_CATS];
+  const opAtual = d ? (d.op||'') : (op||'');
+  const grAtual = d ? (d.grupo||'outros') : (grupo||'outros');
+  const tpAtual = d ? (d.cat||'') : (tipo||'');
   const st = d ? d.status : 'pendente';
+  // o nome já vem sugerido pelo tipo; continua editável
+  const nome = d ? (d.nome||'') : (tipo||'');
 
-  openModal(`<h3>${d?'Editar':'Registrar'} <span>documento</span></h3>
+  openModal(`<h3>${d?'Editar':'Anexar'} <span>documento</span></h3>
     <div class="frow">
-      <div><label>Operação</label><select id="m_dop">${opcoesOperacaoDoc(d?d.op:'')}</select></div>
-      <div><label>Categoria</label><select id="m_dcat">${cats.map(c=>`<option${d&&d.cat===c?' selected':''}>${esc(c)}</option>`).join('')}</select></div>
+      <div><label>Operação</label><select id="m_dop">${opcoesOperacaoDoc(opAtual)}</select></div>
+      <div><label>Bloco</label><select id="m_dgrupo">${DOC_GRUPOS.map(g=>`<option value="${g.k}"${grAtual===g.k?' selected':''}>${g.ic} ${esc(g.l)}</option>`).join('')}</select></div>
+      <div><label>Tipo</label><input id="m_dcat" value="${esc(tpAtual)}" placeholder="Invoice, BL, DUIMP…" list="lista_tipos_doc">
+        <datalist id="lista_tipos_doc">${DOC_GRUPOS.flatMap(g=>g.tipos).map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+      </div>
       <div><label>Status</label><select id="m_dst">${['pendente','recebido','revisado','aprovado'].map(s=>`<option${st===s?' selected':''}>${s}</option>`).join('')}</select></div>
     </div>
-    <div class="frow"><div style="grid-column:span 2"><label>Nome do documento</label><input id="m_dnome" value="${d?esc(d.nome||''):''}" placeholder="Ex.: BL Original MSC"></div>
+    <div class="frow"><div style="grid-column:span 2"><label>Nome do documento</label><input id="m_dnome" value="${esc(nome)}" placeholder="Ex.: BL Original MSC"></div>
     <div><label>Link (URL do Arquivo / Supabase / Drive)</label><input id="m_dlink" value="${d?esc(d.link||''):''}" placeholder="Preenchido automaticamente ao anexar arquivo"></div></div>
     <div class="frow">
       <div style="grid-column:span 3">
@@ -2251,8 +2429,8 @@ function openDocModal(id){
     </div>
     <div class="frow"><div><label>Observação</label><input id="m_dobs" value="${d?esc(d.obs||''):''}"></div></div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-mag" onclick="saveDoc(${d?`'${esc(d._id)}'`:'null'})">${d?'Salvar':'Registrar'}</button>
+      <button class="btn btn-ghost" onclick="${opAtual?`openOpDocsModal('${esc(opAtual)}')`:'closeModal()'}">Cancelar</button>
+      <button class="btn btn-mag" onclick="saveDoc(${d?`'${esc(d._id)}'`:'null'})">${d?'Salvar':'Anexar'}</button>
     </div>`);
 }
 
@@ -2276,7 +2454,8 @@ async function uploadDocFile(file){
 
 function saveDoc(id){
   if(!V('m_dnome')){ toast('⚠ Nome do documento'); return; }
-  const campos={op:V('m_dop'),nome:V('m_dnome'),cat:V('m_dcat'),link:V('m_dlink'),status:V('m_dst'),obs:V('m_dobs')};
+  const campos={op:V('m_dop'),grupo:V('m_dgrupo'),nome:V('m_dnome'),cat:V('m_dcat')||V('m_dnome'),
+    link:V('m_dlink'),status:V('m_dst'),obs:V('m_dobs')};
 
   const existente = id ? DB.docs.find(x=>x && x._id===id) : null;
   if(id && !existente){ toast('⚠ Documento não encontrado'); return; }
@@ -2287,7 +2466,11 @@ function saveDoc(id){
   } else {
     DB.docs.unshift(Object.assign({_id:novoId(),por:USER.nome.split(' ')[0],data:hoje()},campos));
   }
-  saveDB(); closeModal(); renderDocs(); toast(existente?'Documento atualizado ✓':'Documento registrado ✓');
+  saveDB();
+  toast(existente?'Documento atualizado ✓':'Documento anexado ✓');
+  // volta para o painel da operação de onde veio
+  if(campos.op) openOpDocsModal(campos.op); else closeModal();
+  renderOps();
 }
 
 /* ---------- FRETES ---------- */
@@ -2663,6 +2846,7 @@ function getISOWeekBounds(){
 
 function renderFin(){
   if(!USER.fin){ return; }
+  renderPlanilhaGeral();
   fillOpSelect('finFilter', true);
 
   const hjISO = new Date().toISOString().slice(0, 10);
@@ -3201,7 +3385,7 @@ function computeNotifs(){
     Object.entries(DB.checklists).forEach(([op,list])=>list.forEach(it=>{
       if(it.status==='coletado') n.push({tab:'checklist',ic:'✅',tx:`<b>${esc(it.titulo)}</b> (${esc(op)}) coletado por ${esc(it.coletadoPor||'—')} — aguarda <b>revisão</b>`,tg:'Checklist'});
     }));
-    DB.docs.filter(d=>d.status==='recebido'&&d.cat!=='Checklist').forEach(d=>n.push({tab:'docs',ic:'📁',tx:`<b>${esc(d.nome)}</b> (${esc(d.op)}) recebido — revisar`,tg:'Documentação'}));
+    DB.docs.filter(d=>d.status==='recebido'&&d.cat!=='Checklist').forEach(d=>n.push({tab:'painel',ic:'📁',tx:`<b>${esc(d.nome)}</b> (${esc(d.op)}) recebido — revisar`,tg:'Documentação'}));
   }
   DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.prazo&&t.prazo<=hj).forEach(t=>{
     n.push({tab:'agenda',ic:'📅',tx:`Tarefa <b>${esc(t.t)}</b> ${t.prazo<hj?'<b style="color:var(--red)">vencida</b>':'vence hoje'}`,tg:'Agenda'});
