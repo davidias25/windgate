@@ -2096,21 +2096,24 @@ function renderDocs(){
   $('docsEmpty').style.display=rows.length?'none':'block';
   $('docsBody').innerHTML=rows.map((d,i)=>{
     const stP={pendente:'draft',recebido:'blue',revisado:'teal',aprovado:'ok'}[d.status]||'draft';
-    return `<tr><td><select style="width:150px;padding:3px 6px;font-size:11px" onchange="docSetOp('${esc(d._id||'')}',this.value)">
-        <option value=""${!d.op?' selected':''}>— sem operação —</option>
-        ${DB.ops.map(o=>`<option value="${esc(o.id)}"${d.op===o.id?' selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}
-      </select></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
+    const opRot = d.op==='WindGate' ? '🏢 WindGate' : (d.op || '— sem operação —');
+    return `<tr><td><b>${esc(opRot)}</b></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
       <td>${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF">abrir ↗</a>`:'—'}</td>
       <td><span class="pill ${stP}">${esc(d.status)}</span></td><td>${esc(d.por)}</td><td class="note">${esc(d.obs||'')}</td>
-      <td><button class="del" onclick="deleteDoc('${esc(d._id||'')}')">✕</button></td></tr>`;
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" title="editar" onclick="openDocModal('${esc(d._id||'')}')">✏️</button>
+        <button class="del" title="excluir" onclick="deleteDoc('${esc(d._id||'')}')">✕</button>
+      </td></tr>`;
   }).join('');
 }
-/* Permite atribuir a operação direto na tabela — documentos recuperados do
-   Storage chegam sem operação, e antes não havia como definir depois. */
-function docSetOp(id, op){
-  const d=DB.docs.find(x=>x && x._id===id);
-  if(!d) return;
-  d.op=op; saveDB(); renderDocs();
+
+/* Opções de operação de um documento. Além das OPs, existe a WindGate —
+   documentos da estrutura fixa da empresa não pertencem a nenhuma importação. */
+function opcoesOperacaoDoc(selecionada){
+  const sel = v => selecionada===v ? ' selected' : '';
+  return `<option value=""${sel('')}>— sem operação —</option>`
+    + `<option value="WindGate"${sel('WindGate')}>🏢 WindGate (Estrutura Fixa)</option>`
+    + DB.ops.map(o=>`<option value="${esc(o.id)}"${sel(o.id)}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
 }
 
 const fmtBytes = b => b>=1048576 ? (b/1048576).toFixed(1)+' MB' : b>=1024 ? Math.round(b/1024)+' KB' : b+' B';
@@ -2148,7 +2151,7 @@ async function abrirRecuperacaoStorage(){
     return;
   }
 
-  const opts=`<option value="">— sem operação —</option>`+DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+  const opts=opcoesOperacaoDoc('');
   const linhas=_arquivosStorage.map((a,i)=>{
     // arquivos minúsculos são resíduo dos testes automatizados, não documento real
     const provavelLixo=a.tamanho<1024;
@@ -2223,25 +2226,34 @@ async function deleteDoc(id){
     } catch(e){}
   }
 }
-function openDocModal(){
-  if(!DB.ops.length){ toast('Crie uma operação primeiro.'); return; }
-  openModal(`<h3>Registrar <span>documento</span></h3>
+/* Serve para registrar (sem id) e para editar (com o _id do documento). */
+function openDocModal(id){
+  const d = id ? DB.docs.find(x=>x && x._id===id) : null;
+  if(id && !d){ toast('⚠ Documento não encontrado'); return; }
+
+  const cats = DOC_CATS.includes(d&&d.cat) || !d || !d.cat ? DOC_CATS : [d.cat, ...DOC_CATS];
+  const st = d ? d.status : 'pendente';
+
+  openModal(`<h3>${d?'Editar':'Registrar'} <span>documento</span></h3>
     <div class="frow">
-      <div><label>Operação</label><select id="m_dop">${DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}</select></div>
-      <div><label>Categoria</label><select id="m_dcat">${DOC_CATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
-      <div><label>Status</label><select id="m_dst"><option>pendente</option><option>recebido</option><option>revisado</option><option>aprovado</option></select></div>
+      <div><label>Operação</label><select id="m_dop">${opcoesOperacaoDoc(d?d.op:'')}</select></div>
+      <div><label>Categoria</label><select id="m_dcat">${cats.map(c=>`<option${d&&d.cat===c?' selected':''}>${esc(c)}</option>`).join('')}</select></div>
+      <div><label>Status</label><select id="m_dst">${['pendente','recebido','revisado','aprovado'].map(s=>`<option${st===s?' selected':''}>${s}</option>`).join('')}</select></div>
     </div>
-    <div class="frow"><div style="grid-column:span 2"><label>Nome do documento</label><input id="m_dnome" placeholder="Ex.: BL Original MSC"></div>
-    <div><label>Link (URL do Arquivo / Supabase / Drive)</label><input id="m_dlink" placeholder="Preenchido automaticamente ao anexar arquivo"></div></div>
+    <div class="frow"><div style="grid-column:span 2"><label>Nome do documento</label><input id="m_dnome" value="${d?esc(d.nome||''):''}" placeholder="Ex.: BL Original MSC"></div>
+    <div><label>Link (URL do Arquivo / Supabase / Drive)</label><input id="m_dlink" value="${d?esc(d.link||''):''}" placeholder="Preenchido automaticamente ao anexar arquivo"></div></div>
     <div class="frow">
       <div style="grid-column:span 3">
-        <label>📁 Anexar Arquivo (PDF, Imagem, XLSX, CSV)</label>
+        <label>📁 ${d?'Substituir arquivo':'Anexar Arquivo'} (PDF, Imagem, XLSX, CSV)</label>
         <input type="file" id="m_dfile" style="background:#171f33;padding:8px" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" onchange="uploadDocFile(this.files[0])">
         <div id="m_upload_status" style="font-size:12px;margin-top:4px"></div>
       </div>
     </div>
-    <div class="frow"><div><label>Observação</label><input id="m_dobs"></div></div>
-    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveDoc()">Registrar</button></div>`);
+    <div class="frow"><div><label>Observação</label><input id="m_dobs" value="${d?esc(d.obs||''):''}"></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="saveDoc(${d?`'${esc(d._id)}'`:'null'})">${d?'Salvar':'Registrar'}</button>
+    </div>`);
 }
 
 async function uploadDocFile(file){
@@ -2262,10 +2274,20 @@ async function uploadDocFile(file){
   }
 }
 
-function saveDoc(){
+function saveDoc(id){
   if(!V('m_dnome')){ toast('⚠ Nome do documento'); return; }
-  DB.docs.unshift({_id:novoId(),op:V('m_dop'),nome:V('m_dnome'),cat:V('m_dcat'),link:V('m_dlink'),status:V('m_dst'),por:USER.nome.split(' ')[0],obs:V('m_dobs'),data:hoje()});
-  saveDB(); closeModal(); renderDocs(); toast('Documento registrado ✓');
+  const campos={op:V('m_dop'),nome:V('m_dnome'),cat:V('m_dcat'),link:V('m_dlink'),status:V('m_dst'),obs:V('m_dobs')};
+
+  const existente = id ? DB.docs.find(x=>x && x._id===id) : null;
+  if(id && !existente){ toast('⚠ Documento não encontrado'); return; }
+
+  if(existente){
+    // preserva _id, quem registrou e a data original — o registro é o mesmo
+    Object.assign(existente, campos);
+  } else {
+    DB.docs.unshift(Object.assign({_id:novoId(),por:USER.nome.split(' ')[0],data:hoje()},campos));
+  }
+  saveDB(); closeModal(); renderDocs(); toast(existente?'Documento atualizado ✓':'Documento registrado ✓');
 }
 
 /* ---------- FRETES ---------- */
