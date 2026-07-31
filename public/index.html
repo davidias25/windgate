@@ -947,7 +947,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
   <div class="card">
     <h2>Registro de cotações</h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Operação</th><th>Empresa</th><th>Rota</th><th>Modal</th><th class="r">USD</th><th class="r">R$ (PTAX+regra)</th><th>Chegada prev.</th><th>Validade</th><th>Status</th><th>Resp.</th><th></th></tr></thead><tbody id="freteBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Operação</th><th>Empresa</th><th>Rota</th><th>Modal</th><th class="r">USD</th><th class="r">R$ total (PTAX+regra + taxas)</th><th>Chegada prev.</th><th>Validade</th><th>Status</th><th>Resp.</th><th></th></tr></thead><tbody id="freteBody"></tbody></table></div>
     <div class="empty" id="freteEmpty" style="display:none">Nenhuma cotação de frete registrada.</div>
   </div>
   <div class="cota-grid">
@@ -2352,11 +2352,16 @@ async function lockArrivedPtax(){
     }
   }
 }
+/* Total da cotação em R$: a parte em dólar convertida pela PTAX (com a regra do
+   agente) somada às taxas e custos que já vêm em reais. */
 function freteBRL(f){
   const regra=agRegra(f.empresa);
   const fx=f.ptaxLock || DB.ptax;
-  if(!fx || !fx.rate || !f.usd) return null;
-  return {brl:(+f.usd)*fx.rate*(1+regra/100), fx, regra, locked:!!f.ptaxLock};
+  const usd=+f.usd||0, extras=+f.brl||0;
+  if(!usd && !extras) return null;
+  if(usd && (!fx || !fx.rate)) return null;   // sem PTAX não dá para converter
+  const convertido = usd ? usd*fx.rate*(1+regra/100) : 0;
+  return {brl:convertido+extras, convertido, extras, usd, fx, regra, locked:!!f.ptaxLock};
 }
 
 function renderFrete(skipLock){
@@ -2373,9 +2378,16 @@ function renderFrete(skipLock){
   $('freteBody').innerHTML=DB.fretes.map((f,i)=>{
     const p={'Cotado':'blue','Negociando':'wait','Fechado':'ok','Expirado':'draft'}[f.status]||'draft';
     const conv=freteBRL(f);
-    const brlCell = conv
-      ? `<div class="num" style="font-weight:800">${fmt(conv.brl)}</div><div style="font-size:9px;color:var(--mut2)">${conv.locked?'🔒 PTAX da chegada':'projeção'} ${conv.fx.rate.toLocaleString('pt-BR',{minimumFractionDigits:4})}${conv.regra?' +'+conv.regra+'%':''}</div>`
-      : '<span class="note">informe a PTAX</span>';
+    let brlCell='<span class="note">informe a PTAX</span>';
+    if(conv){
+      const linhaFx = conv.usd
+        ? `<div style="font-size:9px;color:var(--mut2)">${conv.locked?'🔒 PTAX da chegada':'projeção'} ${conv.fx.rate.toLocaleString('pt-BR',{minimumFractionDigits:4})}${conv.regra?' +'+conv.regra+'%':''}</div>`
+        : '';
+      const linhaExtras = conv.extras
+        ? `<div style="font-size:9px;color:var(--mut2)">${conv.usd?fmt(conv.convertido)+' + ':''}${fmt(conv.extras)} em taxas</div>`
+        : '';
+      brlCell=`<div class="num" style="font-weight:800">${fmt(conv.brl)}</div>${linhaFx}${linhaExtras}`;
+    }
     const cheg=f.chegada?f.chegada.split('-').reverse().slice(0,2).join('/')+'/'+f.chegada.slice(0,4):'—';
     return `<tr><td>${esc(f.data)}</td><td><b>${esc(f.op||'—')}</b></td>
       <td><b>${esc(f.empresa||'—')}</b>${f.contato?`<div style="font-size:9.5px;color:var(--mut2)">${esc(f.contato)}${f.fone?' · '+esc(f.fone):''}</div>`:''}</td>
@@ -2433,6 +2445,7 @@ function openFreteModal(pref){
     </div>
     <div class="frow">
       <div><label>Valor (USD)</label><input id="m_fusd" type="number" step="0.01" value="${pref.usd||''}" oninput="freteRefHint()"></div>
+      <div><label>Taxas e custos (R$)</label><input id="m_fbrl" type="number" step="0.01" value="${pref.brl||''}" placeholder="0,00" oninput="freteRefHint()" title="Custos que já vêm em reais — somam ao valor em dólar convertido"></div>
       <div><label>Chegada prevista</label><input id="m_fcheg" type="date" value="${pref.chegada||''}"></div>
       <div><label>Validade</label><input id="m_fval" value="${esc(pref.validade||'')}" placeholder="Ex.: 15/08"></div>
       <div><label>Status</label><select id="m_fst"><option>Cotado</option><option>Negociando</option><option>Fechado</option><option>Expirado</option></select></div>
@@ -2453,11 +2466,23 @@ function freteRefHint(){
   const el=$('freteRefHint'); if(!el) return;
   const rota=V('m_frota'), usd=N('m_fusd');
   const emp=V('m_femp'); const regra=agRegra(emp);
-  // prévia em R$
-  const fx=DB.ptax;
-  $('m_fbrlPrev').innerHTML = (fx&&fx.rate&&usd)
-    ? `≈ <b style="color:#fff">${fmt(usd*fx.rate*(1+regra/100))}</b> (PTAX ${fx.rate.toLocaleString('pt-BR',{minimumFractionDigits:4})}${regra?' +'+regra+'%':''} — projeção; trava na PTAX oficial do dia da chegada)`
-    : '';
+  // prévia em R$ — dólar convertido + taxas em reais
+  const fx=DB.ptax, extras=N('m_fbrl');
+  const conv = (fx&&fx.rate&&usd) ? usd*fx.rate*(1+regra/100) : 0;
+  if(usd && !(fx&&fx.rate)){
+    $('m_fbrlPrev').innerHTML = extras
+      ? `Taxas: <b style="color:#fff">${fmt(extras)}</b> — informe a PTAX para somar a parte em dólar.`
+      : '';
+  } else if(conv || extras){
+    const detalhe = conv && extras
+      ? `${fmt(conv)} (USD × PTAX ${fx.rate.toLocaleString('pt-BR',{minimumFractionDigits:4})}${regra?' +'+regra+'%':''}) + ${fmt(extras)} em taxas`
+      : conv
+        ? `PTAX ${fx.rate.toLocaleString('pt-BR',{minimumFractionDigits:4})}${regra?' +'+regra+'%':''} — projeção; trava na PTAX oficial do dia da chegada`
+        : 'somente taxas e custos em reais';
+    $('m_fbrlPrev').innerHTML = `Total ≈ <b style="color:#fff">${fmt(conv+extras)}</b> (${detalhe})`;
+  } else {
+    $('m_fbrlPrev').innerHTML = '';
+  }
   // benchmark interno
   if(!rota||!usd){ el.style.display='none'; return; }
   const k=rotaKey(rota);
@@ -2484,7 +2509,7 @@ function saveFrete(){
   }
   DB.fretes.unshift({data:hoje(),op:V('m_fop'),empresa:emp,rota:V('m_frota'),modal:V('m_fmodal'),
     contato:V('m_fcont'),fone:V('m_ffone'),fabContato:V('m_fabcont'),fabEmail:V('m_fabmail'),fabWhats:V('m_fabwhats'),
-    usd:N('m_fusd'),chegada:V('m_fcheg'),validade:V('m_fval'),
+    usd:N('m_fusd'),brl:N('m_fbrl'),chegada:V('m_fcheg'),validade:V('m_fval'),
     status:V('m_fst'),resp:V('m_fresp'),ptaxLock:null});
   saveDB(); closeModal(); renderFrete(true); toast('Cotação de frete registrada ✓');
 }
