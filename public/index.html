@@ -1129,7 +1129,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="pontual">Apenas Pontuais</option>
       </select>
     </h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Nota Fiscal</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Categoria</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Nota Fiscal</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
     <div class="empty" id="finEmpty" style="display:none">Nenhum lançamento para o filtro selecionado.</div>
   </div>
 
@@ -3021,6 +3021,7 @@ function renderFin(){
       <td><b>${esc(l.op)}</b></td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
       <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? '📌 Fixa' : 'Pontual'}</span></td>
+      <td>${l.categoria ? `<span class="pill mag">${esc(l.categoria)}</span>` : '<span class="note">—</span>'}</td>
       <td>${esc(l.desc)}</td>
       <td class="r num" style="font-weight:700">${fmt(+l.valor || 0)}</td>
       <td>
@@ -3047,6 +3048,9 @@ function renderFin(){
    reordena a lista quando traz registros de outro usuário, e um índice velho
    apagaria ou alteraria o lançamento errado. */
 const finPorId = id => DB.fin.find(l => l && l._id === id);
+
+/* Classificação do lançamento, independente de ser receita ou despesa. */
+const FIN_CATEGORIAS = ['Empréstimo','Estudo impo','Imposto geral','Imposto importação'];
 
 function setFinStatus(id, status){
   const l = finPorId(id);
@@ -3100,6 +3104,10 @@ function openLancModal(id){
       <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="toggleNatLanc(this.value)"><option value="false"${fixo?'':' selected'}>Pontual / Operacional</option><option value="true"${fixo?' selected':''}>Fixa Mensal (WindGate)</option></select></div>
       <div><label>Vínculo / Operação</label><select id="m_lop">${opOptions}</select></div>
       <div><label>Tipo</label><select id="m_ltipo"><option value="Despesa"${sel(l&&l.tipo,'Despesa')}>Despesa (Contas a Pagar)</option><option value="Receita"${sel(l&&l.tipo,'Receita')}>Receita (Contas a Receber)</option></select></div>
+      <div><label>Categoria</label><select id="m_lcat">
+        <option value=""${sel(l&&l.categoria||'','')}>— sem categoria —</option>
+        ${FIN_CATEGORIAS.map(c=>`<option${sel(l&&l.categoria,c)}>${esc(c)}</option>`).join('')}
+      </select></div>
     </div>
     <div class="frow">
       <div><label>Data de Vencimento</label><input type="date" id="m_lvenc" value="${l?esc(l.vencimento||l.data||hjIso):hjIso}"></div>
@@ -3150,6 +3158,7 @@ function saveLanc(id){
       vencimento: vencLanc,
       op: opFinal,
       tipo: tipo,
+      categoria: V('m_lcat') || '',
       fixo: isFixo,
       desc: desc,
       valor: rawVal,
