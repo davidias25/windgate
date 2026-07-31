@@ -705,8 +705,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <section class="view" id="view-painel">
   <div class="view-head">
     <div><h1>Torre de <span>Controle</span></h1><p>Visão geral das operações — produção, trânsito, documentação, entregas e travas.</p></div>
-    <div class="hd-actions"><button class="btn btn-mag" onclick="openOpModal()">+ Nova operação</button></div>
+    <div class="hd-actions">
+      <button class="btn btn-ghost" id="btnSyncClickUp" onclick="importarOperacoesClickUp()">🔄 Sincronizar ClickUp</button>
+      <button class="btn btn-mag" onclick="openOpModal()">+ Nova operação</button>
+    </div>
   </div>
+  <div id="clickupAviso" style="display:none;background:#FF5A6E22;border:1px solid #FF5A6E66;color:#FFB4BE;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
   <div class="stats-row" id="opStats"></div>
   <div class="ops-grid" id="opsGrid"></div>
   <div class="empty" id="opsEmpty" style="display:none">Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.</div>
@@ -908,7 +912,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <section class="view" id="view-docs">
   <div class="view-head">
     <div><h1>Documenta<span>ção</span></h1><p>Registro central de documentos por operação — com link (Drive/ClickUp/e-mail) e status. Fonte única, nada se perde.</p></div>
-    <div class="hd-actions"><button class="btn btn-mag" onclick="openDocModal()">+ Registrar documento</button></div>
+    <div class="hd-actions">
+      <button class="btn btn-ghost" onclick="abrirRecuperacaoStorage()">📥 Recuperar do Supabase</button>
+      <button class="btn btn-mag" onclick="openDocModal()">+ Registrar documento</button>
+    </div>
   </div>
   <div class="card">
     <h2>Arquivo geral <span class="spacer"></span><select id="docFilter" style="width:210px" onchange="renderDocs()"></select></h2>
@@ -1452,6 +1459,37 @@ async function uploadFileUniversal(file) {
   return { success: false, message: 'Erro ao enviar arquivo para a nuvem.' };
 }
 
+/* Coleções sincronizadas registro a registro com o banco central. */
+const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks'];
+
+/* Cada registro precisa de uma identidade estável, senão o servidor não
+   consegue distinguir "documento novo de outro usuário" de "documento que
+   sumiu", e as gravações concorrentes se apagam entre si. */
+function novoId(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'r-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+/* Registros antigos (gravados antes do `_id`) recebem um id derivado do próprio
+   conteúdo: assim dois navegadores chegam ao MESMO id para o MESMO registro e a
+   mesclagem não duplica. Uma vez atribuído, o id fica gravado e não muda mais. */
+function idDeterministico(rec){
+  const txt = JSON.stringify(rec);
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < txt.length; i++){
+    const c = txt.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 + c, 0x85ebca6b) >>> 0;
+  }
+  return 'h-' + h1.toString(36) + h2.toString(36);
+}
+
+function garantirIds(){
+  COLECOES_SYNC.forEach(k=>{
+    (DB[k]||[]).forEach(r=>{ if(r && typeof r==='object' && !r._id) r._id = idDeterministico(r); });
+  });
+}
+
 function ensureDBStructure(){
   if (!DB || typeof DB !== 'object') DB = defaultDB();
   const def = defaultDB();
@@ -1468,8 +1506,8 @@ function ensureDBStructure(){
       }
     });
   }
-  if (!Array.isArray(DB.fin)) DB.fin = [];
   if (!Array.isArray(DB.ops)) DB.ops = [];
+  if (!Array.isArray(DB.fin)) DB.fin = [];
   if (!Array.isArray(DB.docs)) DB.docs = [];
   if (!Array.isArray(DB.fretes)) DB.fretes = [];
   if (!Array.isArray(DB.fornecedores)) DB.fornecedores = [];
@@ -1479,23 +1517,74 @@ function ensureDBStructure(){
   if (!DB.agentes) DB.agentes = def.agentes || {};
   if (!DB.gestao) DB.gestao = {};
   if (!DB.settings) DB.settings = { criadoEm: new Date().toISOString(), schema: 4 };
+  if (!DB._removidos || typeof DB._removidos !== 'object') DB._removidos = {};
+  garantirIds();
+}
+
+/* Últimos ids conhecidos por coleção — a diferença contra o estado atual é o
+   que o usuário excluiu, e é isso que vira "tombstone" para o servidor. Sem
+   isso, um registro apagado aqui voltaria da cópia de outro usuário. */
+let _idsConhecidos = {};
+function fotografarIds(){
+  COLECOES_SYNC.forEach(k=>{
+    _idsConhecidos[k] = new Set((DB[k]||[]).map(r=>r&&r._id).filter(Boolean));
+  });
+}
+function registrarRemocoes(){
+  COLECOES_SYNC.forEach(k=>{
+    const antes = _idsConhecidos[k];
+    if(!antes) return;
+    const agora = new Set((DB[k]||[]).map(r=>r&&r._id).filter(Boolean));
+    antes.forEach(id=>{ if(!agora.has(id)) DB._removidos[id] = Date.now(); });
+  });
+  fotografarIds();
 }
 
 let _saveT=null;
 function saveDB(){
   ensureDBStructure();
+  registrarRemocoes();
   clearTimeout(_saveT);
   _saveT=setTimeout(async()=>{
-    const ok=await store.set(DBKEY, JSON.stringify(DB));
+    const payload = JSON.stringify(DB);
+    const ok=await store.set(DBKEY, payload);
     if(!ok) console.warn('persistência indisponível — usando memória');
     try {
       await fetch(getApiUrl('/api/db'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(DB)
+        body: payload
       });
     } catch(e){}
   },300);
+}
+
+/* O banco central só conhece as chaves que já foram gravadas nele. Mesclar (em vez
+   de substituir) preserva o que é local — usuários, checklists, settings — e evita
+   que uma resposta incompleta do servidor apague dados do sistema. */
+function aplicarDBdoServidor(serverDB){
+  const base = (DB && typeof DB === 'object') ? DB : defaultDB();
+  DB = Object.assign({}, base, serverDB);
+  ensureDBStructure();
+}
+
+/* Na sincronização periódica o servidor manda no que ele conhece, mas o que foi
+   criado aqui e ainda não subiu (o POST tem 300ms de espera) não pode se perder.
+   Registro local ausente no servidor só é descartado se o servidor souber que
+   ele foi excluído — é para isso que serve `_removidos`. */
+function aplicarSincronizacao(serverDB){
+  const removidos = Object.assign({}, DB && DB._removidos, serverDB._removidos);
+  const locais = {};
+  COLECOES_SYNC.forEach(k=>{
+    const doServidor = Array.isArray(serverDB[k]) ? serverDB[k] : [];
+    const idsServidor = new Set(doServidor.map(r=>r&&r._id).filter(Boolean));
+    const soLocais = (DB[k]||[]).filter(r=>r && r._id && !idsServidor.has(r._id) && !removidos[r._id]);
+    locais[k] = doServidor.filter(r=>!(r && r._id && removidos[r._id])).concat(soLocais);
+  });
+  aplicarDBdoServidor(serverDB);
+  COLECOES_SYNC.forEach(k=>{ DB[k] = locais[k]; });
+  DB._removidos = removidos;
+  fotografarIds();
 }
 
 async function loadDB(){
@@ -1504,37 +1593,41 @@ async function loadDB(){
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.db) {
-        DB = json.db;
-        ensureDBStructure();
+        DB = defaultDB();
+        aplicarDBdoServidor(json.db);
         await store.set(DBKEY, JSON.stringify(DB));
+        fotografarIds();
         return;
       }
     }
   } catch(e){}
 
-  try{ const raw=await store.get(DBKEY); if(raw){ DB=JSON.parse(raw); ensureDBStructure(); return; } }catch(e){}
-  DB=defaultDB(); saveDB();
+  try{ const raw=await store.get(DBKEY); if(raw){ DB=JSON.parse(raw); ensureDBStructure(); fotografarIds(); return; } }catch(e){}
+  DB=defaultDB(); ensureDBStructure(); fotografarIds(); saveDB();
 }
 
 setInterval(async ()=>{
+  // Não recarrega por cima de um formulário aberto — sobrescreveria o que
+  // o usuário está editando naquele instante.
+  const modal = $('modalBg');
+  if (modal && modal.classList.contains('show')) return;
   try {
     const res = await fetch(getApiUrl('/api/db'));
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.db) {
-        const curSig = JSON.stringify(DB);
-        const newSig = JSON.stringify(json.db);
-        if (curSig !== newSig) {
-          DB = json.db;
-          ensureDBStructure();
-          await store.set(DBKEY, JSON.stringify(DB));
-          const activeTab = document.querySelector('.tab-btn.active');
-          if (activeTab && activeTab.id) {
-            const k = activeTab.id.replace('tabbtn-', '');
-            if (typeof showTab === 'function') showTab(k);
-          }
-        }
-      }
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.success || !json.db) return;
+
+    const antes = JSON.stringify(DB);
+    aplicarSincronizacao(json.db);
+    // Compara depois da mesclagem: comparar com o payload cru dispararia um
+    // re-render a cada 12 s, já que o servidor não guarda todas as chaves locais.
+    if (JSON.stringify(DB) === antes) return;
+
+    await store.set(DBKEY, JSON.stringify(DB));
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (activeTab && activeTab.id) {
+      const k = activeTab.id.replace('tabbtn-', '');
+      if (typeof showTab === 'function') showTab(k);
     }
   } catch(e){}
 }, 12000);
@@ -1719,42 +1812,57 @@ function showTab(k){
 }
 
 /* ---------- PAINEL (operações) ---------- */
+/* ---------- PAINEL (operações) ---------- */
 function renderOps(){
-  const counts={}; STATUS_OP.forEach(s=>counts[s.k]=0);
-  DB.ops.forEach(o=>counts[o.status]=(counts[o.status]||0)+1);
-  const ativos=DB.ops.filter(o=>!['entregue','concluida'].includes(o.status)).length;
-  const sr=$('opStats'); sr.innerHTML='';
-  const tiles=[
-    {n:ativos,l:'Operações ativas',c:'#E91E63'},
-    {n:counts.producao,l:'Em produção',c:'#F0B429'},
-    {n:counts.embarcado,l:'Em trânsito',c:'#2563EB'},
-    {n:counts.chegada,l:'Desembaraço',c:'#9B6EF3'},
-    {n:counts.logistica,l:'Log. nacional',c:'#E91E63'},
-    {n:counts.documentacao,l:'Documentação',c:'#6E9BFF'},
-    {n:counts.travada,l:'Travadas',c:'#FF5A6E'}
-  ];
-  tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div></div>`; });
-  const g=$('opsGrid'); g.innerHTML='';
-  $('opsEmpty').style.display=DB.ops.length?'none':'block';
-  const order=[...DB.ops].sort((a,b)=>(a.status==='travada'?-1:0)-(b.status==='travada'?-1:0));
-  order.forEach(o=>{
-    const m=stMeta(o.status);
-    const d=document.createElement('div'); d.className='op-card'; d.style.setProperty('--stc',m.c);
-    d.innerHTML=`<div class="oh"><div><div class="oid">${esc(o.id)}</div><div class="onm">${esc(o.nome)}</div></div>
-      <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c}22;color:${m.c}">${m.l}</span></div>
-      <div class="od">
-        <span>👤 Cliente: <b>${esc(o.cliente||'—')}</b></span>
-        <span>➡️ Próx. ação: <b>${esc(o.prox||'—')}</b></span>
-        <span>🧑‍💼 Resp.: <b>${esc(o.resp||'—')}</b>${o.obs?` &nbsp;·&nbsp; 📝 ${esc(o.obs)}`:''}</span>
-      </div>
-      <div class="op-prog"><div class="tr"><div style="width:${opPct(o.id)}%"></div></div><span>${opPct(o.id)}% docs</span></div>`;
-    d.onclick=()=>openOpModal(o.id);
-    g.appendChild(d);
-  });
+  try {
+    ensureDBStructure();
+    const counts={}; STATUS_OP.forEach(s=>counts[s.k]=0);
+    (DB.ops||[]).forEach(o=>{ if(o && o.status) counts[o.status]=(counts[o.status]||0)+1; });
+    const ativos=(DB.ops||[]).filter(o=>o && !['entregue','concluida'].includes(o.status)).length;
+    const sr=$('opStats'); if(sr) sr.innerHTML='';
+    const tiles=[
+      {n:ativos,l:'Operações ativas',c:'#E91E63'},
+      {n:counts.producao||0,l:'Em produção',c:'#F0B429'},
+      {n:counts.embarcado||0,l:'Em trânsito',c:'#2563EB'},
+      {n:counts.chegada||0,l:'Desembaraço',c:'#9B6EF3'},
+      {n:counts.logistica||0,l:'Log. nacional',c:'#E91E63'},
+      {n:counts.documentacao||0,l:'Documentação',c:'#6E9BFF'},
+      {n:counts.travada||0,l:'Travadas',c:'#FF5A6E'}
+    ];
+    if(sr){
+      tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div></div>`; });
+    }
+    const g=$('opsGrid'); if(!g) return;
+    g.innerHTML='';
+    const emptyEl = $('opsEmpty');
+    if(emptyEl) emptyEl.style.display=(DB.ops && DB.ops.length)?'none':'block';
+
+    const order=[...(DB.ops||[])].sort((a,b)=>(a && a.status==='travada'?-1:0)-(b && b.status==='travada'?-1:0));
+    order.forEach(o=>{
+      if(!o) return;
+      const m=stMeta(o.status)||STATUS_OP[0];
+      const d=document.createElement('div'); d.className='op-card'; d.style.setProperty('--stc',m.c||'#2563EB');
+      const pct = opPct(o.id);
+      d.innerHTML=`<div class="oh"><div><div class="oid">${esc(o.id||'OP')}</div><div class="onm">${esc(o.nome||'Operação')}</div></div>
+        <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span></div>
+        <div class="od">
+          <span>👤 Cliente: <b>${esc(o.cliente||'—')}</b></span>
+          <span>➡️ Próx. ação: <b>${esc(o.prox||'—')}</b></span>
+          <span>🧑‍💼 Resp.: <b>${esc(o.resp||'—')}</b>${o.obs?` &nbsp;·&nbsp; 📝 ${esc(o.obs)}`:''}</span>
+          ${o.clickupUrl?`<span>🔗 ClickUp: <a href="${esc(o.clickupUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7FA6FF">${esc(o.statusClickUp||'abrir tarefa')}</a></span>`:''}
+        </div>
+        <div class="op-prog"><div class="tr"><div style="width:${pct}%"></div></div><span>${pct}% docs</span></div>`;
+      d.onclick=()=>openOpModal(o.id);
+      g.appendChild(d);
+    });
+  } catch(err) {
+    console.error('Erro ao renderizar Torre de Controle:', err);
+  }
 }
 function opPct(opId){
+  if(!DB || !DB.checklists) return 0;
   const l=DB.checklists[opId]; if(!l||!l.length) return 0;
-  return Math.round(l.filter(i=>i.status==='aprovado'||i.status==='na').length/l.length*100);
+  return Math.round(l.filter(i=>i && (i.status==='aprovado'||i.status==='na')).length/l.length*100);
 }
 function openOpModal(id){
   const o=id?DB.ops.find(x=>x.id===id):null;
@@ -1793,16 +1901,89 @@ function openOpModal(id){
     </div>`);
 }
 function saveOp(id){
-  const nid=(id||V('m_opid').trim().toUpperCase());
-  if(!nid){ toast('⚠ Informe o código da operação'); return; }
-  let o=DB.ops.find(x=>x.id===nid);
-  const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),status:V('m_opst'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
-    origemPorto:V('m_oporig'),destinoPorto:V('m_opdest'),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
-  if(o) Object.assign(o,data); else DB.ops.push(data);
-  if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
-  saveDB(); closeModal(); renderOps(); toast('Operação salva ✓');
-  try { fetch('/api/integrations/clickup/tarefa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(()=>{}); } catch(e){}
+  try {
+    const nid=(id||V('m_opid').trim().toUpperCase());
+    if(!nid){ toast('⚠ Informe o código da operação'); return; }
+    let o=DB.ops.find(x=>x.id===nid);
+    const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),status:V('m_opst'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
+      origemPorto:V('m_oporig'),destinoPorto:V('m_opdest'),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
+    if(o) Object.assign(o,data); else { DB.ops.push(data); o=data; }
+    if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
+    saveDB(); closeModal(); renderOps(); toast('Operação salva ✓');
+    sincronizarClickUp(o);
+  } catch(err) {
+    console.error('Erro ao salvar operação:', err);
+    toast('⚠ Erro ao salvar operação');
+  }
 }
+
+/* Traz as operações cadastradas no ClickUp para a Torre de Controle.
+   O ClickUp manda no que existe e no status; tudo que só existe aqui
+   (responsável, próxima ação, ETA, navio, rastreio) é preservado. */
+async function importarOperacoesClickUp(silencioso){
+  const btn=$('btnSyncClickUp'), aviso=$('clickupAviso');
+  if(btn){ btn.disabled=true; btn.textContent='🔄 Sincronizando…'; }
+  try{
+    const res=await fetch(getApiUrl('/api/integrations/clickup/operacoes'));
+    const j=await res.json();
+
+    if(j.erro){
+      if(aviso){ aviso.style.display='block'; aviso.innerHTML=`⚠️ <b>ClickUp:</b> ${esc(j.erro)}`; }
+      if(!silencioso) toast('⚠ Não foi possível ler as operações do ClickUp');
+      return;
+    }
+    if(aviso) aviso.style.display='none';
+
+    ensureDBStructure();
+    let novas=0, atualizadas=0;
+    (j.ops||[]).forEach(op=>{
+      if(!op || !op.id) return;
+      const local=DB.ops.find(x=>x && (
+        (x.clickupTaskId && x.clickupTaskId===op.clickupTaskId) || x.id===op.id
+      ));
+      if(local){
+        // nome e cliente digitados aqui prevalecem — só preenche o que estiver vazio
+        if(!local.nome) local.nome=op.nome;
+        if(!local.cliente) local.cliente=op.cliente;
+        local.status=op.status;
+        local.statusClickUp=op.statusClickUp;
+        local.clickupTaskId=op.clickupTaskId;
+        local.clickupUrl=op.clickupUrl;
+        atualizadas++;
+      } else {
+        DB.ops.push(Object.assign({prox:'',resp:'',obs:'',posAtual:''}, op));
+        novas++;
+      }
+    });
+
+    if(novas||atualizadas){ saveDB(); renderOps(); }
+    if(!silencioso) toast(`ClickUp sincronizado — <b>${novas}</b> nova(s), <b>${atualizadas}</b> atualizada(s) ✓`);
+  }catch(err){
+    console.error('Erro ao importar operações do ClickUp:', err);
+    if(!silencioso) toast('⚠ Erro ao falar com o servidor');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🔄 Sincronizar ClickUp'; }
+  }
+}
+
+/* Envia a operação ao ClickUp e guarda o id da tarefa, para que o próximo
+   salvamento atualize a mesma tarefa em vez de criar uma duplicada. */
+function sincronizarClickUp(op){
+  if(!op) return;
+  fetch(getApiUrl('/api/integrations/clickup/tarefa'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(op)
+  })
+  .then(r=>r.ok?r.json():null)
+  .then(j=>{
+    if(!j || !j.taskId) return;
+    const alvo=DB.ops.find(x=>x && x.id===op.id);
+    if(alvo && alvo.clickupTaskId!==j.taskId){ alvo.clickupTaskId=j.taskId; saveDB(); }
+  })
+  .catch(()=>{});
+}
+
 function delOp(id){ DB.ops=DB.ops.filter(x=>x.id!==id); saveDB(); closeModal(); renderOps(); toast('Operação excluída'); }
 function fillOpSelect(selId,includeAll){
   const s=$(selId); if(!s) return; const cur=s.value;
@@ -1882,7 +2063,7 @@ function syncChkDoc(op,it){
   const map={coletado:'recebido',revisado:'revisado',aprovado:'aprovado',pendente:'pendente',na:'pendente'};
   const ex=DB.docs.find(d=>d.op===op&&d.nome===it.titulo);
   if(ex){ ex.link=it.link; ex.status=map[it.status]||'recebido'; }
-  else DB.docs.unshift({op,nome:it.titulo,cat:'Checklist',link:it.link,status:map[it.status]||'recebido',por:it.coletadoPor||(USER?USER.nome.split(' ')[0]:''),obs:'via checklist',data:hoje()});
+  else DB.docs.unshift({_id:novoId(),op,nome:it.titulo,cat:'Checklist',link:it.link,status:map[it.status]||'recebido',por:it.coletadoPor||(USER?USER.nome.split(' ')[0]:''),obs:'via checklist',data:hoje()});
 }
 function chkCobranca(){
   const op=$('chkOpSel').value; if(!op) return;
@@ -1914,15 +2095,115 @@ function renderDocs(){
   const rows=DB.docs.filter(d=>!f||d.op===f);
   $('docsEmpty').style.display=rows.length?'none':'block';
   $('docsBody').innerHTML=rows.map((d,i)=>{
-    const idx=DB.docs.indexOf(d);
     const stP={pendente:'draft',recebido:'blue',revisado:'teal',aprovado:'ok'}[d.status]||'draft';
-    return `<tr><td><b>${esc(d.op)}</b></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
+    return `<tr><td><select style="width:150px;padding:3px 6px;font-size:11px" onchange="docSetOp('${esc(d._id||'')}',this.value)">
+        <option value=""${!d.op?' selected':''}>— sem operação —</option>
+        ${DB.ops.map(o=>`<option value="${esc(o.id)}"${d.op===o.id?' selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('')}
+      </select></td><td>${esc(d.nome)}</td><td><span class="pill mag">${esc(d.cat)}</span></td>
       <td>${d.link?`<a href="${esc(d.link)}" target="_blank" style="color:#7FA6FF">abrir ↗</a>`:'—'}</td>
       <td><span class="pill ${stP}">${esc(d.status)}</span></td><td>${esc(d.por)}</td><td class="note">${esc(d.obs||'')}</td>
-      <td><button class="del" onclick="deleteDoc(${idx})">✕</button></td></tr>`;
+      <td><button class="del" onclick="deleteDoc('${esc(d._id||'')}')">✕</button></td></tr>`;
   }).join('');
 }
-async function deleteDoc(idx){
+/* Permite atribuir a operação direto na tabela — documentos recuperados do
+   Storage chegam sem operação, e antes não havia como definir depois. */
+function docSetOp(id, op){
+  const d=DB.docs.find(x=>x && x._id===id);
+  if(!d) return;
+  d.op=op; saveDB(); renderDocs();
+}
+
+const fmtBytes = b => b>=1048576 ? (b/1048576).toFixed(1)+' MB' : b>=1024 ? Math.round(b/1024)+' KB' : b+' B';
+
+/* Reencontra no Supabase Storage os arquivos que já foram enviados e ainda não
+   têm registro na aba Documentos — o arquivo nunca se perdeu, só o registro. */
+let _arquivosStorage=[];
+async function abrirRecuperacaoStorage(){
+  openModal('<h3>📥 Recuperar do <span>Supabase</span></h3><p class="note">Consultando o Storage…</p>');
+  let j;
+  try{
+    const res=await fetch(getApiUrl('/api/storage/arquivos'));
+    j=await res.json();
+  }catch(e){
+    openModal(`<h3>📥 Recuperar do <span>Supabase</span></h3>
+      <p class="note">⚠ Não foi possível falar com o servidor. Verifique se o back-end está rodando.</p>
+      <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+    return;
+  }
+
+  if(j.erro){
+    openModal(`<h3>📥 Recuperar do <span>Supabase</span></h3>
+      <p class="note">⚠ ${esc(j.erro)}</p>
+      <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+    return;
+  }
+
+  const jaRegistrados=new Set(DB.docs.map(d=>d.link).filter(Boolean));
+  _arquivosStorage=(j.arquivos||[]).filter(a=>!jaRegistrados.has(a.url));
+
+  if(!_arquivosStorage.length){
+    openModal(`<h3>📥 Recuperar do <span>Supabase</span></h3>
+      <p class="note">Todos os ${j.total} arquivos do Storage já estão registrados na aba Documentos. Nada a recuperar.</p>
+      <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+    return;
+  }
+
+  const opts=`<option value="">— sem operação —</option>`+DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
+  const linhas=_arquivosStorage.map((a,i)=>{
+    // arquivos minúsculos são resíduo dos testes automatizados, não documento real
+    const provavelLixo=a.tamanho<1024;
+    const dt=a.enviadoEm?new Date(a.enviadoEm).toLocaleDateString('pt-BR'):'—';
+    return `<tr>
+      <td style="padding:5px 6px"><input type="checkbox" id="rec_${i}" ${provavelLixo?'':'checked'}></td>
+      <td style="padding:5px 6px"><label for="rec_${i}" style="cursor:pointer">${esc(a.nomeOriginal)}</label></td>
+      <td style="padding:5px 6px;color:${provavelLixo?'#FF8FA0':'#94A3B8'};white-space:nowrap">${fmtBytes(a.tamanho)}</td>
+      <td style="padding:5px 6px;color:#94A3B8;white-space:nowrap">${dt}</td>
+      <td style="padding:5px 6px"><select id="recop_${i}" style="width:150px;padding:3px 6px;font-size:11px">${opts}</select></td>
+    </tr>`;
+  }).join('');
+
+  openModal(`<h3>📥 Recuperar do <span>Supabase</span></h3>
+    <p class="note">${_arquivosStorage.length} arquivo(s) no Storage sem registro na aba Documentos. Os menores que 1 KB vêm desmarcados — são resíduo dos testes automatizados.</p>
+    <div style="max-height:340px;overflow:auto;margin:12px 0;border:1px solid #23304F;border-radius:8px">
+      <table style="width:100%;font-size:12px"><thead><tr style="position:sticky;top:0;background:#131B2E">
+        <th style="padding:6px"></th><th style="padding:6px;text-align:left">Arquivo</th><th style="padding:6px;text-align:left">Tamanho</th><th style="padding:6px;text-align:left">Enviado</th><th style="padding:6px;text-align:left">Operação</th>
+      </tr></thead><tbody>${linhas}</tbody></table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="marcarTodosStorage(true)">Marcar todos</button>
+      <button class="btn btn-ghost" onclick="marcarTodosStorage(false)">Desmarcar todos</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="importarArquivosStorage()">Importar selecionados</button>
+    </div>`);
+}
+
+function marcarTodosStorage(v){
+  _arquivosStorage.forEach((a,i)=>{ const c=$('rec_'+i); if(c) c.checked=v; });
+}
+
+function importarArquivosStorage(){
+  let n=0;
+  _arquivosStorage.forEach((a,i)=>{
+    const c=$('rec_'+i);
+    if(!c || !c.checked) return;
+    const op=$('recop_'+i) ? $('recop_'+i).value : '';
+    DB.docs.unshift({
+      _id:novoId(), op, nome:a.nomeOriginal, cat:'Recuperado', link:a.url,
+      status:'recebido', por:USER?USER.nome.split(' ')[0]:'', obs:'recuperado do Supabase Storage',
+      data:a.enviadoEm?a.enviadoEm.slice(0,10):hoje()
+    });
+    n++;
+  });
+  if(!n){ toast('⚠ Nenhum arquivo selecionado'); return; }
+  saveDB(); closeModal(); renderDocs();
+  toast(`<b>${n}</b> documento(s) recuperado(s) do Supabase ✓`);
+}
+
+/* Exclui pelo `_id`: a ordem do array muda quando a sincronização traz
+   documentos de outro usuário, e um índice velho apagaria o documento errado. */
+async function deleteDoc(id){
+  const idx = DB.docs.findIndex(d=>d && d._id===id);
   const d = DB.docs[idx];
   if(!d) return;
 
@@ -1983,7 +2264,7 @@ async function uploadDocFile(file){
 
 function saveDoc(){
   if(!V('m_dnome')){ toast('⚠ Nome do documento'); return; }
-  DB.docs.unshift({op:V('m_dop'),nome:V('m_dnome'),cat:V('m_dcat'),link:V('m_dlink'),status:V('m_dst'),por:USER.nome.split(' ')[0],obs:V('m_dobs'),data:hoje()});
+  DB.docs.unshift({_id:novoId(),op:V('m_dop'),nome:V('m_dnome'),cat:V('m_dcat'),link:V('m_dlink'),status:V('m_dst'),por:USER.nome.split(' ')[0],obs:V('m_dobs'),data:hoje()});
   saveDB(); closeModal(); renderDocs(); toast('Documento registrado ✓');
 }
 

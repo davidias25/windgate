@@ -1,8 +1,21 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+
+// O banco central é o arquivo real das operações. A suíte grava um DB de teste
+// em /api/db, então precisa apontar para um arquivo temporário ANTES de carregar
+// o servidor — do contrário zera as operações da Torre de Controle.
+const TEST_DB_FILE = path.join(os.tmpdir(), `windgate-test-db-${process.pid}.json`);
+process.env.WINDGATE_DB_FILE = TEST_DB_FILE;
+
+// O upload de teste ia para o bucket real do Supabase a cada execução — o
+// Storage acumulou dezenas de "test_document.pdf". A rota continua sendo
+// testada; só o envio para a nuvem fica desligado.
+process.env.SUPABASE_DISABLED = '1';
 
 const app = require('../src/server');
-const { criarTarefaOperacao } = require('../src/integrations/clickup.service');
+const { criarTarefaOperacao, operacaoDaTarefa, statusInterno } = require('../src/integrations/clickup.service');
+const { mesclarDB } = require('../src/services/db-merge.service');
 
 async function runTests() {
   console.log('🧪 Iniciando suíte de testes de integração do WindGate Backend...\n');
@@ -18,6 +31,10 @@ async function runTests() {
       failures++;
     }
   }
+
+  const REAL_DB_FILE = path.join(__dirname, '../data/db.json');
+  const lerBancoReal = () => fs.existsSync(REAL_DB_FILE) ? fs.readFileSync(REAL_DB_FILE, 'utf8') : null;
+  const bancoRealAntes = lerBancoReal();
 
   const server = app.listen(0); // Random free port
   const port = server.address().port;
@@ -59,6 +76,8 @@ async function runTests() {
     const jsonDbPost = await resDbPost.json();
     assert(resDbPost.status === 200, 'POST /api/db retorna HTTP 200');
     assert(jsonDbPost.success === true, 'POST /api/db atualiza o banco central com sucesso');
+    assert(fs.existsSync(TEST_DB_FILE), 'POST /api/db grava no arquivo de teste, não no banco real');
+    assert(bancoRealAntes === lerBancoReal(), 'POST /api/db NÃO altera data/db.json (operações preservadas)');
 
     // 2. Criar Cotação (POST /api/cotacoes)
     console.log('\n--- Testando Cotações API ---');
@@ -106,6 +125,80 @@ async function runTests() {
     if (clickupResult && clickupResult.id) {
       assert(typeof clickupResult.id === 'string', 'criarTarefaOperacao cria tarefa com sucesso no ClickUp e retorna ID');
     }
+
+    // 1.9. Mesclagem do banco central (gravações concorrentes)
+    console.log('\n--- Testando Mesclagem do Banco Central (multi-usuário) ---');
+    const estadoBase = { docs: [{ _id: 'x', nome: 'antigo' }], ops: [] };
+
+    // Dois usuários que carregaram o mesmo estado salvam documentos diferentes
+    const doSamir = { docs: [{ _id: 's', nome: 'BL do Samir' }, { _id: 'x', nome: 'antigo' }], ops: [] };
+    const daIvina = { docs: [{ _id: 'i', nome: 'PL da Ivina' }, { _id: 'x', nome: 'antigo' }], ops: [] };
+    let mesclado = mesclarDB(mesclarDB(estadoBase, doSamir), daIvina);
+    const nomes = mesclado.docs.map(d => d.nome);
+    assert(nomes.includes('BL do Samir') && nomes.includes('PL da Ivina'),
+      'Gravações concorrentes preservam os documentos dos dois usuários');
+    assert(mesclado.docs.length === 3, 'Mesclagem não duplica o documento que ambos já tinham');
+
+    // Edição de um registro existente não vira um segundo registro
+    mesclado = mesclarDB(mesclado, { docs: [{ _id: 'i', nome: 'PL da Ivina', status: 'aprovado' }] });
+    assert(mesclado.docs.length === 3, 'Editar um documento não cria duplicata');
+    assert(mesclado.docs.find(d => d._id === 'i').status === 'aprovado', 'Edição prevalece sobre a cópia do servidor');
+
+    // Exclusão precisa vencer a cópia desatualizada de quem não sincronizou
+    mesclado = mesclarDB(mesclado, { docs: [{ _id: 'x', nome: 'antigo' }], _removidos: { s: Date.now() } });
+    assert(!mesclado.docs.some(d => d._id === 's'), 'Documento excluído sai do banco central');
+    mesclado = mesclarDB(mesclado, doSamir);
+    assert(!mesclado.docs.some(d => d._id === 's'), 'Documento excluído não ressuscita quando um cliente antigo salva');
+
+    const resMerge1 = await fetch(`${baseUrl}/api/db`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docs: [{ _id: 'api-1', nome: 'Doc A' }] })
+    });
+    await resMerge1.json();
+    await fetch(`${baseUrl}/api/db`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docs: [{ _id: 'api-2', nome: 'Doc B' }] })
+    });
+    const aposMerge = (await (await fetch(`${baseUrl}/api/db`)).json()).db;
+    assert(aposMerge.docs.some(d => d._id === 'api-1') && aposMerge.docs.some(d => d._id === 'api-2'),
+      'POST /api/db mescla em vez de substituir — nenhum documento é perdido');
+
+    // 6.4. Listagem do Storage (recuperar documentos já enviados)
+    console.log('\n--- Testando Listagem do Supabase Storage ---');
+    const resArq = await fetch(`${baseUrl}/api/storage/arquivos`);
+    const jsonArq = await resArq.json();
+    assert(resArq.status === 200, 'GET /api/storage/arquivos retorna HTTP 200');
+    assert(Array.isArray(jsonArq.arquivos), 'GET /api/storage/arquivos retorna array de arquivos');
+    assert(jsonArq.success === true || typeof jsonArq.erro === 'string',
+      'Storage indisponível devolve erro legível em vez de falhar em silêncio');
+
+    // 6.5. Importação das operações do ClickUp para a Torre de Controle
+    console.log('\n--- Testando Importação de Operações do ClickUp ---');
+    const op19 = operacaoDaTarefa({
+      id: 't1', name: 'OP19 Gisbom', url: 'https://app.clickup.com/t/t1',
+      status: { status: 'impo em producao na china', type: 'open' }
+    });
+    assert(op19.id === 'OP19', 'operacaoDaTarefa extrai o código OPxx do nome da tarefa');
+    assert(op19.nome === 'Gisbom', 'operacaoDaTarefa remove o código do nome exibido');
+    assert(op19.status === 'producao', 'operacaoDaTarefa traduz o status do ClickUp para o status interno');
+    assert(op19.clickupTaskId === 't1', 'operacaoDaTarefa preserva o id da tarefa para evitar duplicidade');
+
+    const opSub = operacaoDaTarefa({ id: 't2', name: 'OP03.1 Cabrinha Sri Lanka', status: { status: 'impo finalizada 2026', type: 'done' } });
+    assert(opSub.id === 'OP03.1', 'operacaoDaTarefa aceita códigos com subnúmero (OP03.1)');
+    assert(opSub.status === 'concluida', 'Status "impo finalizada" vira "concluida"');
+
+    const opSemCodigo = operacaoDaTarefa({ id: 't3', name: 'Motopecas - Igor', status: { status: 'estudo de viabilidade', type: 'custom' } });
+    assert(opSemCodigo.id === null, 'Tarefa sem código OPxx fica sem id (resolvido na listagem)');
+    assert(opSemCodigo.status === 'cotacao', 'Status "estudo de viabilidade" vira "cotacao"');
+
+    assert(statusInterno('status inexistente', 'closed') === 'concluida', 'Status desconhecido do tipo closed vira "concluida"');
+
+    const resOps = await fetch(`${baseUrl}/api/integrations/clickup/operacoes`);
+    const jsonOps = await resOps.json();
+    assert(resOps.status === 200, 'GET /api/integrations/clickup/operacoes retorna HTTP 200');
+    assert(Array.isArray(jsonOps.ops), 'GET /api/integrations/clickup/operacoes retorna array de operações');
+    assert(jsonOps.success === true || typeof jsonOps.erro === 'string',
+      'Quando o ClickUp falha, a rota devolve um erro legível em vez de falhar em silêncio');
 
     // 7. Testar Upload de Arquivo Suportado (PDF)
     console.log('\n--- Testando Upload Middleware e Rota (Arquivo Válido) ---');
@@ -162,6 +255,10 @@ async function runTests() {
     failures++;
   } finally {
     server.close();
+    try {
+      if (fs.existsSync(TEST_DB_FILE)) fs.unlinkSync(TEST_DB_FILE);
+      if (fs.existsSync(TEST_DB_FILE + '.bak')) fs.unlinkSync(TEST_DB_FILE + '.bak');
+    } catch (e) {}
     console.log(`\n===================================================`);
     console.log(`📊 Resultado dos Testes: ${passed} passaram, ${failures} falharam.`);
     console.log(`===================================================`);

@@ -4,3 +4,6 @@ uploads/*
 .env
 credentials-drive.json
 *.log
+data/db.json
+data/db.json.bak
+backups/
