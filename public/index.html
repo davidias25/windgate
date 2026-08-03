@@ -1669,6 +1669,14 @@ function migrateDB(){
     });
     DB.settings.schema = 5; ch = true;
   }
+  if ((DB.settings.schema || 5) < 6) {
+    // Tarefas anteriores à notificação de atribuição nascem como já vistas —
+    // do contrário todo mundo receberia um lote de "nova tarefa" retroativo.
+    (DB.agendaTasks || []).forEach(t => {
+      if (t && t.vistoEm === undefined) t.vistoEm = t.criadaEm || new Date().toISOString();
+    });
+    DB.settings.schema = 6; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -1818,6 +1826,7 @@ function showTab(k){
   if(k==='sourcing') renderForn();
   if(k==='fin') renderFin();
   if(k==='config') renderConfig();
+  if(k!=='agenda') _tarefasNovasDaVisita.clear();
   if(k==='agenda') renderAgenda();
   if(k==='gestao') renderGestao();
   if(k==='mapa') renderMapa();
@@ -3393,23 +3402,33 @@ function renderAgenda(){
   if(fS==='feitas') rows=rows.filter(t=>t.status==='feita');
   $('agEmpty').style.display=rows.length?'none':'block';
   $('agBody').innerHTML=rows.map(t=>{
-    const idx=DB.agendaTasks.indexOf(t);
+    const id=esc(t._id||'');
     const late=t.status!=='feita'&&t.prazo&&t.prazo<hj;
     const pr=t.prazo?t.prazo.split('-').reverse().join('/'):'—';
+    const nova=t.status!=='feita'&&(!t.vistoEm||_tarefasNovasDaVisita.has(t._id));
     return `<tr class="${late?'ag-late':''} ${t.status==='feita'?'ag-done':''}">
-      <td><input type="checkbox" style="width:auto" ${t.status==='feita'?'checked':''} onchange="agToggle(${idx},this.checked)"></td>
-      <td><b>${esc(t.t)}</b></td>
+      <td><input type="checkbox" style="width:auto" ${t.status==='feita'?'checked':''} onchange="agToggle('${id}',this.checked)"></td>
+      <td><b>${esc(t.t)}</b>${nova?' <span class="pill mag" style="font-size:9px">nova</span>':''}</td>
       <td>${esc(t.resp)}</td>
       <td>${late?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
       <td><span class="pill prio-${nrm(t.prio)}">${esc(t.prio)}</span></td>
       <td class="note">${esc(t.obs||'')}</td><td class="note">${esc(t.por||'')}</td>
-      <td><button class="del" onclick="DB.agendaTasks.splice(${idx},1);saveDB();renderAgenda();updateNotifs()">✕</button></td></tr>`;
+      <td><button class="del" onclick="agDel('${id}')">✕</button></td></tr>`;
   }).join('');
+  marcarTarefasVistas();
 }
-function agToggle(idx,done){
-  const t=DB.agendaTasks[idx];
+/* Tarefas são localizadas pelo `_id`: a sincronização reordena a lista quando
+   traz tarefas de outro usuário, e um índice velho concluiria a tarefa errada. */
+function agToggle(id,done){
+  const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
+  if(!t){ toast('⚠ Tarefa não encontrada'); renderAgenda(); return; }
   t.status=done?'feita':'aberta'; t.doneAt=done?new Date().toISOString().slice(0,10):null;
   saveDB(); renderAgenda(); updateNotifs();
+}
+function agDel(id){
+  const i=(DB.agendaTasks||[]).findIndex(x=>x && x._id===id);
+  if(i<0){ toast('⚠ Tarefa não encontrada'); return; }
+  DB.agendaTasks.splice(i,1); saveDB(); renderAgenda(); updateNotifs();
 }
 function openAgendaTaskModal(){
   openModal(`<h3>Nova tarefa na <span>agenda</span></h3>
@@ -3424,8 +3443,31 @@ function openAgendaTaskModal(){
 }
 function saveAgendaTask(){
   if(!V('m_agt')){ toast('⚠ Descreva a tarefa'); return; }
-  DB.agendaTasks.unshift({id:'t_'+Date.now(),t:V('m_agt'),resp:V('m_agresp'),prazo:V('m_agprazo'),prio:V('m_agprio'),status:'aberta',obs:V('m_agobs'),por:USER.nome.split(' ')[0],doneAt:null});
-  saveDB(); closeModal(); renderAgenda(); updateNotifs(); toast('Tarefa adicionada ✓');
+  const eu=USER.nome.split(' ')[0], resp=V('m_agresp');
+  // `vistoEm` vazio é o que faz a tarefa aparecer como nova para o responsável.
+  // Quem atribui para si mesmo já sabe da tarefa, então nasce como vista.
+  DB.agendaTasks.unshift({_id:novoId(),id:'t_'+Date.now(),t:V('m_agt'),resp,prazo:V('m_agprazo'),
+    prio:V('m_agprio'),status:'aberta',obs:V('m_agobs'),por:eu,doneAt:null,
+    criadaEm:new Date().toISOString(), vistoEm: resp===eu ? new Date().toISOString() : null});
+  saveDB(); closeModal(); renderAgenda(); updateNotifs();
+  toast(resp===eu ? 'Tarefa adicionada ✓' : `Tarefa atribuída a <b>${esc(resp)}</b> — ele(a) será notificado(a) ✓`);
+}
+
+/* O responsável deixa de ser avisado assim que abre a Agenda e vê a tarefa.
+   As que eram novas seguem marcadas até ele sair da aba — se a etiqueta sumisse
+   no mesmo instante, ele nunca veria QUAIS tarefas eram as novas. */
+let _tarefasNovasDaVisita = new Set();
+function marcarTarefasVistas(){
+  if(!USER) return;
+  const eu=USER.nome.split(' ')[0], agora=new Date().toISOString();
+  let mudou=false;
+  (DB.agendaTasks||[]).forEach(t=>{
+    if(t && t.resp===eu && !t.vistoEm){
+      _tarefasNovasDaVisita.add(t._id);
+      t.vistoEm=agora; mudou=true;
+    }
+  });
+  if(mudou){ saveDB(); updateNotifs(); }
 }
 
 /* ---------- PENDÊNCIAS / NOTIFICAÇÕES ---------- */
@@ -3442,7 +3484,13 @@ function computeNotifs(){
     }));
     DB.docs.filter(d=>d.status==='recebido'&&d.cat!=='Checklist').forEach(d=>n.push({tab:'painel',ic:'📁',tx:`<b>${esc(d.nome)}</b> (${esc(d.op)}) recebido — revisar`,tg:'Documentação'}));
   }
-  DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.prazo&&t.prazo<=hj).forEach(t=>{
+  // Tarefa recém-atribuída a mim por outra pessoa — avisa até eu abrir a Agenda
+  DB.agendaTasks.filter(t=>t && t.status!=='feita' && t.resp===eu && !t.vistoEm).forEach(t=>{
+    const prazo=t.prazo?` · prazo ${t.prazo.split('-').reverse().join('/')}`:'';
+    n.push({tab:'agenda',ic:'🔔',tx:`Nova tarefa para você: <b>${esc(t.t)}</b>${t.por?` — atribuída por <b>${esc(t.por)}</b>`:''}${prazo}`,tg:'Agenda — Nova atribuição'});
+  });
+  // Vencimento: só para as que já foram vistas, senão o aviso acima duplica
+  DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.vistoEm&&t.prazo&&t.prazo<=hj).forEach(t=>{
     n.push({tab:'agenda',ic:'📅',tx:`Tarefa <b>${esc(t.t)}</b> ${t.prazo<hj?'<b style="color:var(--red)">vencida</b>':'vence hoje'}`,tg:'Agenda'});
   });
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
