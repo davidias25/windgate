@@ -779,7 +779,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>Mark-up NF (%)</label><input type="number" id="mkp" value="1" step="0.1" oninput="calc()"></div>
           <div><label>Alíq. efetiva ST — CE (%)</label><input type="number" id="aliqST" value="16" step="0.1" oninput="calc()"></div>
         </div>
-        <p class="note">Padrões replicam a planilha "Nacionalização AL" (PIS imp. 2,1% · COFINS imp. 9,65% fixos por item; ST CE = 20% interna − 4% destacado). Ajuste apenas com validação da contadora.</p>
+        <p class="note">PIS/COFINS de <b>saída</b> (venda). Os de <b>importação</b> vêm da NCM de cada item, na tabela abaixo. ST CE = 20% interna − 4% destacado. Ajuste apenas com validação da contadora.</p>
+        <p class="note" style="color:#F0B429;margin-top:6px">⚠ <b>% Invoice (base impostos)</b> abaixo de 100% calcula os tributos sobre um valor menor que o da invoice. O Simulador Siscomex usa sempre o valor aduaneiro integral — mantenha 100% para conferir com ele.</p>
       </section>
 
       <section class="card">
@@ -789,6 +790,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <thead><tr>
               <th style="min-width:170px">Descrição</th><th>NCM</th><th class="r">Qtd</th>
               <th class="r">Unit. USD</th><th class="r">Peso unit. (kg)</th><th class="r">II %</th><th class="r">IPI %</th>
+              <th class="r" title="PIS-Importação da NCM">PIS %</th><th class="r" title="COFINS-Importação da NCM">COFINS %</th>
               <th title="Convênio 52/91 — só na triangular">52/91</th><th title="PIS/COFINS monofásico — só na triangular">Mono</th>
               <th class="r">FOB R$</th><th></th>
             </tr></thead>
@@ -3867,7 +3869,7 @@ const DEFAULT_EXPS = [
 ];
 
 function addItem(it){
-  it = it||{d:'',ncm:'',q:1,u:0,p:0,ii:10.8,ipi:0,c5291:false,mono:false};
+  it = it||{d:'',ncm:'',q:1,u:0,p:0,ii:10.8,ipi:0,pis:2.1,cofins:9.65,c5291:false,mono:false};
   state.items.push(it);
   renderItems();
   const idx = state.items.length - 1;
@@ -3890,6 +3892,8 @@ function renderItems(){
       <td><input type="number" id="item_p_${i}" value="${it.p}" step="0.01" style="width:80px" oninput="state.items[${i}].p=+this.value||0;calc()"></td>
       <td><input type="number" id="item_ii_${i}" value="${it.ii}" step="0.1" style="width:64px" oninput="state.items[${i}].ii=+this.value||0;calc()"></td>
       <td><input type="number" id="item_ipi_${i}" value="${it.ipi}" step="0.1" style="width:64px" oninput="state.items[${i}].ipi=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_pis_${i}" value="${it.pis!=null?it.pis:2.1}" step="0.01" style="width:66px" oninput="state.items[${i}].pis=+this.value||0;calc()"></td>
+      <td><input type="number" id="item_cof_${i}" value="${it.cofins!=null?it.cofins:9.65}" step="0.01" style="width:74px" oninput="state.items[${i}].cofins=+this.value||0;calc()"></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.c5291?'checked':''} onchange="state.items[${i}].c5291=this.checked;calc()"></td>
       <td style="text-align:center"><input type="checkbox" style="width:auto" ${it.mono?'checked':''} onchange="state.items[${i}].mono=this.checked;calc()"></td>
       <td class="r num item-total" id="fob_${i}">—</td>
@@ -3971,8 +3975,12 @@ function ncmAuto(i,raw){
   if($('item_ii_'+i)) $('item_ii_'+i).value = tax.ii;
   if($('item_ipi_'+i)) $('item_ipi_'+i).value = tax.ipi;
   if($('item_desc_'+i) && (!$('item_desc_'+i).value || $('item_desc_'+i).value.startsWith('Item'))) $('item_desc_'+i).value = tax.desc;
-  if($('pisS')) $('pisS').value = tax.pis;
-  if($('cofS')) $('cofS').value = tax.cofins;
+  // PIS/COFINS da NCM são os de IMPORTAÇÃO e vão para o item. Antes eram
+  // gravados em pisS/cofS, que são as alíquotas de SAÍDA — escolher a NCM
+  // trocava 1,6%/7,65% da venda por 2,1%/9,65% da importação.
+  it.pis = tax.pis; it.cofins = tax.cofins;
+  if($('item_pis_'+i)) $('item_pis_'+i).value = tax.pis;
+  if($('item_cof_'+i)) $('item_cof_'+i).value = tax.cofins;
 
   calc();
   $('ncmHint').innerHTML=`📊 <b>Tributos NCM ${ncm}:</b> II: <b style="color:#34C77C">${tax.ii}%</b> · IPI: <b style="color:#34C77C">${tax.ipi}%</b> · PIS: <b style="color:#34C77C">${tax.pis}%</b> · COFINS: <b style="color:#34C77C">${tax.cofins}%</b> (${esc(tax.desc)}) &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
@@ -3990,6 +3998,8 @@ function ncmAuto(i,raw){
           const d=json.data;
           if(d.ii!=null) { it.ii=d.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=d.ii; }
           if(d.ipi!=null) { it.ipi=d.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=d.ipi; }
+          if(d.pis!=null) { it.pis=d.pis; if($('item_pis_'+i)) $('item_pis_'+i).value=d.pis; }
+          if(d.cofins!=null) { it.cofins=d.cofins; if($('item_cof_'+i)) $('item_cof_'+i).value=d.cofins; }
           if(d.descricao && (!it.d || it.d === tax.desc)) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
           calc();
           $('ncmHint').innerHTML=`🌐 <b>Siscomex Classif API (Oficial):</b> ${esc(d.descricao)}<br>📊 <b>Tributos Importação Preenchidos:</b> II: <b style="color:#34C77C">${d.ii}%</b> · IPI: <b style="color:#34C77C">${d.ipi}%</b> · PIS: <b style="color:#34C77C">${d.pis}%</b> · COFINS: <b style="color:#34C77C">${d.cofins}%</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
@@ -4035,10 +4045,15 @@ function calc(){
     const share=fob/fobBRLtot, pesoShare=pesoTot>0?(it.q*it.p)/pesoTot:share;
     const invRed=fob*pctInv;
     const frete_i=share*freteBRL, seg_i=share*seguro, cap_i=share*capat;
-    const cif=invRed+frete_i+seg_i+cap_i;              // base impostos (invoice reduzida)
+    const cif=invRed+frete_i+seg_i+cap_i;              // valor aduaneiro
     const ii=cif*(it.ii/100), ipi=(cif+ii)*(it.ipi/100);
-    const pis=cif*0.021, cof=cif*0.0965;
-    const ce=(invRed+frete_i+ii+ipi+pis+cof+share*sisc+pesoShare*afrmm+share*honor)/(1-icmsE);
+    // PIS/COFINS-Importação usam a alíquota da própria NCM. Estavam fixos em
+    // 2,1%/9,65%, o que errava toda NCM com alíquota diferente.
+    const pis=cif*((it.pis!=null?it.pis:2.1)/100), cof=cif*((it.cofins!=null?it.cofins:9.65)/100);
+    // Base do ICMS (LC 87/96, art. 13, V): valor aduaneiro + II + IPI + PIS +
+    // COFINS + despesas aduaneiras, com o próprio ICMS por dentro. O seguro e a
+    // capatazia integram o valor aduaneiro e faltavam aqui.
+    const ce=(cif+ii+ipi+pis+cof+share*sisc+pesoShare*afrmm+share*honor)/(1-icmsE);
     const icmsent=ce*icmsE, ch=ce-ipi-icmsent;
     II+=ii;IPI+=ipi;PIS+=pis;COF+=cof;CEtot+=ce;ICMSent+=icmsent;CHtot+=ch;
   });
@@ -4062,7 +4077,9 @@ function calc(){
   const st = (V('ufDestino')==='CE') ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
   const custoReal = compra + impostos + despesas + resultante;   // L113
 
-  R={compra,impostos,despesas,resultante,custoReal,st,nfSaida,fob:fobBRLtot};
+  R={compra,impostos,despesas,resultante,custoReal,st,nfSaida,fob:fobBRLtot,
+     // detalhamento por tributo, para conferência contra o Simulador Siscomex
+     __ii:II,__ipi:IPI,__pis:PIS,__cof:COF,__icms:ICMSent};
   R.fobShares=[]; if(fobBRLtot>0) state.items.forEach(it=>R.fobShares.push({share:(it.q*it.u*txD)/fobBRLtot,c5291:!!it.c5291,mono:!!it.mono}));
   $('sCompra').textContent=fmt(compra);
   $('sImpostos').textContent=fmt(impostos);
