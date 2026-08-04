@@ -43,6 +43,8 @@ if (!fs.existsSync(path.dirname(DB_FILE_PATH))) {
 
 const { buscarNCM, pesquisarNCMs } = require('./services/ncm.service');
 const { mesclarDB } = require('./services/db-merge.service');
+const { consultarTratamento } = require('./integrations/siscomex.service');
+const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
 
 // O banco é carregado de forma assíncrona (vem do Supabase Storage). As rotas
@@ -88,6 +90,49 @@ app.post('/api/db', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Banco de alíquotas oficiais (TEC/Gecex + TIPI/Receita), atualizado a cada 15 dias
+app.get('/api/aliquotas/status', async (req, res) => {
+  await aliquotas.carregar();
+  res.json({ success: true, ...aliquotas.status() });
+});
+
+app.post('/api/aliquotas/atualizar', async (req, res) => {
+  const r = await aliquotas.atualizar(req.query.force === '1');
+  res.status(r.ok ? 200 : 500).json({ success: r.ok, ...r, ...aliquotas.status() });
+});
+
+app.get('/api/aliquotas/:ncm', async (req, res) => {
+  try {
+    const r = await aliquotas.consultar(req.params.ncm);
+    if (!r) {
+      return res.status(200).json({
+        success: false,
+        encontrado: false,
+        erro: aliquotas.status().carregada
+          ? 'NCM não consta na TEC vigente — confira o código.'
+          : 'Tabela de alíquotas ainda não carregada no servidor.'
+      });
+    }
+    res.json({ success: true, encontrado: true, ...r });
+  } catch (err) {
+    res.status(500).json({ success: false, encontrado: false, erro: err.message });
+  }
+});
+
+// Tratamento tributário da NCM no TTCE (regime e fundamento legal — não traz
+// alíquota; serve para avisar quando a alíquota cheia não se aplica).
+app.get('/api/ncm/:code/tratamento', async (req, res) => {
+  try {
+    const r = await consultarTratamento(req.params.code, {
+      codigoPais: req.query.pais,
+      data: req.query.data
+    });
+    res.status(200).json(Object.assign({ success: !r.erro }, r));
+  } catch (err) {
+    res.status(500).json({ success: false, configurado: false, erro: err.message });
   }
 });
 
@@ -257,6 +302,8 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 if (require.main === module) {
+  // Verifica diariamente e rebaixa as planilhas oficiais a cada 15 dias.
+  aliquotas.agendar();
   app.listen(PORT, () => {
     console.log(`===================================================`);
     console.log(`🚀 Servidor WindGate API rodando na porta ${PORT}`);

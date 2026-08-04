@@ -16,6 +16,8 @@ process.env.SUPABASE_DISABLED = '1';
 const app = require('../src/server');
 const { criarTarefaOperacao, operacaoDaTarefa, statusInterno } = require('../src/integrations/clickup.service');
 const { mesclarDB } = require('../src/services/db-merge.service');
+const aliquotas = require('../src/services/aliquotas.service');
+const siscomex = require('../src/integrations/siscomex.service');
 
 async function runTests() {
   console.log('🧪 Iniciando suíte de testes de integração do WindGate Backend...\n');
@@ -162,6 +164,52 @@ async function runTests() {
     const aposMerge = (await (await fetch(`${baseUrl}/api/db`)).json()).db;
     assert(aposMerge.docs.some(d => d._id === 'api-1') && aposMerge.docs.some(d => d._id === 'api-2'),
       'POST /api/db mescla em vez de substituir — nenhum documento é perdido');
+
+    // 6.3. Banco de alíquotas oficiais (TEC + TIPI)
+    console.log('\n--- Testando Banco de Alíquotas (TEC/Gecex + TIPI/Receita) ---');
+    assert(aliquotas.parseAliquota(0).valor === 0, 'parseAliquota lê alíquota zero');
+    assert(aliquotas.parseAliquota('12,6BK').valor === 12.6, 'parseAliquota lê alíquota com vírgula');
+    assert(aliquotas.parseAliquota('12,6BK').marcador === 'BK', 'parseAliquota preserva a marcação da TEC (BK/BIT)');
+    assert(aliquotas.parseAliquota('') === null, 'parseAliquota ignora célula vazia');
+    assert(aliquotas.parseAliquota('NT') === null, 'parseAliquota ignora "NT" (não tributado)');
+    assert(aliquotas.INTERVALO_DIAS === 15, 'Atualização das alíquotas configurada para 15 dias');
+
+    const resStatus = await fetch(`${baseUrl}/api/aliquotas/status`);
+    const jsonStatus = await resStatus.json();
+    assert(resStatus.status === 200, 'GET /api/aliquotas/status retorna HTTP 200');
+    assert(jsonStatus.intervaloDias === 15, 'Status informa o intervalo de 15 dias');
+
+    const resNcmAliq = await fetch(`${baseUrl}/api/aliquotas/73089090`);
+    const jsonNcmAliq = await resNcmAliq.json();
+    assert(resNcmAliq.status === 200, 'GET /api/aliquotas/:ncm retorna HTTP 200');
+    assert(typeof jsonNcmAliq.encontrado === 'boolean', 'Consulta de alíquota informa se a NCM foi encontrada');
+    if (jsonNcmAliq.encontrado) {
+      assert(typeof jsonNcmAliq.ii === 'number', 'NCM encontrada traz alíquota de II numérica');
+    }
+
+    const resNcmInvalido = await fetch(`${baseUrl}/api/aliquotas/00000000`);
+    const jsonNcmInvalido = await resNcmInvalido.json();
+    assert(jsonNcmInvalido.encontrado === false && typeof jsonNcmInvalido.erro === 'string',
+      'NCM inexistente devolve erro legível em vez de alíquota inventada');
+
+    // 6.35. TTCE — tratamento tributário (não traz alíquota, traz o regime)
+    console.log('\n--- Testando TTCE (tratamento tributário) ---');
+    const ttceExemplo = siscomex.normalizar({ tratamentosTributarios: [
+      { tributo: { nome: 'II' }, regime: { nome: 'RECOLHIMENTO INTEGRAL' }, fundamentoLegal: { codigo: '6999', nome: 'Regra geral' } },
+      { tributo: { nome: 'IPI' }, regime: { nome: 'REDUÇÃO' }, fundamentoLegal: { codigo: '1234', nome: 'Ex-tarifário' } }
+    ]});
+    assert(ttceExemplo.integral === false, 'TTCE marca a NCM como fora do recolhimento integral quando há redução');
+    assert(ttceExemplo.ressalvas.length === 1 && ttceExemplo.ressalvas[0].tributo === 'IPI',
+      'TTCE isola qual tributo está fora do recolhimento integral');
+    assert(siscomex.normalizar({ tratamentosTributarios: [
+      { tributo: { nome: 'II' }, regime: { nome: 'RECOLHIMENTO INTEGRAL' } }
+    ]}).integral === true, 'TTCE confirma recolhimento integral quando todos os tributos estão integrais');
+
+    const resTtce = await fetch(`${baseUrl}/api/ncm/73089090/tratamento`);
+    const jsonTtce = await resTtce.json();
+    assert(resTtce.status === 200, 'GET /api/ncm/:code/tratamento retorna HTTP 200');
+    assert(jsonTtce.configurado === false || Array.isArray(jsonTtce.tributos),
+      'Sem certificado, o TTCE informa que não está configurado em vez de quebrar');
 
     // 6.4. Listagem do Storage (recuperar documentos já enviados)
     console.log('\n--- Testando Listagem do Supabase Storage ---');

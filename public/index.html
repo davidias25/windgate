@@ -800,6 +800,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="addItem()">+ adicionar item</button>
         <div class="warn" id="warnNCM">⚠ Existe NCM com menos de 8 dígitos — confira antes de aprovar.</div>
         <div class="note" id="ncmHint" style="margin-top:8px"></div>
+        <div id="ttceHint" style="margin-top:8px"></div>
       </section>
 
       <section class="card">
@@ -3980,6 +3981,58 @@ let _ncmT=null;
 /* Deixa explícito de onde vieram as alíquotas. Só as salvas na biblioteca foram
    conferidas por alguém; as demais são tabela interna ou estimativa por capítulo
    e precisam ser checadas no Simulador Siscomex antes de virar preço. */
+/* Tratamento tributário da NCM no TTCE do Portal Único. Ele não devolve
+   alíquota — devolve o REGIME de cada tributo. O que interessa aqui é o caso
+   em que o regime não é recolhimento integral: a alíquota cheia da biblioteca
+   deixa de valer e alguém precisa olhar o fundamento legal. */
+let _ttceT=null;
+function consultarTTCE(ncm){
+  const box=$('ttceHint'); if(!box) return;
+  clearTimeout(_ttceT);
+  _ttceT=setTimeout(async()=>{
+    try{
+      const r=await fetch(getApiUrl(`/api/ncm/${ncm}/tratamento`));
+      const j=await r.json();
+
+      // Sem certificado no servidor a consulta simplesmente não existe para o
+      // usuário — não faz sentido poluir a tela com erro de configuração.
+      if(!j.configurado){ box.innerHTML=''; return; }
+
+      if(j.erro){
+        box.innerHTML=`<div class="note" style="color:var(--mut2)">TTCE indisponível no momento (${esc(j.erro)}). As alíquotas da cotação não dependem dele.</div>`;
+        return;
+      }
+      if(!j.tributos || !j.tributos.length){ box.innerHTML=''; return; }
+
+      if(j.integral){
+        box.innerHTML=`<div class="note" style="color:#34C77C">✅ <b>TTCE:</b> recolhimento integral para todos os tributos desta NCM — as alíquotas cheias se aplicam.</div>`;
+        return;
+      }
+      box.innerHTML=`<div style="background:#FF5A6E1a;border:1px solid #FF5A6E66;border-radius:8px;padding:10px 12px">
+        <div style="color:#FFB4BE;font-weight:700;font-size:12px">⚠️ TTCE — esta NCM tem tributo fora do recolhimento integral</div>
+        <div style="font-size:11.5px;color:#E7ECF7;margin-top:5px">A alíquota cheia pode não se aplicar. Confira o fundamento legal antes de fechar o preço.</div>
+        <table style="width:100%;font-size:11.5px;margin-top:7px">
+          <thead><tr><th style="text-align:left;padding:3px 4px">Tributo</th><th style="text-align:left;padding:3px 4px">Regime</th><th style="text-align:left;padding:3px 4px">Fundamento legal</th></tr></thead>
+          <tbody>${j.ressalvas.map(t=>`<tr>
+            <td style="padding:3px 4px"><b>${esc(t.tributo)}</b></td>
+            <td style="padding:3px 4px"><span class="pill wait">${esc(t.regime)}</span></td>
+            <td style="padding:3px 4px;color:var(--mut)">${esc(t.fundamentoLegal||'—')}</td></tr>`).join('')}</tbody>
+        </table></div>`;
+    }catch(e){ box.innerHTML=''; }
+  },400);
+}
+
+/* Aviso quando o II e o IPI vieram da tabela oficial baixada das fontes. */
+function hintOficial(ncm, a, i){
+  const dias = a.atualizadoEm ? Math.floor((Date.now()-new Date(a.atualizadoEm))/86400000) : null;
+  const marc = a.marcador ? ` <span class="pill blue" title="marcação da TEC">${esc(a.marcador)}</span>` : '';
+  return `<div style="color:#34C77C">📋 <b>NCM ${esc(ncm)}</b> — alíquotas oficiais: II <b>${a.ii}%</b>${marc} · IPI <b>${a.ipi!=null?a.ipi:'—'}%</b></div>
+    <div style="margin-top:2px">${esc(a.desc||'')}</div>
+    <div class="note" style="margin-top:4px">Fonte: TEC (Gecex) e TIPI (Receita Federal)${dias!=null?` · tabela atualizada há ${dias} dia(s)`:''}.
+      PIS <b>${document.getElementById('item_pis_'+i)?document.getElementById('item_pis_'+i).value:'2.1'}%</b> e COFINS <b>${document.getElementById('item_cof_'+i)?document.getElementById('item_cof_'+i).value:'9.65'}%</b> seguem a Lei 10.865/2004 — confira se a NCM tem exceção.
+      <button class="btn btn-ghost btn-sm" onclick="ncmSave(${i})">💾 fixar na biblioteca</button></div>`;
+}
+
 function hintNCM(ncm, tax, i, descOficial){
   const linha = `II: <b>${tax.ii}%</b> · IPI: <b>${tax.ipi}%</b> · PIS: <b>${tax.pis}%</b> · COFINS: <b>${tax.cofins}%</b>`;
   const simulador = `<a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">conferir no Simulador Siscomex ↗</a>`;
@@ -4032,6 +4085,22 @@ function ncmAuto(i,raw){
   clearTimeout(_ncmT);
   _ncmT=setTimeout(async()=>{
     try{
+      // Alíquotas oficiais (TEC + TIPI). Não sobrescrevem o que a equipe já
+      // conferiu e salvou na biblioteca — essa continua tendo a última palavra.
+      try{
+        const ra=await fetch(getApiUrl('/api/aliquotas/'+ncm));
+        const ja=await ra.json();
+        if(ja.encontrado && getNCMAliquotas(ncm).origem!=='lib'){
+          if(ja.ii!=null){ it.ii=ja.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=ja.ii; }
+          if(ja.ipi!=null){ it.ipi=ja.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=ja.ipi; }
+          calc();
+          $('ncmHint').innerHTML = hintOficial(ncm, ja, i);
+        } else if(!ja.encontrado && ja.erro){
+          const box=$('ncmHint');
+          if(box) box.innerHTML += `<div class="note" style="color:#F0B429;margin-top:4px">ℹ️ ${esc(ja.erro)}</div>`;
+        }
+      }catch(e){}
+
       const r=await fetch('/api/ncm/'+ncm);
       if(r.ok){
         const json=await r.json();
@@ -4042,7 +4111,8 @@ function ncmAuto(i,raw){
           // sistema — não sobrescrevem o que já foi conferido e salvo.
           if(d.descricao && (!it.d || it.d === tax.desc)) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
           calc();
-          $('ncmHint').innerHTML = hintNCM(ncm, getNCMAliquotas(ncm), i, d.descricao);
+          if(!/TEC \(Gecex\)/.test($('ncmHint').textContent)) $('ncmHint').innerHTML = hintNCM(ncm, getNCMAliquotas(ncm), i, d.descricao);
+          consultarTTCE(ncm);
         }
       }
     }catch(e){}
