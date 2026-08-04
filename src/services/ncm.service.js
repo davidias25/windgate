@@ -91,7 +91,11 @@ async function buscarNCM(codigoRaw) {
       ipi: aliquotas.ipi,
       pis: aliquotas.pis,
       cofins: aliquotas.cofins,
-      fonte: 'Siscomex Classif API (Oficial)'
+      // A API do Siscomex Classif publica só a nomenclatura. A descrição é
+      // oficial; as alíquotas vêm da tabela interna deste serviço e podem não
+      // corresponder à NCM — chamá-las de oficiais induzia a erro.
+      fonte: 'Descrição: Siscomex Classif (oficial) · Alíquotas: tabela interna',
+      aliquotasEstimadas: !NCM_SPECIFIC[cleanCode]
     };
   }
 
@@ -104,7 +108,8 @@ async function buscarNCM(codigoRaw) {
     ipi: aliquotas.ipi,
     pis: aliquotas.pis,
     cofins: aliquotas.cofins,
-    fonte: 'Regra Tributária TEC'
+    fonte: 'Alíquotas estimadas por capítulo — conferir no Simulador Siscomex',
+    aliquotasEstimadas: true
   };
 }
 

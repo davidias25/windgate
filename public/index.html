@@ -3915,9 +3915,28 @@ function renderExps(){
 }
 
 /* ===== Biblioteca NCM & Motor Tributário TEC/TIPI ===== */
+/* A API do Siscomex Classif publica apenas a nomenclatura (código e descrição):
+   ela NÃO traz alíquotas. As alíquotas abaixo são uma tabela interna reduzida —
+   fora dela, o que sai é uma estimativa por capítulo. Por isso toda NCM não
+   cadastrada aparecia com II 10,8% · IPI 3,25%.
+
+   A biblioteca (DB.ncmlib) tem precedência: uma alíquota conferida no Simulador
+   Siscomex e salva uma vez passa a valer para toda a equipe. */
 function getNCMAliquotas(ncmCode){
   const clean = String(ncmCode||'').replace(/\D/g,'');
-  if(clean.length < 2) return { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Mercadoria geral' };
+  if(clean.length < 2) return { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Mercadoria geral', origem:'default' };
+
+  const salvo = ncmLib()[clean];
+  if(salvo && salvo.ii != null){
+    return {
+      ii:+salvo.ii, ipi:+salvo.ipi||0,
+      pis: salvo.pis!=null?+salvo.pis:2.1,
+      cofins: salvo.cofins!=null?+salvo.cofins:9.65,
+      desc: salvo.d || `NCM ${clean}`,
+      c5291: !!salvo.c5291, mono: !!salvo.mono,
+      origem: 'lib'
+    };
+  }
 
   const spec = {
     '73089090': { ii: 10.8, ipi: 0, pis: 2.1, cofins: 9.65, desc: 'Escoras e estruturas de ferro ou aço', c5291: true, mono: false },
@@ -3933,7 +3952,7 @@ function getNCMAliquotas(ncmCode){
     '82055990': { ii: 14.0, ipi: 5.0, pis: 2.1, cofins: 9.65, desc: 'Ferramentas manuais', c5291: false, mono: false },
     '95030099': { ii: 18.0, ipi: 6.5, pis: 2.1, cofins: 9.65, desc: 'Outros brinquedos', c5291: false, mono: false }
   };
-  if(spec[clean]) return spec[clean];
+  if(spec[clean]) return Object.assign({origem:'tabela'}, spec[clean]);
 
   const cap = clean.slice(0, 2);
   const capRules = {
@@ -3951,11 +3970,33 @@ function getNCMAliquotas(ncmCode){
     '70': { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: 'Vidro e suas obras' }
   };
 
-  return capRules[cap] || { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: `Mercadoria NCM Cap. ${cap}` };
+  if(capRules[cap]) return Object.assign({origem:'capitulo'}, capRules[cap]);
+  return { ii: 10.8, ipi: 3.25, pis: 2.1, cofins: 9.65, desc: `Mercadoria NCM Cap. ${cap}`, origem:'estimativa' };
 }
 
 function ncmLib(){ if(!DB.ncmlib) DB.ncmlib={}; return DB.ncmlib; }
 let _ncmT=null;
+
+/* Deixa explícito de onde vieram as alíquotas. Só as salvas na biblioteca foram
+   conferidas por alguém; as demais são tabela interna ou estimativa por capítulo
+   e precisam ser checadas no Simulador Siscomex antes de virar preço. */
+function hintNCM(ncm, tax, i, descOficial){
+  const linha = `II: <b>${tax.ii}%</b> · IPI: <b>${tax.ipi}%</b> · PIS: <b>${tax.pis}%</b> · COFINS: <b>${tax.cofins}%</b>`;
+  const simulador = `<a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">conferir no Simulador Siscomex ↗</a>`;
+  const salvar = `<button class="btn btn-ghost btn-sm" onclick="ncmSave(${i})">💾 salvar estas alíquotas para a NCM ${esc(ncm)}</button>`;
+  const desc = descOficial ? `<div style="margin-top:2px">${esc(descOficial)}</div>` : '';
+
+  if(tax.origem === 'lib'){
+    return `<div style="color:#34C77C">✅ <b>NCM ${esc(ncm)}</b> — alíquotas conferidas e salvas pela equipe: ${linha}</div>${desc}
+      <div style="margin-top:4px">${simulador} · edite na tabela e salve de novo para atualizar.</div>`;
+  }
+  const rotulo = tax.origem === 'tabela' ? 'tabela interna (não conferida na fonte oficial)'
+               : tax.origem === 'capitulo' ? `estimativa pelo capítulo ${esc(ncm.slice(0,2))} — <b>não é a alíquota desta NCM</b>`
+               : 'valor genérico — <b>não é a alíquota desta NCM</b>';
+  return `<div style="color:#F0B429">⚠️ <b>NCM ${esc(ncm)}</b> — ${rotulo}: ${linha}</div>${desc}
+    <div style="margin-top:4px">Confira no simulador e corrija na tabela de itens. ${simulador}</div>
+    <div style="margin-top:4px">${salvar}</div>`;
+}
 
 function ncmAuto(i,raw){
   const ncm=String(raw||'').replace(/\D/g,'');
@@ -3983,7 +4024,7 @@ function ncmAuto(i,raw){
   if($('item_cof_'+i)) $('item_cof_'+i).value = tax.cofins;
 
   calc();
-  $('ncmHint').innerHTML=`📊 <b>Tributos NCM ${ncm}:</b> II: <b style="color:#34C77C">${tax.ii}%</b> · IPI: <b style="color:#34C77C">${tax.ipi}%</b> · PIS: <b style="color:#34C77C">${tax.pis}%</b> · COFINS: <b style="color:#34C77C">${tax.cofins}%</b> (${esc(tax.desc)}) &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
+  $('ncmHint').innerHTML = hintNCM(ncm, tax, i);
 
   if(ncm.length < 8) return;
 
@@ -3996,13 +4037,12 @@ function ncmAuto(i,raw){
         const json=await r.json();
         if(json.success && json.data){
           const d=json.data;
-          if(d.ii!=null) { it.ii=d.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=d.ii; }
-          if(d.ipi!=null) { it.ipi=d.ipi; if($('item_ipi_'+i)) $('item_ipi_'+i).value=d.ipi; }
-          if(d.pis!=null) { it.pis=d.pis; if($('item_pis_'+i)) $('item_pis_'+i).value=d.pis; }
-          if(d.cofins!=null) { it.cofins=d.cofins; if($('item_cof_'+i)) $('item_cof_'+i).value=d.cofins; }
+          // A API do Siscomex só confirma a DESCRIÇÃO oficial da NCM. As
+          // alíquotas que ela devolve são as mesmas da tabela interna deste
+          // sistema — não sobrescrevem o que já foi conferido e salvo.
           if(d.descricao && (!it.d || it.d === tax.desc)) { it.d=d.descricao; if($('item_desc_'+i)) $('item_desc_'+i).value=d.descricao; }
           calc();
-          $('ncmHint').innerHTML=`🌐 <b>Siscomex Classif API (Oficial):</b> ${esc(d.descricao)}<br>📊 <b>Tributos Importação Preenchidos:</b> II: <b style="color:#34C77C">${d.ii}%</b> · IPI: <b style="color:#34C77C">${d.ipi}%</b> · PIS: <b style="color:#34C77C">${d.pis}%</b> · COFINS: <b style="color:#34C77C">${d.cofins}%</b> &nbsp; <a href="https://portalunico.siscomex.gov.br/ttce/#/simulador-calculo" target="_blank" style="color:#7FA6FF">abrir Simulador Siscomex TTCE ↗</a>`;
+          $('ncmHint').innerHTML = hintNCM(ncm, getNCMAliquotas(ncm), i, d.descricao);
         }
       }
     }catch(e){}
@@ -4011,8 +4051,17 @@ function ncmAuto(i,raw){
 function ncmSave(i){
   const it=state.items[i]; const ncm=String(it.ncm||'').replace(/\D/g,'');
   if(ncm.length!==8){ toast('⚠ NCM precisa de 8 dígitos'); return; }
-  ncmLib()[ncm]={d:it.d||'salvo do uso',ii:+it.ii||null,ipi:+it.ipi||null,c5291:!!it.c5291,mono:!!it.mono};
-  saveDB(); toast('📚 NCM '+ncm+' salvo na biblioteca ✓');
+  // Guarda os quatro tributos: salvar só II e IPI deixava PIS/COFINS voltarem
+  // para o palpite genérico na próxima vez que a NCM fosse digitada.
+  ncmLib()[ncm]={
+    d: it.d || 'salvo do uso',
+    ii: +it.ii || 0, ipi: +it.ipi || 0,
+    pis: it.pis!=null ? +it.pis : 2.1,
+    cofins: it.cofins!=null ? +it.cofins : 9.65,
+    c5291: !!it.c5291, mono: !!it.mono,
+    por: USER ? USER.nome.split(' ')[0] : '', em: hoje()
+  };
+  saveDB(); toast(`📚 NCM ${ncm} salvo — passa a valer para toda a equipe ✓`);
   ncmAuto(i,ncm);
 }
 function tipoOpChanged(){
