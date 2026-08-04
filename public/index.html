@@ -645,6 +645,17 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .prio-baixa{background:var(--blue-soft);color:#7FA6FF}
 .ag-late td{background:rgba(255,90,110,.05)}
 .ag-done{opacity:.5;text-decoration:line-through}
+.ag-exp{background:none;border:0;color:var(--mut);cursor:pointer;font:inherit;font-size:11px;padding:0 5px 0 0;line-height:1}
+.ag-exp:hover{color:var(--txt)}
+.ag-sub>td{background:rgba(255,255,255,.025);padding-top:4px;padding-bottom:10px}
+.ag-sub-wrap{padding-left:26px;border-left:2px solid rgba(143,160,188,.18);margin-left:4px}
+.ag-sub-item{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+.ag-sub-item.feita{opacity:.45;text-decoration:line-through}
+.ag-sub-item.feita .ag-sub-quem,.ag-sub-item.feita .del{text-decoration:none}
+.ag-sub-item .del{margin-left:auto}
+.ag-sub-add{display:flex;gap:6px;margin-top:6px}
+.ag-sub-add input{flex:1 1 auto;min-width:0;font-size:12px;padding:5px 8px}
+.ag-sub-quem{font-size:9.5px;color:var(--mut2);text-transform:none;letter-spacing:0}
 /* gestão do mês */
 .gest-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
 @media(max-width:1020px){.gest-grid{grid-template-columns:1fr}}
@@ -1023,7 +1034,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div style="overflow-x:auto"><table><thead><tr><th></th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th>Obs</th><th>Criada por</th><th></th></tr></thead><tbody id="agBody"></tbody></table></div>
     <div class="empty" id="agEmpty" style="display:none">Nenhuma tarefa — clique em <b>+ Nova tarefa</b>.</div>
   </div>
-  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável.</div>
+  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, que não têm prazo próprio.</div>
 </section>
 
 <!-- ========== GESTÃO DO MÊS ========== -->
@@ -3412,6 +3423,60 @@ function agPrazoTxt(t){
   if(!t.prazo) return '—';
   return t.prazo.split('-').reverse().join('/')+(t.hora?' · '+t.hora:'');
 }
+/* Subtarefas são os passos de uma tarefa, guardadas dentro dela — não têm
+   prazo nem responsável próprios, senão virariam tarefas soltas fora da lista.
+   Tarefas criadas antes disso simplesmente não têm o campo. */
+const agSubs = t => Array.isArray(t && t.subs) ? t.subs : [];
+/* Quais linhas estão abertas é estado da tela, não do banco: cada um abre as
+   suas sem empurrar isso para a tela dos outros na sincronização. */
+let _agExpandidas = new Set();
+function agExpandir(id){
+  if(_agExpandidas.has(id)) _agExpandidas.delete(id); else _agExpandidas.add(id);
+  renderAgenda();
+}
+function agSubRow(t,id,subs){
+  const itens=subs.map(s=>{
+    const sid=esc(s._id||'');
+    const quem=s.feita&&s.feitaPor?` <span class="ag-sub-quem">✓ ${esc(s.feitaPor)}</span>`:'';
+    return `<div class="ag-sub-item${s.feita?' feita':''}">
+      <input type="checkbox" style="width:auto;margin:0" ${s.feita?'checked':''} onchange="agSubToggle('${id}','${sid}',this.checked)">
+      <span>${esc(s.t)}</span>${quem}
+      <button class="del" onclick="agSubDel('${id}','${sid}')" title="excluir subtarefa">✕</button></div>`;
+  }).join('');
+  return `<tr class="ag-sub"><td></td><td colspan="7"><div class="ag-sub-wrap">
+    ${itens||'<div class="note" style="padding:2px 0">Nenhuma subtarefa ainda.</div>'}
+    <div class="ag-sub-add">
+      <input id="agsub_${id}" placeholder="Nova subtarefa — Enter para adicionar" onkeydown="if(event.key==='Enter'){event.preventDefault();agSubAdd('${id}')}">
+      <button class="btn btn-ghost" style="padding:5px 12px;font-size:11px" onclick="agSubAdd('${id}')">Adicionar</button>
+    </div></div></td></tr>`;
+}
+function agSubAdd(id){
+  const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
+  if(!t){ toast('⚠ Tarefa não encontrada'); renderAgenda(); return; }
+  const el=$('agsub_'+id), txt=el?el.value.trim():'';
+  if(!txt){ if(el) el.focus(); return; }
+  if(!Array.isArray(t.subs)) t.subs=[];
+  t.subs.push({_id:novoId(),t:txt,feita:false,por:USER?USER.nome.split(' ')[0]:'',
+    criadaEm:new Date().toISOString(),feitaPor:'',feitaEm:null});
+  _agExpandidas.add(id);
+  saveDB(); renderAgenda();
+  const novo=$('agsub_'+id); if(novo) novo.focus();   // seguir digitando a próxima
+}
+function agSubToggle(id,sid,feita){
+  const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
+  const s=agSubs(t).find(x=>x && x._id===sid);
+  if(!s){ toast('⚠ Subtarefa não encontrada'); renderAgenda(); return; }
+  s.feita=!!feita;
+  s.feitaPor=feita&&USER?USER.nome.split(' ')[0]:'';
+  s.feitaEm=feita?new Date().toISOString().slice(0,10):null;
+  saveDB(); renderAgenda();
+}
+function agSubDel(id,sid){
+  const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
+  const i=agSubs(t).findIndex(x=>x && x._id===sid);
+  if(i<0){ toast('⚠ Subtarefa não encontrada'); renderAgenda(); return; }
+  t.subs.splice(i,1); saveDB(); renderAgenda();
+}
 function renderAgenda(){
   if(!$('agBody')) return;
   const fR=V('agFiltroResp'), fS=V('agFiltroSt')||'abertas';
@@ -3433,14 +3498,18 @@ function renderAgenda(){
     const late=agVencida(t);
     const pr=agPrazoTxt(t);
     const nova=t.status!=='feita'&&(!t.vistoEm||_tarefasNovasDaVisita.has(t._id));
+    const subs=agSubs(t), feitas=subs.filter(s=>s.feita).length;
+    const aberto=_agExpandidas.has(t._id);
+    const cont=subs.length?` <span class="pill ${feitas===subs.length?'ok':'blue'}" style="font-size:9px">${feitas}/${subs.length}</span>`:'';
     return `<tr class="${late?'ag-late':''} ${t.status==='feita'?'ag-done':''}">
       <td><input type="checkbox" style="width:auto" ${t.status==='feita'?'checked':''} onchange="agToggle('${id}',this.checked)"></td>
-      <td><b>${esc(t.t)}</b>${nova?' <span class="pill mag" style="font-size:9px">nova</span>':''}</td>
+      <td><button class="ag-exp" onclick="agExpandir('${id}')" title="${subs.length?'subtarefas':'adicionar subtarefas'}">${aberto?'▾':'▸'}</button><b>${esc(t.t)}</b>${cont}${nova?' <span class="pill mag" style="font-size:9px">nova</span>':''}</td>
       <td>${esc(t.resp)}</td>
       <td>${late?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
       <td><span class="pill prio-${nrm(t.prio)}">${esc(t.prio)}</span></td>
       <td class="note">${esc(t.obs||'')}</td><td class="note">${esc(t.por||'')}</td>
-      <td><button class="del" onclick="agDel('${id}')">✕</button></td></tr>`;
+      <td><button class="del" onclick="agDel('${id}')">✕</button></td></tr>`
+      + (aberto?agSubRow(t,id,subs):'');
   }).join('');
   marcarTarefasVistas();
 }
@@ -3449,8 +3518,12 @@ function renderAgenda(){
 function agToggle(id,done){
   const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
   if(!t){ toast('⚠ Tarefa não encontrada'); renderAgenda(); return; }
+  // Concluir a tarefa não fecha as subtarefas por conta própria — quem marca
+  // sabe se sobrou passo por fazer; só avisamos que sobrou.
+  const pendentes=agSubs(t).filter(s=>!s.feita).length;
   t.status=done?'feita':'aberta'; t.doneAt=done?new Date().toISOString().slice(0,10):null;
   saveDB(); renderAgenda(); updateNotifs();
+  if(done&&pendentes) toast(`Tarefa concluída — <b>${pendentes}</b> subtarefa${pendentes>1?'s':''} ainda em aberto`);
 }
 function agDel(id){
   const i=(DB.agendaTasks||[]).findIndex(x=>x && x._id===id);
