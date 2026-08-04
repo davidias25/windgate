@@ -4050,10 +4050,9 @@ function calc(){
     // PIS/COFINS-Importação usam a alíquota da própria NCM. Estavam fixos em
     // 2,1%/9,65%, o que errava toda NCM com alíquota diferente.
     const pis=cif*((it.pis!=null?it.pis:2.1)/100), cof=cif*((it.cofins!=null?it.cofins:9.65)/100);
-    // Base do ICMS (LC 87/96, art. 13, V): valor aduaneiro + II + IPI + PIS +
-    // COFINS + despesas aduaneiras, com o próprio ICMS por dentro. O seguro e a
-    // capatazia integram o valor aduaneiro e faltavam aqui.
-    const ce=(cif+ii+ipi+pis+cof+share*sisc+pesoShare*afrmm+share*honor)/(1-icmsE);
+    // Base do ICMS mantida como na planilha "Nacionalização AL" — este cálculo
+    // não é alterado aqui; só II, IPI, PIS e COFINS são tratados neste módulo.
+    const ce=(invRed+frete_i+ii+ipi+pis+cof+share*sisc+pesoShare*afrmm+share*honor)/(1-icmsE);
     const icmsent=ce*icmsE, ch=ce-ipi-icmsent;
     II+=ii;IPI+=ipi;PIS+=pis;COF+=cof;CEtot+=ce;ICMSent+=icmsent;CHtot+=ch;
   });
