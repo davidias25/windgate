@@ -1520,6 +1520,13 @@ function ensureDBStructure(){
   if (!DB.gestao) DB.gestao = {};
   if (!DB.settings) DB.settings = { criadoEm: new Date().toISOString(), schema: 4 };
   if (!DB._removidos || typeof DB._removidos !== 'object') DB._removidos = {};
+  // Notificações já clicadas, por usuário. Poda o que é antigo para o registro
+  // não crescer sem limite — a pendência em si continua no dado de origem.
+  if (!DB.notifLidas || typeof DB.notifLidas !== 'object') DB.notifLidas = {};
+  const limiteNotif = Date.now() - 90*24*60*60*1000;
+  Object.values(DB.notifLidas).forEach(m=>{
+    if(m && typeof m==='object') Object.entries(m).forEach(([k,ts])=>{ if(typeof ts==='number' && ts < limiteNotif) delete m[k]; });
+  });
   garantirIds();
 }
 
@@ -3542,7 +3549,36 @@ function computeNotifs(){
     });
   }
 
-  return n.filter(x=>USER.tabs.includes(x.tab)||x.tab==='fin');
+  // Identidade da notificação pelo conteúdo: se a situação mudar (outro
+  // documento, outro prazo), a chave muda e ela volta a aparecer.
+  n.forEach(x=>{ x.k = idDeterministico({t:x.tab,g:x.tg,x:x.tx}); });
+
+  const lidas = (DB.notifLidas && DB.notifLidas[USER.key]) || {};
+  return n.filter(x=>(USER.tabs.includes(x.tab)||x.tab==='fin') && !lidas[x.k]);
+}
+
+/* Notificação clicada some da lista — por usuário, já que cada um vê as suas. */
+function marcarNotifLida(k){
+  if(!USER || !k) return;
+  if(!DB.notifLidas) DB.notifLidas={};
+  if(!DB.notifLidas[USER.key]) DB.notifLidas[USER.key]={};
+  DB.notifLidas[USER.key][k]=Date.now();
+  saveDB();
+}
+function abrirNotif(k,tab){
+  marcarNotifLida(k);
+  $('bellPanel').classList.remove('show');
+  showTab(tab);
+  updateNotifs();
+}
+function limparNotifs(ev){
+  if(ev) ev.stopPropagation();
+  computeNotifs().forEach(x=>{
+    if(!DB.notifLidas) DB.notifLidas={};
+    if(!DB.notifLidas[USER.key]) DB.notifLidas[USER.key]={};
+    DB.notifLidas[USER.key][x.k]=Date.now();
+  });
+  saveDB(); updateNotifs();
 }
 function updateNotifs(){
   if(!USER||!$('bellCount')) return;
@@ -3555,8 +3591,12 @@ function updateNotifs(){
   const hasFin = n.some(x=>x.tab==='fin');
   if(hasFin){ const bFin=$('tabbtn-fin'); if(bFin && !bFin.querySelector('.dot')) bFin.insertAdjacentHTML('beforeend',' <span class="dot"></span>'); }
   $('bellPanel').innerHTML = n.length
-    ? `<div style="font-size:11px;font-weight:800;color:var(--mag);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px">Pendências de ${esc(USER.nome.split(' ')[0])} · ${n.length}</div>`+
-      n.map(x=>`<div class="notif" onclick="showTab('${x.tab}');$('bellPanel').classList.remove('show')" style="${x.tab==='fin'?'border-left:3px solid #F0B429;margin-left:4px;border-radius:8px;':''}">`+
+    ? `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px">
+         <span style="font-size:11px;font-weight:800;color:var(--mag);text-transform:uppercase;letter-spacing:.1em">Pendências de ${esc(USER.nome.split(' ')[0])} · ${n.length}</span>
+         <span class="spacer"></span>
+         <button class="btn btn-ghost btn-sm" onclick="limparNotifs(event)">limpar todas</button>
+       </div>`+
+      n.map(x=>`<div class="notif" onclick="abrirNotif('${x.k}','${x.tab}')" style="${x.tab==='fin'?'border-left:3px solid #F0B429;margin-left:4px;border-radius:8px;':''}">`+
         `<div class="ic">${x.ic}</div><div><div class="tx">${x.tx}</div><div class="tg">${x.tg} →</div></div></div>`).join('')
     : '<div class="notif"><div class="ic">🎉</div><div class="tx">Nenhuma pendência para você agora.</div></div>';
 }

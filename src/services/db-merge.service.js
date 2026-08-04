@@ -14,7 +14,9 @@
 const COLECOES = ['ops', 'docs', 'fin', 'fretes', 'fornecedores', 'qindex', 'agendaTasks'];
 
 // Objetos indexados por chave própria (opId, id da cotação, 'YYYY-MM'…)
-const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib'];
+// `notifLidas` é indexado por usuário: mesclar por chave preserva o que cada um
+// já leu, em vez de a gravação de um apagar a do outro.
+const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas'];
 
 const DIAS_TOMBSTONE = 90;
 
