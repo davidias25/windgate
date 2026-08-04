@@ -4025,10 +4025,16 @@ function consultarTTCE(ncm){
 /* Aviso quando o II e o IPI vieram da tabela oficial baixada das fontes. */
 function hintOficial(ncm, a, i){
   const dias = a.atualizadoEm ? Math.floor((Date.now()-new Date(a.atualizadoEm))/86400000) : null;
-  const marc = a.marcador ? ` <span class="pill blue" title="marcação da TEC">${esc(a.marcador)}</span>` : '';
-  return `<div style="color:#34C77C">📋 <b>NCM ${esc(ncm)}</b> — alíquotas oficiais: II <b>${a.ii}%</b>${marc} · IPI <b>${a.ipi!=null?a.ipi:'—'}%</b></div>
+  const marc = a.marcador ? ` <span class="pill blue" title="bem de capital / informática — pode ter ex-tarifário">${esc(a.marcador)}</span>` : '';
+  // O que vale no despacho é a alíquota aplicada, não a TEC base. Mostra as
+  // duas quando divergem, para ninguém achar que o sistema errou.
+  const divergencia = a.reduzida
+    ? `<div style="margin-top:3px;color:#F0B429">↳ TEC base é <b>${a.iiTec}%</b>; a aplicada é <b>${a.ii}%</b>${a.fundamentacao?` — ${esc(a.fundamentacao)}`:''}</div>`
+    : '';
+  return `<div style="color:#34C77C">📋 <b>NCM ${esc(ncm)}</b> — alíquota aplicada: II <b>${a.ii}%</b>${marc} · IPI <b>${a.ipi!=null?a.ipi:'—'}%</b></div>
+    ${divergencia}
     <div style="margin-top:2px">${esc(a.desc||'')}</div>
-    <div class="note" style="margin-top:4px">Fonte: TEC (Gecex) e TIPI (Receita Federal)${dias!=null?` · tabela atualizada há ${dias} dia(s)`:''}.
+    <div class="note" style="margin-top:4px">Fonte: ${esc(a.fonte||'TEC e TIPI')}${dias!=null?` · tabela atualizada há ${dias} dia(s)`:''}.
       PIS <b>${document.getElementById('item_pis_'+i)?document.getElementById('item_pis_'+i).value:'2.1'}%</b> e COFINS <b>${document.getElementById('item_cof_'+i)?document.getElementById('item_cof_'+i).value:'9.65'}%</b> seguem a Lei 10.865/2004 — confira se a NCM tem exceção.
       <button class="btn btn-ghost btn-sm" onclick="ncmSave(${i})">💾 fixar na biblioteca</button></div>`;
 }
