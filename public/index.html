@@ -3392,15 +3392,32 @@ const WORLD_PATH="M334.5 472.3L333.7 473.7L332.9 475L327.1 474.6L320.9 474.8L317
 /* ---------- AGENDA ---------- */
 function agendaOrd(t){
   const pw={'Alta':0,'Média':1,'Baixa':2}[t.prio]??1;
-  return (t.status==='feita'?'1':'0')+pw+(t.prazo||'9999-99-99');
+  // Sem horário a tarefa fica no fim do próprio dia: "às 09:00" é mais urgente
+  // que "em algum momento de hoje".
+  return (t.status==='feita'?'1':'0')+pw+(t.prazo||'9999-99-99')+(t.hora||'99:99');
+}
+/* Data e hora do relógio local. O resto do sistema usa a data em UTC, que no
+   Brasil vira o dia seguinte às 21h — comparar hora marcada com hora UTC diria
+   que uma tarefa das 20h já venceu. Aqui os dois lados são locais. */
+function agHoje(){ const d=new Date(); return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); }
+function agAgora(){ const d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+/* Com horário, vence na hora marcada; sem horário, só depois do dia inteiro. */
+function agVencida(t){
+  if(!t||t.status==='feita'||!t.prazo) return false;
+  const hj=agHoje();
+  if(t.prazo!==hj) return t.prazo<hj;
+  return !!t.hora && t.hora<agAgora();
+}
+function agPrazoTxt(t){
+  if(!t.prazo) return '—';
+  return t.prazo.split('-').reverse().join('/')+(t.hora?' · '+t.hora:'');
 }
 function renderAgenda(){
   if(!$('agBody')) return;
-  const hj=new Date().toISOString().slice(0,10);
   const fR=V('agFiltroResp'), fS=V('agFiltroSt')||'abertas';
   const all=DB.agendaTasks;
   const abertas=all.filter(t=>t.status!=='feita');
-  const atras=abertas.filter(t=>t.prazo&&t.prazo<hj);
+  const atras=abertas.filter(agVencida);
   $('agStats').innerHTML=`
     <div class="stat" style="--sc:#2563EB"><div class="n" style="color:#7FA6FF">${abertas.length}</div><div class="l">Abertas</div></div>
     <div class="stat" style="--sc:#FF5A6E"><div class="n" style="color:#FF5A6E">${atras.length}</div><div class="l">Vencidas</div></div>
@@ -3413,8 +3430,8 @@ function renderAgenda(){
   $('agEmpty').style.display=rows.length?'none':'block';
   $('agBody').innerHTML=rows.map(t=>{
     const id=esc(t._id||'');
-    const late=t.status!=='feita'&&t.prazo&&t.prazo<hj;
-    const pr=t.prazo?t.prazo.split('-').reverse().join('/'):'—';
+    const late=agVencida(t);
+    const pr=agPrazoTxt(t);
     const nova=t.status!=='feita'&&(!t.vistoEm||_tarefasNovasDaVisita.has(t._id));
     return `<tr class="${late?'ag-late':''} ${t.status==='feita'?'ag-done':''}">
       <td><input type="checkbox" style="width:auto" ${t.status==='feita'?'checked':''} onchange="agToggle('${id}',this.checked)"></td>
@@ -3446,9 +3463,12 @@ function openAgendaTaskModal(){
     <div class="frow">
       <div><label>Responsável</label><select id="m_agresp">${['Samir','Davi','Ívina','Matheus'].map(r=>`<option ${USER&&USER.nome.startsWith(r)?'selected':''}>${r}</option>`).join('')}</select></div>
       <div><label>Prazo</label><input type="date" id="m_agprazo"></div>
-      <div><label>Prioridade</label><select id="m_agprio"><option>Alta</option><option selected>Média</option><option>Baixa</option></select></div>
+      <div><label>Hora <span style="opacity:.55;font-weight:400">· opcional</span></label><input type="time" id="m_aghora"></div>
     </div>
-    <div class="frow"><div style="grid-column:span 3"><label>Observação</label><input id="m_agobs"></div></div>
+    <div class="frow">
+      <div><label>Prioridade</label><select id="m_agprio"><option>Alta</option><option selected>Média</option><option>Baixa</option></select></div>
+      <div style="grid-column:span 2"><label>Observação</label><input id="m_agobs"></div>
+    </div>
     <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveAgendaTask()">Adicionar</button></div>`);
 }
 function saveAgendaTask(){
@@ -3456,7 +3476,9 @@ function saveAgendaTask(){
   const eu=USER.nome.split(' ')[0], resp=V('m_agresp');
   // `vistoEm` vazio é o que faz a tarefa aparecer como nova para o responsável.
   // Quem atribui para si mesmo já sabe da tarefa, então nasce como vista.
-  DB.agendaTasks.unshift({_id:novoId(),id:'t_'+Date.now(),t:V('m_agt'),resp,prazo:V('m_agprazo'),
+  // Hora só faz sentido presa a uma data: sem prazo ela é descartada.
+  const prazo=V('m_agprazo'), hora=prazo?V('m_aghora'):'';
+  DB.agendaTasks.unshift({_id:novoId(),id:'t_'+Date.now(),t:V('m_agt'),resp,prazo,hora,
     prio:V('m_agprio'),status:'aberta',obs:V('m_agobs'),por:eu,doneAt:null,
     criadaEm:new Date().toISOString(), vistoEm: resp===eu ? new Date().toISOString() : null});
   saveDB(); closeModal(); renderAgenda(); updateNotifs();
@@ -3496,12 +3518,13 @@ function computeNotifs(){
   }
   // Tarefa recém-atribuída a mim por outra pessoa — avisa até eu abrir a Agenda
   DB.agendaTasks.filter(t=>t && t.status!=='feita' && t.resp===eu && !t.vistoEm).forEach(t=>{
-    const prazo=t.prazo?` · prazo ${t.prazo.split('-').reverse().join('/')}`:'';
+    const prazo=t.prazo?` · prazo ${agPrazoTxt(t)}`:'';
     n.push({tab:'agenda',ic:'🔔',tx:`Nova tarefa para você: <b>${esc(t.t)}</b>${t.por?` — atribuída por <b>${esc(t.por)}</b>`:''}${prazo}`,tg:'Agenda — Nova atribuição'});
   });
   // Vencimento: só para as que já foram vistas, senão o aviso acima duplica
   DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.vistoEm&&t.prazo&&t.prazo<=hj).forEach(t=>{
-    n.push({tab:'agenda',ic:'📅',tx:`Tarefa <b>${esc(t.t)}</b> ${t.prazo<hj?'<b style="color:var(--red)">vencida</b>':'vence hoje'}`,tg:'Agenda'});
+    const quando=agVencida(t)?'<b style="color:var(--red)">vencida</b>':(t.hora?`vence hoje às <b>${esc(t.hora)}</b>`:'vence hoje');
+    n.push({tab:'agenda',ic:'📅',tx:`Tarefa <b>${esc(t.t)}</b> ${quando}`,tg:'Agenda'});
   });
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
   DB.ops.filter(o=>o.status==='travada').forEach(o=>n.push({tab:'painel',ic:'⚠️',tx:`Operação <b>${esc(o.id)}</b> está <b style="color:var(--red)">travada</b>`,tg:'Painel'}));
