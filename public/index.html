@@ -639,6 +639,13 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .notif .tx b{color:#fff}
 .notif .tg{font-size:9px;color:var(--mut2);text-transform:uppercase;letter-spacing:.06em}
 .tab-btn .dot{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block;margin-left:2px;box-shadow:0 0 6px rgba(255,90,110,.9)}
+/* fotos da proposta */
+.foto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px;margin:10px 0}
+.foto-cel{position:relative;aspect-ratio:4/3;border-radius:8px;overflow:hidden;background:rgba(143,160,188,.10);border:1px solid rgba(143,160,188,.20)}
+.foto-cel img{width:100%;height:100%;object-fit:cover;display:block}
+.foto-cel .del{position:absolute;top:3px;right:3px;background:rgba(10,14,24,.78);border-radius:50%;width:20px;height:20px;line-height:1;padding:0}
+.foto-cel .n{position:absolute;left:5px;bottom:4px;font-size:9px;font-weight:800;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+.foto-cel.enviando{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--mut)}
 /* agenda */
 .prio-alta{background:var(--red-soft);color:var(--red)}
 .prio-media{background:var(--amber-soft);color:var(--amber)}
@@ -773,6 +780,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>Prazo estimado (dias)</label><input type="number" id="prazo" value="60"></div>
           <div><label>Validade da proposta (dias)</label><input type="number" id="validade" value="7"></div>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Fotos do produto <span class="spacer"></span><span class="note" id="fotoCont">0 / 6</span></h2>
+        <p class="note">Até 6 fotos, numa página só da proposta. Sem foto, a proposta sai igual — só sem essa página.</p>
+        <div class="foto-grid" id="fotoGrid"></div>
+        <input type="file" id="fotoInput" accept="image/*" multiple style="display:none" onchange="fotosEscolhidas(this)">
+        <button class="btn btn-ghost" id="fotoBtn" onclick="$('fotoInput').click()">+ Adicionar fotos</button>
       </section>
 
       <section class="card">
@@ -1299,7 +1314,7 @@ const DBKEY='windgate_hub_v1';
 /* ---------- estado ---------- */
 let DB = null;
 let USER = null;          // usuário logado
-let state = {items:[],exps:[],status:'draft',id:null,criadoPor:null,aprovadoPor:null}; // cotação em edição
+let state = {items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:null,aprovadoPor:null}; // cotação em edição
 
 const STATUS_OP = [
   {k:'cotacao',    l:'Cotação',              c:'#8FA0BC'},
@@ -1789,6 +1804,7 @@ function enterApp(){
   });
   $('userChip').innerHTML=`<div class="avatar" style="background:${USER.cor}">${USER.nome[0]}</div><div><div class="nm">${esc(USER.nome.split(' ')[0])}</div><div class="rl">${esc(USER.papel)}</div></div><button title="Uso de Memória & Banco" onclick="mostrarUsoMemoria()" style="margin-right:6px">💾</button><button title="Sair" onclick="logout()">⏻</button>`;
   showTab(USER.tabs[0]);
+  renderFotos();
   updateNotifs();
   toast(`Bem-vindo(a), <b>${esc(USER.nome.split(' ')[0])}</b>! 👋`);
 }
@@ -4522,7 +4538,9 @@ function snapshot(){
     'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','mkp','aliqST',
     'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
-  return {fields,items:state.items,exps:state.exps,status:state.status,id:state.id,criadoPor:state.criadoPor,aprovadoPor:state.aprovadoPor,preco:R.preco||0};
+  // As fotos guardam só a URL no Storage — o arquivo em si não entra no banco,
+  // que é sincronizado inteiro a cada gravação.
+  return {fields,items:state.items,exps:state.exps,fotos:state.fotos||[],status:state.status,id:state.id,criadoPor:state.criadoPor,aprovadoPor:state.aprovadoPor,preco:R.preco||0};
 }
 function saveQuote(silent){
   if(!state.id) state.id='q_'+Date.now();
@@ -4538,9 +4556,9 @@ function saveQuote(silent){
 function loadQuote(id){
   const s=DB.quotes[id]; if(!s){ toast('⚠ Cotação não encontrada'); return; }
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
-  state.items=s.items||[]; state.exps=s.exps||[]; state.id=s.id;
+  state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor;
-  renderItems(); renderExps(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
+  renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
   msg('Cotação carregada.');
 }
 function delQuote(id){ delete DB.quotes[id]; DB.qindex=DB.qindex.filter(x=>x.id!==id); saveDB(); refreshSaved(); }
@@ -4556,7 +4574,8 @@ function refreshSaved(){
   }).join('');
 }
 function newQuote(){
-  state={items:[],exps:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null};
+  state={items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null};
+  renderFotos();
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
   $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
@@ -4568,6 +4587,122 @@ function newQuote(){
   addItem(); state.exps=[]; DEFAULT_EXPS.forEach(e=>addExp({...e}));
   setStatus('draft'); msg('Nova cotação.');
 }
+/* ===== fotos do produto na proposta =====
+   A foto vai para o Storage e da cotação fica só a URL. Guardar a imagem
+   dentro do banco engordaria o JSON que é sincronizado inteiro a cada
+   gravação — seis fotos por cotação derrubariam a sincronização de todos. */
+const MAX_FOTOS = 6;
+let _fotosSubindo = 0;
+
+function renderFotos(){
+  const g=$('fotoGrid'); if(!g) return;
+  const fotos=state.fotos||[];
+  g.innerHTML = fotos.map((f,i)=>`<div class="foto-cel">
+      <img src="${esc(f.url)}" alt="${esc(f.nome||('Foto '+(i+1)))}" loading="lazy">
+      <span class="n">${i+1}</span>
+      <button class="del" onclick="fotoRemover('${esc(f._id)}')" title="remover foto">✕</button>
+    </div>`).join('')
+    + Array.from({length:_fotosSubindo},()=>'<div class="foto-cel enviando">enviando…</div>').join('');
+  const c=$('fotoCont'); if(c) c.textContent=fotos.length+' / '+MAX_FOTOS;
+  const b=$('fotoBtn');
+  if(b){
+    const cheio=fotos.length+_fotosSubindo>=MAX_FOTOS;
+    b.disabled=cheio;
+    b.textContent=cheio?'Limite de 6 fotos':'+ Adicionar fotos';
+  }
+}
+
+/* Reduz antes de enviar: foto de celular tem 4 MB e 4000px, e na proposta
+   ocupa meia página. O que sobra é banda e espera de quem está cotando. */
+function reduzirFoto(file, maxLado, qualidade){
+  return new Promise((ok,erro)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>erro(new Error('não deu para ler o arquivo'));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>erro(new Error('o arquivo não é uma imagem válida'));
+      img.onload=()=>{
+        const lado=Math.max(img.width,img.height)||1, f=Math.min(1,maxLado/lado);
+        const c=document.createElement('canvas');
+        c.width=Math.max(1,Math.round(img.width*f)); c.height=Math.max(1,Math.round(img.height*f));
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        c.toBlob(b=>b?ok(b):erro(new Error('falha ao converter a imagem')),'image/jpeg',qualidade);
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+async function fotosEscolhidas(input){
+  const escolhidas=[...(input.files||[])];
+  input.value='';                                  // permite reescolher o mesmo arquivo
+  if(!escolhidas.length) return;
+  if(!Array.isArray(state.fotos)) state.fotos=[];
+  const vagas=MAX_FOTOS-state.fotos.length;
+  if(vagas<=0){ toast(`⚠ A proposta aceita <b>${MAX_FOTOS} fotos</b> — remova alguma para trocar`); return; }
+  const lote=escolhidas.slice(0,vagas);
+  if(escolhidas.length>vagas) toast(`⚠ Só cabiam mais <b>${vagas}</b> — as demais foram ignoradas`);
+
+  for(const file of lote){
+    if(!/^image\//.test(file.type)){ toast(`⚠ <b>${esc(file.name)}</b> não é uma imagem`); continue; }
+    _fotosSubindo++; renderFotos();
+    try{
+      const blob=await reduzirFoto(file,1600,.82);
+      const nome=(file.name||'foto').replace(/\.[^.]+$/,'')+'.jpg';
+      const fd=new FormData(); fd.append('arquivo',blob,nome);
+      const r=await fetch('/api/upload',{method:'POST',body:fd});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||!j.success) throw new Error(j.message||j.error||'falha no envio');
+      if(!j.supabaseUrl) toast('⚠ Foto salva só neste servidor — sem o Storage ela some no próximo deploy');
+      state.fotos.push({_id:novoId(),url:j.supabaseUrl||j.finalUrl,nome:file.name||nome});
+    }catch(e){
+      toast(`⚠ <b>${esc(file.name||'foto')}</b>: ${esc(e.message||'falhou')}`);
+    }finally{
+      _fotosSubindo--; renderFotos();
+    }
+  }
+  if(state.id) saveQuote(true);            // cotação já salva não perde as fotos
+  msg('Fotos atualizadas.');
+}
+
+function fotoRemover(id){
+  // Remove da cotação, não do Storage: a mesma foto pode estar em outra
+  // proposta já enviada ao cliente.
+  const i=(state.fotos||[]).findIndex(f=>f && f._id===id);
+  if(i<0) return;
+  state.fotos.splice(i,1); renderFotos();
+  if(state.id) saveQuote(true);
+}
+
+/* Traz a imagem de volta como dataURL para o jsPDF. O Storage responde com
+   Access-Control-Allow-Origin: *, então o canvas não fica bloqueado. */
+function fotoParaPDF(url){
+  return new Promise((ok,erro)=>{
+    const img=new Image();
+    img.crossOrigin='anonymous';
+    const t=setTimeout(()=>erro(new Error('demorou demais')),15000);
+    img.onload=()=>{
+      clearTimeout(t);
+      try{
+        const c=document.createElement('canvas');
+        c.width=img.naturalWidth; c.height=img.naturalHeight;
+        c.getContext('2d').drawImage(img,0,0);
+        ok({dataURL:c.toDataURL('image/jpeg',.85),w:img.naturalWidth,h:img.naturalHeight});
+      }catch(e){ erro(e); }
+    };
+    img.onerror=()=>{ clearTimeout(t); erro(new Error('não carregou')); };
+    img.src=url;
+  });
+}
+async function carregarFotosDaProposta(){
+  const out=[];
+  for(const f of (state.fotos||[])){
+    try{ out.push(await fotoParaPDF(f.url)); }catch(e){ console.warn('foto ignorada',f.url,e); }
+  }
+  return out;
+}
+
 let _msgT=null;
 function msg(t){ const m=$('saveMsg'); m.textContent=t; clearTimeout(_msgT); _msgT=setTimeout(()=>m.textContent='',4000); }
 </script>
@@ -4614,11 +4749,17 @@ function bandPDF(doc,y,txt,color){
   return y+20;
 }
 
-function gerarPropostaPDF(){
+async function gerarPropostaPDF(){
   if(state.status!=='ok'){ toast('🔒 A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.'); return; }
   const dErr=desemErrors();
   if(dErr.length){ toast('⛔ <b>Desembolso bloqueado:</b> '+dErr[0]); return; }
   if(!window.jspdf || !window.jspdf.jsPDF){ gerarPropostaPrint(); return; }
+  // Sem foto a proposta sai como sempre saiu; com foto, ganha uma página.
+  const pedidas=(state.fotos||[]).length;
+  if(pedidas) toast('📷 Preparando as fotos da proposta…');
+  const fotos=pedidas?await carregarFotosDaProposta():[];
+  if(pedidas && !fotos.length) toast('⚠ Nenhuma das fotos carregou — a proposta sai sem a página de fotos');
+  else if(fotos.length<pedidas) toast(`⚠ ${pedidas-fotos.length} foto(s) não carregaram e ficaram de fora`);
   try{
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({unit:'pt',format:'a4'});
@@ -4687,11 +4828,36 @@ function gerarPropostaPDF(){
     doc.setFont('helvetica','normal');
     const ytxt=doc.splitTextToSize('Os valores acima são válidos por '+(V('validade')||'7')+' dias. A composição do preço acompanha a taxa de câmbio do dia de cada pagamento; qualquer variação é comunicada previamente ao cliente antes do desembolso.',505);
     doc.text(ytxt,44,y+25);
-    pdfFooter(doc,1);
+    const totalPag=fotos.length?4:3;
+    let pag=1;
+    pdfFooter(doc,pag,totalPag);
 
-    /* ===== PÁGINA 2 — ETAPAS + DESEMBOLSO ===== */
-    doc.addPage();
-    pdfHeader(doc,cliente+' · Etapas & Cronograma · '+mesAno,2);
+    /* ===== PÁGINA DE FOTOS — só existe quando há foto ===== */
+    if(fotos.length){
+      doc.addPage(); pag++;
+      pdfHeader(doc,cliente+' · O produto · '+mesAno,pag);
+      const yf=bandPDF(doc,120,'FOTOS DO PRODUTO',PDF_NAVY);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_GRAY);
+      doc.text('Imagens do produto cotado'+(merc?' — '+merc:'')+'.',36,yf+16);
+      // Uma foto ocupa a página inteira; duas, uma coluna; daí em diante, duas.
+      const cols=fotos.length<=2?1:2;
+      const larg=cols===1?523:253.5;
+      const alt=cols===1?(fotos.length===1?400:290):190;
+      const y0=yf+30;
+      fotos.forEach((f,i)=>{
+        const x=36+(i%cols)*(larg+16), y=y0+Math.floor(i/cols)*(alt+16);
+        doc.setFillColor(245,247,250); doc.rect(x,y,larg,alt,'F');
+        doc.setDrawColor(221,228,234); doc.setLineWidth(.8); doc.rect(x,y,larg,alt);
+        const k=Math.min((larg-12)/f.w,(alt-12)/f.h);   // encaixa sem distorcer
+        const w=f.w*k, h=f.h*k;
+        doc.addImage(f.dataURL,'JPEG',x+(larg-w)/2,y+(alt-h)/2,w,h);
+      });
+      pdfFooter(doc,pag,totalPag);
+    }
+
+    /* ===== ETAPAS + DESEMBOLSO ===== */
+    doc.addPage(); pag++;
+    pdfHeader(doc,cliente+' · Etapas & Cronograma · '+mesAno,pag);
     let ye=bandPDF(doc,120,'COMO A OPERAÇÃO ACONTECE — DO PEDIDO À ENTREGA',PDF_NAVY);
     const etapas=[
       ['Contrato & OK','Aprovação da proposta e contrato em até 24h.'],
@@ -4732,11 +4898,11 @@ function gerarPropostaPDF(){
     });
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
     doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. O serviço porta a porta está contemplado — sem custos ocultos.',36,yD+92);
-    pdfFooter(doc,2);
+    pdfFooter(doc,pag,totalPag);
 
-    /* ===== PÁGINA 3 — DIFERENCIAIS + CTA ===== */
-    doc.addPage();
-    pdfHeader(doc,cliente+' · Condições · '+mesAno,3);
+    /* ===== DIFERENCIAIS + CTA ===== */
+    doc.addPage(); pag++;
+    pdfHeader(doc,cliente+' · Condições · '+mesAno,pag);
     let y2=bandPDF(doc,130,'POR QUE A OPERAÇÃO COM A WINDGATE VALE MAIS',PDF_MAG);
     const perks=[
       ['Preço competitivo no par','Cotação fechada com fábrica e frete negociados em conjunto, com preço ajustado à operação.'],
@@ -4773,7 +4939,7 @@ function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(143,163,204); doc.text(l,x,cy+82,{align:'center'});
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
-    pdfFooter(doc,3);
+    pdfFooter(doc,pag,totalPag);
 
     const nome='Proposta_WindGate_'+(cliente.replace(/[^\w\dÀ-ú]+/g,'_')||'Cliente')+(V('opNum')?'_'+V('opNum'):'')+'.pdf';
     doc.save(nome);
@@ -4797,6 +4963,8 @@ function gerarPropostaPrint(){
       <div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px">${itens.map(it=>`<tr><td style="padding:8px;border-bottom:1px solid #EDF1F5;color:#1B2A5B;font-weight:700">${esc(it.d)}<br><span style="font-size:8.5px;color:#64707D;font-weight:400">${it.ncm?'NCM '+esc(it.ncm):''}</span></td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${it.q}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${fmt(it.unit)}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5;color:#B5106B;font-weight:800">${fmt(it.total)}</td></tr>`).join('')}</table>
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(R.preco||0)}</span></div>
+      ${(state.fotos||[]).length?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
+      <div style="display:grid;grid-template-columns:repeat(${(state.fotos||[]).length<=2?1:2},1fr);gap:10px">${(state.fotos||[]).map(f=>`<img src="${esc(f.url)}" style="width:100%;border:1px solid #DDE4EA;object-fit:contain;background:#F5F7FA">`).join('')}</div>`:''}
       <div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega — tudo contemplado.</div>
       <div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Valores válidos por ${V('validade')||7} dias; o preço acompanha o câmbio do dia de cada pagamento.</div>
       <div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>
