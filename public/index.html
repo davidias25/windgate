@@ -658,10 +658,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .ag-sub-wrap{padding-left:26px;border-left:2px solid rgba(143,160,188,.18);margin-left:4px}
 .ag-sub-item{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
 .ag-sub-item.feita{opacity:.45;text-decoration:line-through}
-.ag-sub-item.feita .ag-sub-quem,.ag-sub-item.feita .del{text-decoration:none}
+.ag-sub-item.feita .ag-sub-quem,.ag-sub-item.feita .del,.ag-sub-item.feita select{text-decoration:none}
 .ag-sub-item .del{margin-left:auto}
 .ag-sub-add{display:flex;gap:6px;margin-top:6px}
 .ag-sub-add input{flex:1 1 auto;min-width:0;font-size:12px;padding:5px 8px}
+.ag-sub-add select{flex:0 0 116px;font-size:12px;padding:5px 8px}
+.ag-sub-resp{flex:0 0 104px;font-size:11px;padding:2px 6px;height:auto;background:rgba(143,160,188,.10)}
 .ag-sub-quem{font-size:9.5px;color:var(--mut2);text-transform:none;letter-spacing:0}
 /* gestão do mês */
 .gest-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
@@ -1049,7 +1051,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div style="overflow-x:auto"><table><thead><tr><th></th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th>Obs</th><th>Criada por</th><th></th></tr></thead><tbody id="agBody"></tbody></table></div>
     <div class="empty" id="agEmpty" style="display:none">Nenhuma tarefa — clique em <b>+ Nova tarefa</b>.</div>
   </div>
-  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, que não têm prazo próprio.</div>
+  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, cada um com seu responsável, que é avisado igual ao da tarefa.</div>
 </section>
 
 <!-- ========== GESTÃO DO MÊS ========== -->
@@ -1712,6 +1714,20 @@ function migrateDB(){
       if (t && t.vistoEm === undefined) t.vistoEm = t.criadaEm || new Date().toISOString();
     });
     DB.settings.schema = 6; ch = true;
+  }
+  if ((DB.settings.schema || 6) < 7) {
+    // Subtarefas criadas antes do responsável ficam com o da tarefa — é quem
+    // de fato ia fazê-las. E já nascem vistas, senão viraria um lote de
+    // "nova subtarefa" retroativo no sino de todo mundo.
+    (DB.agendaTasks || []).forEach(t => {
+      if (!t || !Array.isArray(t.subs)) return;
+      t.subs.forEach(s => {
+        if (!s) return;
+        if (s.resp === undefined) s.resp = t.resp || '';
+        if (s.vistoEm === undefined) s.vistoEm = s.criadaEm || new Date().toISOString();
+      });
+    });
+    DB.settings.schema = 7; ch = true;
   }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
@@ -3450,21 +3466,41 @@ function agExpandir(id){
   if(_agExpandidas.has(id)) _agExpandidas.delete(id); else _agExpandidas.add(id);
   renderAgenda();
 }
+const AG_RESP=['Samir','Davi','Ívina','Matheus'];
+const agRespOpts=sel=>AG_RESP.map(r=>`<option${r===sel?' selected':''}>${r}</option>`).join('');
 function agSubRow(t,id,subs){
+  const eu=USER?USER.nome.split(' ')[0]:'';
   const itens=subs.map(s=>{
     const sid=esc(s._id||'');
     const quem=s.feita&&s.feitaPor?` <span class="ag-sub-quem">✓ ${esc(s.feitaPor)}</span>`:'';
+    const nova=!s.feita&&s.resp===eu&&(!s.vistoEm||_subsNovasDaVisita.has(s._id));
     return `<div class="ag-sub-item${s.feita?' feita':''}">
       <input type="checkbox" style="width:auto;margin:0" ${s.feita?'checked':''} onchange="agSubToggle('${id}','${sid}',this.checked)">
-      <span>${esc(s.t)}</span>${quem}
+      <span>${esc(s.t)}</span>
+      <select class="ag-sub-resp" title="responsável pela subtarefa" onchange="agSubResp('${id}','${sid}',this.value)">${agRespOpts(s.resp||t.resp)}</select>
+      ${nova?'<span class="pill mag" style="font-size:8.5px">nova</span>':''}${quem}
       <button class="del" onclick="agSubDel('${id}','${sid}')" title="excluir subtarefa">✕</button></div>`;
   }).join('');
   return `<tr class="ag-sub"><td></td><td colspan="7"><div class="ag-sub-wrap">
     ${itens||'<div class="note" style="padding:2px 0">Nenhuma subtarefa ainda.</div>'}
     <div class="ag-sub-add">
       <input id="agsub_${id}" placeholder="Nova subtarefa — Enter para adicionar" onkeydown="if(event.key==='Enter'){event.preventDefault();agSubAdd('${id}')}">
+      <select id="agsubresp_${id}" title="quem faz esta subtarefa">${agRespOpts(t.resp)}</select>
       <button class="btn btn-ghost" style="padding:5px 12px;font-size:11px" onclick="agSubAdd('${id}')">Adicionar</button>
     </div></div></td></tr>`;
+}
+/* Trocar o responsável devolve a subtarefa ao estado de "nova" para quem
+   recebeu — senão ela mudaria de dono sem ninguém ser avisado. */
+function agSubResp(id,sid,quem){
+  const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
+  const s=agSubs(t).find(x=>x && x._id===sid);
+  if(!s){ toast('⚠ Subtarefa não encontrada'); renderAgenda(); return; }
+  if(s.resp===quem) return;
+  const eu=USER?USER.nome.split(' ')[0]:'';
+  s.resp=quem;
+  s.vistoEm = quem===eu ? new Date().toISOString() : null;
+  saveDB(); renderAgenda(); updateNotifs();
+  if(quem!==eu) toast(`Subtarefa passada para <b>${esc(quem)}</b> — ele(a) será notificado(a) ✓`);
 }
 function agSubAdd(id){
   const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
@@ -3472,10 +3508,15 @@ function agSubAdd(id){
   const el=$('agsub_'+id), txt=el?el.value.trim():'';
   if(!txt){ if(el) el.focus(); return; }
   if(!Array.isArray(t.subs)) t.subs=[];
-  t.subs.push({_id:novoId(),t:txt,feita:false,por:USER?USER.nome.split(' ')[0]:'',
-    criadaEm:new Date().toISOString(),feitaPor:'',feitaEm:null});
+  const eu=USER?USER.nome.split(' ')[0]:'';
+  const sel=$('agsubresp_'+id), resp=(sel&&sel.value)||t.resp||eu;
+  // Mesma regra da tarefa: quem se atribui já sabe, então nasce vista.
+  t.subs.push({_id:novoId(),t:txt,feita:false,resp,por:eu,
+    criadaEm:new Date().toISOString(),vistoEm: resp===eu ? new Date().toISOString() : null,
+    feitaPor:'',feitaEm:null});
   _agExpandidas.add(id);
-  saveDB(); renderAgenda();
+  saveDB(); renderAgenda(); updateNotifs();
+  if(resp!==eu) toast(`Subtarefa atribuída a <b>${esc(resp)}</b> — ele(a) será notificado(a) ✓`);
   const novo=$('agsub_'+id); if(novo) novo.focus();   // seguir digitando a próxima
 }
 function agSubToggle(id,sid,feita){
@@ -3485,13 +3526,13 @@ function agSubToggle(id,sid,feita){
   s.feita=!!feita;
   s.feitaPor=feita&&USER?USER.nome.split(' ')[0]:'';
   s.feitaEm=feita?new Date().toISOString().slice(0,10):null;
-  saveDB(); renderAgenda();
+  saveDB(); renderAgenda(); updateNotifs();
 }
 function agSubDel(id,sid){
   const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
   const i=agSubs(t).findIndex(x=>x && x._id===sid);
   if(i<0){ toast('⚠ Subtarefa não encontrada'); renderAgenda(); return; }
-  t.subs.splice(i,1); saveDB(); renderAgenda();
+  t.subs.splice(i,1); saveDB(); renderAgenda(); updateNotifs();
 }
 function renderAgenda(){
   if(!$('agBody')) return;
@@ -3505,7 +3546,9 @@ function renderAgenda(){
     <div class="stat" style="--sc:#F0B429"><div class="n" style="color:#F0B429">${abertas.filter(t=>t.prio==='Alta').length}</div><div class="l">Prioridade alta</div></div>
     <div class="stat" style="--sc:#34C77C"><div class="n" style="color:#34C77C">${all.filter(t=>t.status==='feita').length}</div><div class="l">Concluídas</div></div>`;
   let rows=[...all].sort((a,b)=>agendaOrd(a)<agendaOrd(b)?-1:1);
-  if(fR) rows=rows.filter(t=>t.resp===fR);
+  // Filtrar só pelo dono da tarefa esconderia de quem tem apenas uma
+  // subtarefa nela — e é justamente o que essa pessoa precisa ver.
+  if(fR) rows=rows.filter(t=>t.resp===fR||agSubs(t).some(s=>s&&s.resp===fR));
   if(fS==='abertas') rows=rows.filter(t=>t.status!=='feita');
   if(fS==='feitas') rows=rows.filter(t=>t.status==='feita');
   $('agEmpty').style.display=rows.length?'none':'block';
@@ -3578,15 +3621,23 @@ function saveAgendaTask(){
    As que eram novas seguem marcadas até ele sair da aba — se a etiqueta sumisse
    no mesmo instante, ele nunca veria QUAIS tarefas eram as novas. */
 let _tarefasNovasDaVisita = new Set();
+let _subsNovasDaVisita = new Set();
 function marcarTarefasVistas(){
   if(!USER) return;
   const eu=USER.nome.split(' ')[0], agora=new Date().toISOString();
   let mudou=false;
   (DB.agendaTasks||[]).forEach(t=>{
-    if(t && t.resp===eu && !t.vistoEm){
+    if(!t) return;
+    if(t.resp===eu && !t.vistoEm){
       _tarefasNovasDaVisita.add(t._id);
       t.vistoEm=agora; mudou=true;
     }
+    agSubs(t).forEach(s=>{
+      if(s && s.resp===eu && !s.vistoEm){
+        _subsNovasDaVisita.add(s._id);
+        s.vistoEm=agora; mudou=true;
+      }
+    });
   });
   if(mudou){ saveDB(); updateNotifs(); }
 }
@@ -3609,6 +3660,14 @@ function computeNotifs(){
   DB.agendaTasks.filter(t=>t && t.status!=='feita' && t.resp===eu && !t.vistoEm).forEach(t=>{
     const prazo=t.prazo?` · prazo ${agPrazoTxt(t)}`:'';
     n.push({tab:'agenda',ic:'🔔',tx:`Nova tarefa para você: <b>${esc(t.t)}</b>${t.por?` — atribuída por <b>${esc(t.por)}</b>`:''}${prazo}`,tg:'Agenda — Nova atribuição'});
+  });
+  // Subtarefa recém-atribuída a mim, mesmo quando a tarefa é de outra pessoa
+  DB.agendaTasks.forEach(t=>{
+    if(!t || t.status==='feita') return;
+    agSubs(t).forEach(s=>{
+      if(!s || s.feita || s.resp!==eu || s.vistoEm) return;
+      n.push({tab:'agenda',ic:'🔔',tx:`Nova subtarefa para você: <b>${esc(s.t)}</b> — em <b>${esc(t.t)}</b>${s.por?` · atribuída por <b>${esc(s.por)}</b>`:''}`,tg:'Agenda — Nova atribuição'});
+    });
   });
   // Vencimento: só para as que já foram vistas, senão o aviso acima duplica
   DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.vistoEm&&t.prazo&&t.prazo<=hj).forEach(t=>{
