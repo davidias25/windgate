@@ -2620,7 +2620,8 @@ function renderFrete(skipLock){
     <div class="stat" style="--sc:#F0B429"><div class="n" style="color:#F0B429">${abertas}</div><div class="l">Em negociação</div></div>
     <div class="stat" style="--sc:#34C77C"><div class="n" style="color:#34C77C">${fechadas}</div><div class="l">Fechadas</div></div>`;
   $('freteEmpty').style.display=DB.fretes.length?'none':'block';
-  $('freteBody').innerHTML=DB.fretes.map((f,i)=>{
+  $('freteBody').innerHTML=DB.fretes.map(f=>{
+    const id=esc(f._id||'');
     const p={'Cotado':'blue','Negociando':'wait','Fechado':'ok','Expirado':'draft'}[f.status]||'draft';
     const conv=freteBRL(f);
     let brlCell='<span class="note">informe a PTAX</span>';
@@ -2640,7 +2641,7 @@ function renderFrete(skipLock){
       <td class="r num">${fmtUSD(f.usd)}</td><td class="r">${brlCell}</td>
       <td>${cheg}</td><td>${esc(f.validade||'—')}</td>
       <td><span class="pill ${p}">${esc(f.status)}</span></td><td>${esc(f.resp)}</td>
-      <td><button class="del" onclick="DB.fretes.splice(${i},1);saveDB();renderFrete(true)">✕</button></td></tr>`;
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="editFrete('${id}')">Editar</button> <button class="del" onclick="delFrete('${id}')">✕</button></td></tr>`;
   }).join('');
   renderRotaStats();
 }
@@ -2668,40 +2669,59 @@ function empresaOptions(sel){
   const opt=([k,v])=>`<option value="${esc(k)}" ${sel===k?'selected':''}>${esc(k)}${v.regra?` (PTAX +${v.regra}%)`:''}</option>`;
   return `<option value="">— selecione —</option><optgroup label="Agentes de carga">${ag.map(opt).join('')}</optgroup><optgroup label="Armadores diretos">${ar.map(opt).join('')}</optgroup><option value="__outra" ${sel==='__outra'?'selected':''}>Outra…</option>`;
 }
-function openFreteModal(pref){
+/* O mesmo modal registra e edita: `editId` preenchido faz salvar por cima da
+   cotação em vez de criar outra. */
+function openFreteModal(pref, editId){
   pref=pref||{};
-  openModal(`<h3>Nova cotação de <span>frete</span></h3>
+  const ed=!!editId;
+  const op=(v,sel)=>`<option${v===sel?' selected':''}>${v}</option>`;
+  openModal(`<h3>${ed?'Editar cotação de':'Nova cotação de'} <span>frete</span></h3>
     <div class="frow">
       <div><label>Empresa (lista fechada)</label><select id="m_femp" onchange="fillEmpContato()">${empresaOptions(pref.empresa)}</select></div>
       <div id="m_fempOutraBox" style="display:${pref.empresa==='__outra'?'block':'none'}"><label>Nome da empresa</label><input id="m_fempOutra"></div>
-      <div><label>Operação (opcional)</label><select id="m_fop"><option value="">—</option>${DB.ops.map(o=>`<option value="${esc(o.id)}">${esc(o.id)}</option>`).join('')}</select></div>
-      <div><label>Modal</label><select id="m_fmodal"><option ${pref.modal==='FCL'?'selected':''}>FCL</option><option ${pref.modal==='LCL'?'selected':''}>LCL</option><option ${pref.modal==='Aéreo'?'selected':''}>Aéreo</option><option>Cabotagem</option><option>Rodoviário</option></select></div>
+      <div><label>Operação (opcional)</label><select id="m_fop"><option value="">—</option>${DB.ops.map(o=>`<option value="${esc(o.id)}"${o.id===pref.op?' selected':''}>${esc(o.id)}</option>`).join('')}</select></div>
+      <div><label>Modal</label><select id="m_fmodal">${['FCL','LCL','Aéreo','Cabotagem','Rodoviário'].map(v=>op(v,pref.modal)).join('')}</select></div>
     </div>
     <div class="frow">
       <div style="grid-column:span 2"><label>Rota</label><input id="m_frota" value="${esc(pref.rota||'')}" placeholder="Ex.: Shanghai → Pecém"></div>
-      <div><label>Contato do agente (pessoa)</label><input id="m_fcont" placeholder="Ex.: Ana"></div>
-      <div><label>Telefone / WhatsApp do agente</label><input id="m_ffone" placeholder="+55 …"></div>
+      <div><label>Contato do agente (pessoa)</label><input id="m_fcont" value="${esc(pref.contato||'')}" placeholder="Ex.: Ana"></div>
+      <div><label>Telefone / WhatsApp do agente</label><input id="m_ffone" value="${esc(pref.fone||'')}" placeholder="+55 …"></div>
     </div>
     <div class="grouph">Origem (fábrica na China)</div>
     <div class="frow">
-      <div><label>Contato na fábrica</label><input id="m_fabcont" placeholder="Ex.: Lily"></div>
-      <div><label>E-mail da fábrica</label><input id="m_fabmail" placeholder="lily@fabrica.cn"></div>
-      <div><label>WhatsApp / WeChat da fábrica</label><input id="m_fabwhats" placeholder="+86 …"></div>
+      <div><label>Contato na fábrica</label><input id="m_fabcont" value="${esc(pref.fabContato||'')}" placeholder="Ex.: Lily"></div>
+      <div><label>E-mail da fábrica</label><input id="m_fabmail" value="${esc(pref.fabEmail||'')}" placeholder="lily@fabrica.cn"></div>
+      <div><label>WhatsApp / WeChat da fábrica</label><input id="m_fabwhats" value="${esc(pref.fabWhats||'')}" placeholder="+86 …"></div>
     </div>
     <div class="frow">
       <div><label>Valor (USD)</label><input id="m_fusd" type="number" step="0.01" value="${pref.usd||''}" oninput="freteRefHint()"></div>
       <div><label>Taxas e custos (R$)</label><input id="m_fbrl" type="number" step="0.01" value="${pref.brl||''}" placeholder="0,00" oninput="freteRefHint()" title="Custos que já vêm em reais — somam ao valor em dólar convertido"></div>
       <div><label>Chegada prevista</label><input id="m_fcheg" type="date" value="${pref.chegada||''}"></div>
       <div><label>Validade</label><input id="m_fval" value="${esc(pref.validade||'')}" placeholder="Ex.: 15/08"></div>
-      <div><label>Status</label><select id="m_fst"><option>Cotado</option><option>Negociando</option><option>Fechado</option><option>Expirado</option></select></div>
-      <div><label>Responsável</label><select id="m_fresp">${['Matheus','Davi','Samir','Ívina'].map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div><label>Status</label><select id="m_fst">${['Cotado','Negociando','Fechado','Expirado'].map(v=>op(v,pref.status)).join('')}</select></div>
+      <div><label>Responsável</label><select id="m_fresp">${['Matheus','Davi','Samir','Ívina'].map(v=>op(v,pref.resp)).join('')}</select></div>
     </div>
     <div class="hist" id="freteRefHint" style="display:none"></div>
     <p class="note" id="m_fbrlPrev" style="margin-top:8px"></p>
-    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveFrete()">Registrar</button></div>`);
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveFrete(${ed?`'${esc(editId)}'`:''})">${ed?'Salvar alterações':'Registrar'}</button></div>`);
   $('m_femp').addEventListener('change',()=>{ $('m_fempOutraBox').style.display=$('m_femp').value==='__outra'?'block':'none'; freteRefHint(); });
   $('m_fcheg').addEventListener('change',freteRefHint);
-  fillEmpContato(); freteRefHint();
+  // Ao editar, o contato é o que está na cotação — buscar o da agenda apagaria
+  // o que foi ajustado só para aquele frete.
+  if(!ed) fillEmpContato();
+  freteRefHint();
+}
+function editFrete(id){
+  const f=(DB.fretes||[]).find(x=>x && x._id===id);
+  if(!f){ toast('⚠ Cotação não encontrada'); renderFrete(true); return; }
+  openFreteModal(f,id);
+}
+/* Localiza pelo `_id`: a sincronização reordena a lista ao trazer cotações de
+   outro usuário, e um índice velho apagaria a cotação errada. */
+function delFrete(id){
+  const i=(DB.fretes||[]).findIndex(x=>x && x._id===id);
+  if(i<0){ toast('⚠ Cotação não encontrada'); renderFrete(true); return; }
+  DB.fretes.splice(i,1); saveDB(); renderFrete(true); updateNotifs();
 }
 function fillEmpContato(){
   const emp=V('m_femp'); const a=DB.agentes[emp];
@@ -2739,7 +2759,7 @@ function freteRefHint(){
     ? `<b>Referência interna desta rota:</b> menor valor já registrado ${fmtUSD(min)} (${hist.length} cotações). Está ${fmtUSD(usd-min)} acima — <b style="color:#F0B429">há espaço para negociar</b>.`
     : `<b>Referência interna desta rota:</b> ${fmtUSD(usd)} é o melhor valor já registrado (${hist.length} cotações). ✓`;
 }
-function saveFrete(){
+function saveFrete(editId){
   let emp=V('m_femp');
   if(emp==='__outra'){
     emp=V('m_fempOutra').trim();
@@ -2752,11 +2772,24 @@ function saveFrete(){
     if(V('m_fcont')) DB.agentes[emp].contato=V('m_fcont');
     if(V('m_ffone')) DB.agentes[emp].fone=V('m_ffone');
   }
-  DB.fretes.unshift({data:hoje(),op:V('m_fop'),empresa:emp,rota:V('m_frota'),modal:V('m_fmodal'),
+  const campos={op:V('m_fop'),empresa:emp,rota:V('m_frota'),modal:V('m_fmodal'),
     contato:V('m_fcont'),fone:V('m_ffone'),fabContato:V('m_fabcont'),fabEmail:V('m_fabmail'),fabWhats:V('m_fabwhats'),
     usd:N('m_fusd'),brl:N('m_fbrl'),chegada:V('m_fcheg'),validade:V('m_fval'),
-    status:V('m_fst'),resp:V('m_fresp'),ptaxLock:null});
-  saveDB(); closeModal(); renderFrete(true); toast('Cotação de frete registrada ✓');
+    status:V('m_fst'),resp:V('m_fresp')};
+
+  if(editId){
+    const f=(DB.fretes||[]).find(x=>x && x._id===editId);
+    if(!f){ toast('⚠ Cotação não encontrada — talvez tenha sido apagada'); closeModal(); renderFrete(true); return; }
+    // Mudou a data de chegada: a PTAX travada era a do dia antigo e passa a
+    // não valer mais — solta a trava para ela ser buscada de novo.
+    if(f.chegada!==campos.chegada) f.ptaxLock=null;
+    Object.assign(f,campos);
+    saveDB(); closeModal(); renderFrete(true); updateNotifs(); toast('Cotação de frete atualizada ✓');
+    return;
+  }
+
+  DB.fretes.unshift({_id:novoId(),data:hoje(),...campos,ptaxLock:null});
+  saveDB(); closeModal(); renderFrete(true); updateNotifs(); toast('Cotação de frete registrada ✓');
 }
 
 /* ===== agenda de agentes ===== */
