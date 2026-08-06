@@ -2963,11 +2963,11 @@ function renderFin(){
   // quanto ainda falta sair do caixa. O que já saiu vai nos cartões de pagas.
   let pagHoje = 0, recHoje = 0, numPagHoje = 0, numRecHoje = 0;
   let pagAman = 0, recAman = 0, numPagAman = 0, numRecAman = 0;
-  let pagSem = 0, recSem = 0, pagoSem = 0, numPagSem = 0, numPagoSem = 0;
-  let pagMes = 0, recMes = 0, pagoMes = 0, numPagMes = 0, numPagoMes = 0;
-  // Total das despesas do mês (abertas + quitadas) — é o que alimenta o saldo
-  // do período, que continua sendo a conta do mês inteiro.
-  let despMesTot = 0;
+  let pagSem = 0, recSem = 0, pagoSem = 0, recebidoSem = 0, numPagSem = 0, numPagoSem = 0, numRecSem = 0, numRecebidoSem = 0;
+  let pagMes = 0, recMes = 0, pagoMes = 0, recebidoMes = 0, numPagMes = 0, numPagoMes = 0, numRecMes = 0, numRecebidoMes = 0;
+  // Totais do mês (abertos + liquidados) — é o que alimenta o saldo do
+  // período, que continua sendo a conta do mês inteiro.
+  let despMesTot = 0, recMesTot = 0;
 
   const effectiveItems = [];
 
@@ -2997,31 +2997,34 @@ function renderFin(){
 
     if (vencCalc === hjISO) {
       if (l.tipo === 'Despesa') { if (isPending) { pagHoje += val; numPagHoje++; } }
-      else { recHoje += val; if (isPending) numRecHoje++; }
+      else if (isPending) { recHoje += val; numRecHoje++; }
     }
 
     if (vencCalc === amIso) {
       if (l.tipo === 'Despesa') { if (isPending) { pagAman += val; numPagAman++; } }
-      else { recAman += val; if (isPending) numRecAman++; }
+      else if (isPending) { recAman += val; numRecAman++; }
     }
 
     if (vencCalc >= weekBounds.mondayStr && vencCalc <= weekBounds.sundayStr) {
       if (l.tipo === 'Despesa') {
         if (isPending) { pagSem += val; numPagSem++; } else { pagoSem += val; numPagoSem++; }
+      } else {
+        if (isPending) { recSem += val; numRecSem++; } else { recebidoSem += val; numRecebidoSem++; }
       }
-      else recSem += val;
     }
 
     if (!targetMonth || vencCalc.startsWith(targetMonth)) {
       if (l.tipo === 'Despesa') {
         despMesTot += val;
         if (isPending) { pagMes += val; numPagMes++; } else { pagoMes += val; numPagoMes++; }
+      } else {
+        recMesTot += val;
+        if (isPending) { recMes += val; numRecMes++; } else { recebidoMes += val; numRecebidoMes++; }
       }
-      else recMes += val;
     }
   });
 
-  const saldoPrevistoMes = recMes - despMesTot;
+  const saldoPrevistoMes = recMesTot - despMesTot;
   const mesExtenso = targetMonth ? new Date(targetMonth + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : 'Todos os Períodos';
 
   $('finDashGrid').innerHTML = `
@@ -3062,7 +3065,12 @@ function renderFin(){
     <div class="fin-dash-card" style="border-top:3px solid #22B8CF">
       <div class="c-label" style="color:#22B8CF">📈 Contas a Receber na Semana</div>
       <div class="c-val" style="color:#22B8CF">${fmt(recSem)}</div>
-      <div class="c-sub">Segunda a Domingo</div>
+      <div class="c-sub">${numRecSem} em aberto · segunda a domingo</div>
+    </div>
+    <div class="fin-dash-card" style="border-top:3px solid #34C77C">
+      <div class="c-label" style="color:#34C77C">✅ Contas Recebidas na Semana</div>
+      <div class="c-val" style="color:#34C77C">${fmt(recebidoSem)}</div>
+      <div class="c-sub">${numRecebidoSem} liquidada(s) · segunda a domingo</div>
     </div>
     </div>
 
@@ -3077,15 +3085,20 @@ function renderFin(){
       <div class="c-val" style="color:#34C77C">${fmt(pagoMes)}</div>
       <div class="c-sub">${numPagoMes} quitada(s) · ${mesExtenso}</div>
     </div>
+    <div class="fin-dash-card" style="border-top:3px solid #22B8CF">
+      <div class="c-label" style="color:#22B8CF">📊 Contas a Receber no Mês</div>
+      <div class="c-val" style="color:#22B8CF">${fmt(recMes)}</div>
+      <div class="c-sub">${numRecMes} em aberto · ${mesExtenso}</div>
+    </div>
     <div class="fin-dash-card" style="border-top:3px solid #34C77C">
-      <div class="c-label" style="color:#34C77C">📊 Contas a Receber no Mês</div>
-      <div class="c-val" style="color:#34C77C">${fmt(recMes)}</div>
-      <div class="c-sub">${mesExtenso}</div>
+      <div class="c-label" style="color:#34C77C">✅ Contas Recebidas no Mês</div>
+      <div class="c-val" style="color:#34C77C">${fmt(recebidoMes)}</div>
+      <div class="c-sub">${numRecebidoMes} liquidada(s) · ${mesExtenso}</div>
     </div>
     <div class="fin-dash-card" style="border-top:3px solid ${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'};background:#111A2E">
       <div class="c-label" style="color:${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'}">💰 Saldo Previsto do Período</div>
       <div class="c-val" style="color:${saldoPrevistoMes >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(saldoPrevistoMes)}</div>
-      <div class="c-sub">Receitas − despesas do mês, abertas e pagas (${mesExtenso})</div>
+      <div class="c-sub">Tudo do mês — aberto e liquidado (${mesExtenso})</div>
     </div>
     </div>
   `;
