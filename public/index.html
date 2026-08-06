@@ -642,6 +642,17 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .notif .tx b{color:#fff}
 .notif .tg{font-size:9px;color:var(--mut2);text-transform:uppercase;letter-spacing:.06em}
 .tab-btn .dot{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block;margin-left:2px;box-shadow:0 0 6px rgba(255,90,110,.9)}
+/* crm */
+.crm-funil{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin:4px 0 16px}
+.crm-etapa{background:rgba(143,160,188,.07);border:1px solid var(--line);border-top-width:3px;border-radius:10px;padding:9px 11px}
+.crm-etapa .e-nome{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.crm-etapa .e-val{font-size:15px;font-weight:800;color:#fff;letter-spacing:-.02em}
+.crm-etapa .e-qtd{font-size:9.5px;color:var(--mut2);margin-top:2px}
+.crm-parada{color:var(--amber);font-weight:700}
+.crm-linha-parada td{background:rgba(240,180,41,.05)}
+.crm-hist{max-height:180px;overflow-y:auto;margin:6px 0 2px;border-left:2px solid rgba(143,160,188,.18);padding-left:10px}
+.crm-hist-item{padding:4px 0;font-size:12px}
+.crm-hist-item .q{font-size:9.5px;color:var(--mut2)}
 /* fotos da proposta */
 .foto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px;margin:10px 0}
 .foto-cel{position:relative;aspect-ratio:4/3;border-radius:8px;overflow:hidden;background:rgba(143,160,188,.10);border:1px solid rgba(143,160,188,.20)}
@@ -1057,6 +1068,45 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, cada um com seu responsável, que é avisado igual ao da tarefa.</div>
 </section>
 
+<!-- ========== CRM ========== -->
+<section class="view" id="view-crm">
+  <div class="view-head">
+    <div><h1>CRM <span>WindGate</span></h1><p>Clientes, oportunidades e o funil de vendas. Toda cotação nasce aqui e não sai do radar até virar operação ou perda registrada.</p></div>
+    <div class="hd-actions">
+      <button class="btn btn-ghost" onclick="openCrmClienteModal()">+ Novo cliente</button>
+      <button class="btn btn-mag" onclick="openCrmOportModal()">+ Nova oportunidade</button>
+    </div>
+  </div>
+  <div class="stats-row" id="crmStats"></div>
+
+  <div class="card" id="crmSoltasCard" style="display:none">
+    <h2 class="amber">⚠ Cotações fora do funil <span class="spacer"></span><span class="note" id="crmSoltasCont"></span></h2>
+    <p class="note" style="margin-bottom:10px">Cotação feita e sem oportunidade no CRM é cotação que ninguém está cobrando. Vincule a uma oportunidade ou registre o cliente.</p>
+    <div style="overflow-x:auto"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Mercadoria</th><th class="r">Preço</th><th>Status</th><th>Criada por</th><th></th></tr></thead><tbody id="crmSoltasBody"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Funil de oportunidades <span class="spacer"></span>
+      <select id="crmFiltroResp" style="width:150px" onchange="renderCrm()"><option value="">— todos —</option><option>Samir</option><option>Davi</option><option>Ívina</option><option>Matheus</option></select>
+      &nbsp;<select id="crmFiltroEtapa" style="width:170px" onchange="renderCrm()"><option value="abertas">Em aberto</option><option value="">Todas</option></select>
+    </h2>
+    <div class="crm-funil" id="crmFunil"></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Oportunidade</th><th class="r">Valor</th><th>Etapa</th><th>Próximo passo</th><th>Prazo</th><th>Resp.</th><th>Parada há</th><th></th></tr></thead><tbody id="crmOporBody"></tbody></table></div>
+    <div class="empty" id="crmOporEmpty" style="display:none">Nenhuma oportunidade — clique em <b>+ Nova oportunidade</b>.</div>
+  </div>
+
+  <div class="card">
+    <h2>Clientes <span class="spacer"></span>
+      <input id="crmBusca" placeholder="Buscar por nome, empresa, segmento, cidade…" style="width:280px" oninput="renderCrm()">
+    </h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Empresa</th><th>Segmento</th><th>Telefone</th><th>E-mail</th><th>Cidade / UF</th><th class="r">Oportun.</th><th>Resp.</th><th></th></tr></thead><tbody id="crmCliBody"></tbody></table></div>
+    <div class="empty" id="crmCliEmpty" style="display:none">Nenhum cliente cadastrado — clique em <b>+ Novo cliente</b>.</div>
+  </div>
+
+  <div class="rulebox blue"><b>Regra do CRM:</b> cliente novo entra AQUI antes da cotação — nome, empresa, segmento, telefone, e-mail e endereço completo. Cada pedido vira uma <b>oportunidade</b> com etapa, valor, responsável e próximo passo. Oportunidade sem movimento há mais de 7 dias aparece como <b>parada</b>, e cotação sem oportunidade aparece no topo desta aba.</div>
+  <datalist id="crmSegmentosLista"></datalist>
+</section>
+
 <!-- ========== GESTÃO DO MÊS ========== -->
 <section class="view" id="view-gestao">
   <div class="view-head">
@@ -1361,13 +1411,13 @@ function defaultDB(){
   return {
     users:{
       samir:  {nome:'Samir Fernandes', papel:'Fundador · Direção Geral',      pin:'2012', cor:'#E91E63', fin:true,  aprova:true,  config:true,
-               tabs:['painel','mapa','cotacoes','checklist','frete','sourcing','agenda','gestao','fin','org','config']},
+               tabs:['painel','mapa','cotacoes','crm','checklist','frete','sourcing','agenda','gestao','fin','org','config']},
       davi:   {nome:'Davi',            papel:'Líder Operacional · Pricing & NF', pin:'2020', cor:'#2563EB', fin:true,  aprova:false, config:false,
-               tabs:['painel','mapa','cotacoes','checklist','frete','sourcing','agenda','gestao','fin','org']},
+               tabs:['painel','mapa','cotacoes','crm','checklist','frete','sourcing','agenda','gestao','fin','org']},
       ivina:  {nome:'Ívina',           papel:'Comunicação · Docs & Atendimento', pin:'2026', cor:'#E91E63', fin:false, aprova:false, config:false,
-               tabs:['painel','mapa','checklist','frete','sourcing','agenda','gestao','org']},
+               tabs:['painel','mapa','crm','checklist','frete','sourcing','agenda','gestao','org']},
       matheus:{nome:'Matheus',         papel:'Estagiário · Frete & Tracking', pin:'2025', cor:'#34C77C', fin:false, aprova:false, config:false,
-               tabs:['painel','mapa','frete','checklist','agenda','gestao','org']}
+               tabs:['painel','mapa','crm','frete','checklist','agenda','gestao','org']}
     },
     ops:[
       {id:'OP10', nome:'Escoras',            cliente:'Escoras/Score',   status:'logistica',  prox:'Atualizar status', resp:'Matheus', obs:''},
@@ -1413,6 +1463,8 @@ function defaultDB(){
     },
     ptax:null,          // {rate,date,source,ts}
     agendaTasks:[],     // {id,t,resp,prazo,prio,status,obs,por,doneAt}
+    crm:[],             // clientes {nome,empresa,segmento,fone,email,end:{...},resp,obs,interacoes:[]}
+    crmOps:[],          // oportunidades {clienteId,titulo,valor,etapa,resp,prox,prazo,quoteId}
     gestao:{},          // 'YYYY-MM' → {gestor,destaques,desafios,prox,metas:[{t,resp,prio,done}]}
     settings:{criadoEm:new Date().toISOString(),schema:4}
   };
@@ -1493,7 +1545,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks'];
+const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks','crm','crmOps'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -1546,6 +1598,8 @@ function ensureDBStructure(){
   if (!Array.isArray(DB.fornecedores)) DB.fornecedores = [];
   if (!Array.isArray(DB.qindex)) DB.qindex = [];
   if (!Array.isArray(DB.agendaTasks)) DB.agendaTasks = [];
+  if (!Array.isArray(DB.crm)) DB.crm = [];        // clientes
+  if (!Array.isArray(DB.crmOps)) DB.crmOps = [];  // oportunidades
   if (!DB.checklists) DB.checklists = {};
   if (!DB.agentes) DB.agentes = def.agentes || {};
   if (!DB.gestao) DB.gestao = {};
@@ -1732,6 +1786,20 @@ function migrateDB(){
     });
     DB.settings.schema = 7; ch = true;
   }
+  if ((DB.settings.schema || 7) < 8) {
+    // A aba nasce depois dos usuários: sem isto, ninguém enxergaria o CRM,
+    // porque a lista de abas de cada um já estava gravada no banco.
+    const padrao = defaultDB().users;
+    Object.entries(DB.users || {}).forEach(([k, u]) => {
+      if (!u || !Array.isArray(u.tabs)) return;
+      const temPadrao = padrao[k] && padrao[k].tabs.includes('crm');
+      if ((temPadrao || u.tabs.includes('cotacoes')) && !u.tabs.includes('crm')) {
+        const i = u.tabs.indexOf('cotacoes');
+        u.tabs.splice(i >= 0 ? i + 1 : u.tabs.length, 0, 'crm');
+      }
+    });
+    DB.settings.schema = 8; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -1802,6 +1870,7 @@ const TABS=[
   {k:'painel',   ic:'🗼', l:'Painel'},
   {k:'mapa',     ic:'🗺️', l:'Mapa'},
   {k:'cotacoes', ic:'🧮', l:'Cotações'},
+  {k:'crm',      ic:'🤝', l:'CRM'},
   {k:'checklist',ic:'✅', l:'Checklist'},
   {k:'frete',    ic:'🚢', l:'Fretes'},
   {k:'sourcing', ic:'🔍', l:'Sourcing'},
@@ -1877,6 +1946,7 @@ function showTab(k){
   const btn=$('tabbtn-'+k); if(btn) btn.classList.add('active');
   if(k==='painel') renderOps();
   if(k==='cotacoes'){ refreshSaved(); if(!state.items||!state.items.length) addItem(); else renderItems(); updateApprovalUI(); }
+  if(k==='crm') renderCrm();
   if(k==='checklist') { fillOpSelect('chkOpSel'); renderChecklist(); }
   if(k==='frete') renderFrete();
   if(k==='sourcing') renderForn();
@@ -3720,6 +3790,401 @@ function marcarTarefasVistas(){
   if(mudou){ saveDB(); updateNotifs(); }
 }
 
+/* ---------- CRM ---------- */
+/* Etapas do funil. As duas últimas encerram a oportunidade: saem do que está
+   em aberto e param de cobrar movimento. */
+const CRM_ETAPAS = [
+  {k:'Novo contato',     c:'#7FA6FF'},
+  {k:'Cotando',          c:'#22B8CF'},
+  {k:'Proposta enviada', c:'#F0B429'},
+  {k:'Negociação',       c:'#E91E63'},
+  {k:'Fechado',          c:'#34C77C'},
+  {k:'Perdido',          c:'#8FA0BC'}
+];
+const CRM_ENCERRADAS = ['Fechado','Perdido'];
+const CRM_SEGMENTOS = ['Construção civil','Indústria','Máquinas e equipamentos','Varejo','Agronegócio','Automotivo','Alimentos e bebidas','Energia solar','Saúde','Tecnologia','Móveis e decoração','Outro'];
+const DIAS_PARADA = 7;   // sem movimento além disso, a oportunidade é cobrada
+
+const crmEtapaCor = e => (CRM_ETAPAS.find(x=>x.k===e)||CRM_ETAPAS[0]).c;
+const crmCliente = id => (DB.crm||[]).find(c=>c && c._id===id) || null;
+const crmNomeCli = id => { const c=crmCliente(id); return c ? (c.empresa || c.nome || '—') : '— cliente removido —'; };
+const crmOpsDoCliente = id => (DB.crmOps||[]).filter(o=>o && o.clienteId===id);
+/* Dias desde o último movimento. É o que separa "em negociação" de "esquecida". */
+function crmDiasParado(o){
+  const ref = o.atualizadoEm || o.criadoEm;
+  if(!ref) return 0;
+  return Math.floor((Date.now()-new Date(ref).getTime())/86400000);
+}
+const crmParada = o => o && !CRM_ENCERRADAS.includes(o.etapa) && crmDiasParado(o) >= DIAS_PARADA;
+const crmVencida = o => o && !CRM_ENCERRADAS.includes(o.etapa) && o.prazo && o.prazo < agHoje();
+
+/* Cotações da aba Cotações que casam com o cliente pelo nome digitado lá.
+   Não há vínculo formal entre as duas telas: o que existe é o nome. */
+function crmCotacoesDoCliente(c){
+  if(!c) return [];
+  const alvos=[nrm(c.nome), nrm(c.empresa)].filter(Boolean);
+  return (DB.qindex||[]).filter(q=>{
+    const n=nrm(q.cliente);
+    return n && alvos.some(a=>a===n || a.includes(n) || n.includes(a));
+  });
+}
+/* Cotação sem oportunidade é cotação que ninguém está cobrando — é o buraco
+   que este CRM existe para tapar. */
+function crmCotacoesSoltas(){
+  const vinculadas=new Set((DB.crmOps||[]).map(o=>o && o.quoteId).filter(Boolean));
+  return (DB.qindex||[]).filter(q=>{
+    if(vinculadas.has(q.id)) return false;
+    const cli=crmClientePorNome(q.cliente);
+    if(!cli) return true;                                   // nem cliente tem
+    return !crmOpsDoCliente(cli._id).length;                // cliente sem oportunidade
+  });
+}
+function crmClientePorNome(nome){
+  const n=nrm(nome); if(!n) return null;
+  return (DB.crm||[]).find(c=>{
+    const a=nrm(c.nome), e=nrm(c.empresa);
+    return (a && (a===n||a.includes(n)||n.includes(a))) || (e && (e===n||e.includes(n)||n.includes(e)));
+  }) || null;
+}
+
+function renderCrm(){
+  if(!$('crmOporBody')) return;
+  const clientes=DB.crm||[], opos=DB.crmOps||[];
+  const abertas=opos.filter(o=>o && !CRM_ENCERRADAS.includes(o.etapa));
+  const soltas=crmCotacoesSoltas();
+
+  $('crmStats').innerHTML=`
+    <div class="stat" style="--sc:#2563EB"><div class="n" style="color:#7FA6FF">${clientes.length}</div><div class="l">Clientes</div></div>
+    <div class="stat" style="--sc:#E91E63"><div class="n" style="color:#FF6EA8">${abertas.length}</div><div class="l">Oportunidades abertas</div></div>
+    <div class="stat" style="--sc:#34C77C"><div class="n" style="color:#34C77C;font-size:20px">${fmt(abertas.reduce((s,o)=>s+(+o.valor||0),0))}</div><div class="l">Em negociação</div></div>
+    <div class="stat" style="--sc:#F0B429"><div class="n" style="color:#F0B429">${abertas.filter(crmParada).length}</div><div class="l">Paradas +${DIAS_PARADA} dias</div></div>
+    <div class="stat" style="--sc:#FF5A6E"><div class="n" style="color:#FF5A6E">${soltas.length}</div><div class="l">Cotações fora do funil</div></div>`;
+
+  // ---- funil por etapa
+  $('crmFunil').innerHTML=CRM_ETAPAS.map(e=>{
+    const arr=opos.filter(o=>o && o.etapa===e.k);
+    return `<div class="crm-etapa" style="border-top-color:${e.c}">
+      <div class="e-nome" style="color:${e.c}">${esc(e.k)}</div>
+      <div class="e-val">${fmt(arr.reduce((s,o)=>s+(+o.valor||0),0))}</div>
+      <div class="e-qtd">${arr.length} oportunidade(s)</div></div>`;
+  }).join('');
+
+  // ---- cotações fora do funil
+  $('crmSoltasCard').style.display=soltas.length?'block':'none';
+  $('crmSoltasCont').textContent=soltas.length+' cotação(ões)';
+  $('crmSoltasBody').innerHTML=soltas.map(q=>{
+    const s=DB.quotes[q.id]||{}; const f=s.fields||{};
+    const pill=q.status==='ok'?'<span class="pill ok">APROVADA</span>':q.status==='wait'?'<span class="pill wait">AGUARD. SAMIR</span>':'<span class="pill draft">RASCUNHO</span>';
+    const cli=crmClientePorNome(q.cliente);
+    return `<tr><td><b>${esc(f.opNum||'—')}</b></td><td>${esc(q.cliente||'—')}</td><td>${esc(f.mercadoria||'—')}</td>
+      <td class="r num">${fmt(q.preco||0)}</td><td>${pill}</td><td>${esc(q.criadoPor||'—')}</td>
+      <td style="white-space:nowrap">${cli
+        ? `<button class="btn btn-mag btn-sm" onclick="crmOportDaCotacao('${esc(q.id)}')">Criar oportunidade</button>`
+        : `<button class="btn btn-ghost btn-sm" onclick="crmClienteDaCotacao('${esc(q.id)}')">Cadastrar cliente</button>`}</td></tr>`;
+  }).join('');
+
+  // ---- funil (tabela)
+  const fR=V('crmFiltroResp'), fE=V('crmFiltroEtapa');
+  let linhas=[...opos].sort((a,b)=>{
+    const pa=CRM_ETAPAS.findIndex(x=>x.k===a.etapa), pb=CRM_ETAPAS.findIndex(x=>x.k===b.etapa);
+    if(pa!==pb) return pa-pb;
+    return crmDiasParado(b)-crmDiasParado(a);   // a mais esquecida primeiro
+  });
+  if(fR) linhas=linhas.filter(o=>o.resp===fR);
+  if(fE==='abertas') linhas=linhas.filter(o=>!CRM_ENCERRADAS.includes(o.etapa));
+  $('crmOporEmpty').style.display=linhas.length?'none':'block';
+  $('crmOporBody').innerHTML=linhas.map(o=>{
+    const id=esc(o._id||''), cor=crmEtapaCor(o.etapa);
+    const parada=crmParada(o), venc=crmVencida(o);
+    const dias=crmDiasParado(o);
+    const pr=o.prazo?o.prazo.split('-').reverse().join('/'):'—';
+    const quote=o.quoteId?(DB.qindex||[]).find(q=>q.id===o.quoteId):null;
+    return `<tr class="${parada?'crm-linha-parada':''}">
+      <td><b>${esc(crmNomeCli(o.clienteId))}</b></td>
+      <td>${esc(o.titulo||'—')}${quote?` <span class="pill teal" style="font-size:8.5px" title="cotação vinculada">${esc((DB.quotes[quote.id]&&DB.quotes[quote.id].fields&&DB.quotes[quote.id].fields.opNum)||'cotação')}</span>`:''}</td>
+      <td class="r num">${fmt(+o.valor||0)}</td>
+      <td><span class="pill" style="background:${cor}22;color:${cor}">${esc(o.etapa)}</span></td>
+      <td class="note">${esc(o.prox||'—')}</td>
+      <td>${venc?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
+      <td>${esc(o.resp||'—')}</td>
+      <td>${CRM_ENCERRADAS.includes(o.etapa)?'<span class="note">—</span>':`<span class="${parada?'crm-parada':'note'}">${dias} dia(s)</span>`}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="crmEditarOport('${id}')">Editar</button> <button class="del" onclick="crmDelOport('${id}')">✕</button></td></tr>`;
+  }).join('');
+
+  // ---- clientes
+  const busca=nrm(V('crmBusca'));
+  let cls=[...clientes].sort((a,b)=>nrm(a.empresa||a.nome)<nrm(b.empresa||b.nome)?-1:1);
+  if(busca) cls=cls.filter(c=>nrm([c.nome,c.empresa,c.segmento,c.email,c.fone,(c.end||{}).cidade,(c.end||{}).uf].join(' ')).includes(busca));
+  $('crmCliEmpty').style.display=cls.length?'none':'block';
+  $('crmCliBody').innerHTML=cls.map(c=>{
+    const id=esc(c._id||''), e=c.end||{};
+    const n=crmOpsDoCliente(c._id).length;
+    return `<tr>
+      <td><b>${esc(c.nome||'—')}</b></td><td>${esc(c.empresa||'—')}</td>
+      <td>${c.segmento?`<span class="pill draft">${esc(c.segmento)}</span>`:'<span class="note">—</span>'}</td>
+      <td>${esc(c.fone||'—')}</td><td class="note">${esc(c.email||'—')}</td>
+      <td>${esc([e.cidade,e.uf].filter(Boolean).join('/')||'—')}</td>
+      <td class="r num">${n}</td><td>${esc(c.resp||'—')}</td>
+      <td style="white-space:nowrap"><button class="btn btn-blue btn-sm" onclick="crmVerCliente('${id}')">Ficha</button> <button class="btn btn-ghost btn-sm" onclick="crmEditarCliente('${id}')">Editar</button> <button class="del" onclick="crmDelCliente('${id}')">✕</button></td></tr>`;
+  }).join('');
+
+  // segmentos já usados entram na lista de sugestões
+  const segs=[...new Set([...CRM_SEGMENTOS, ...clientes.map(c=>c.segmento).filter(Boolean)])];
+  const dl=$('crmSegmentosLista'); if(dl) dl.innerHTML=segs.map(s=>`<option value="${esc(s)}">`).join('');
+
+  marcarOportsVistas();
+}
+/* Abrir o CRM já é ver o que foi atribuído: o aviso de "nova oportunidade"
+   para de aparecer, e a cobrança passa a ser por prazo e por parada. */
+function marcarOportsVistas(){
+  if(!USER) return;
+  const eu=USER.nome.split(' ')[0], agora=new Date().toISOString();
+  let mudou=false;
+  (DB.crmOps||[]).forEach(o=>{ if(o && o.resp===eu && !o.vistoEm){ o.vistoEm=agora; mudou=true; } });
+  if(mudou){ saveDB(); updateNotifs(); }
+}
+
+/* ===== clientes ===== */
+function crmClienteCampos(c){
+  c=c||{}; const e=c.end||{};
+  return `<div class="frow">
+      <div><label>Nome do cliente (pessoa)</label><input id="m_cli_nome" value="${esc(c.nome||'')}" placeholder="Ex.: João Custódio"></div>
+      <div><label>Empresa do cliente</label><input id="m_cli_emp" value="${esc(c.empresa||'')}" placeholder="Ex.: Custódio Máquinas Ltda"></div>
+      <div><label>Segmento de atuação</label><input id="m_cli_seg" list="crmSegmentosLista" value="${esc(c.segmento||'')}" placeholder="Ex.: Construção civil"></div>
+    </div>
+    <div class="frow">
+      <div><label>Telefone / WhatsApp</label><input id="m_cli_fone" value="${esc(c.fone||'')}" placeholder="+55 85 9 0000-0000"></div>
+      <div><label>E-mail</label><input id="m_cli_mail" type="email" value="${esc(c.email||'')}" placeholder="cliente@empresa.com.br"></div>
+      <div><label>Responsável WindGate</label><select id="m_cli_resp">${AG_RESP.map(r=>`<option${r===(c.resp||(USER?USER.nome.split(' ')[0]:''))?' selected':''}>${r}</option>`).join('')}</select></div>
+    </div>
+    <div class="grouph">Endereço completo</div>
+    <div class="frow">
+      <div><label>CEP</label><div style="display:flex;gap:6px"><input id="m_cli_cep" value="${esc(e.cep||'')}" placeholder="60000-000" style="flex:1 1 auto;min-width:0" onkeydown="if(event.key==='Enter'){event.preventDefault();crmBuscarCep()}"><button class="btn btn-ghost" style="padding:6px 10px;font-size:11px" onclick="crmBuscarCep()">Buscar</button></div></div>
+      <div style="grid-column:span 2"><label>Logradouro</label><input id="m_cli_log" value="${esc(e.logradouro||'')}" placeholder="Rua / Avenida"></div>
+    </div>
+    <div class="frow">
+      <div><label>Número</label><input id="m_cli_num" value="${esc(e.numero||'')}"></div>
+      <div><label>Complemento</label><input id="m_cli_compl" value="${esc(e.compl||'')}" placeholder="Sala, galpão…"></div>
+      <div><label>Bairro</label><input id="m_cli_bairro" value="${esc(e.bairro||'')}"></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 2"><label>Cidade</label><input id="m_cli_cidade" value="${esc(e.cidade||'')}"></div>
+      <div><label>UF</label><input id="m_cli_uf" value="${esc(e.uf||'')}" maxlength="2" placeholder="CE"></div>
+    </div>
+    <div class="frow"><div style="grid-column:span 3"><label>Observações</label><input id="m_cli_obs" value="${esc(c.obs||'')}" placeholder="Como chegou até nós, histórico, preferências…"></div></div>`;
+}
+function openCrmClienteModal(pref){
+  openModal(`<h3>Novo <span>cliente</span></h3>${crmClienteCampos(pref)}
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="crmSalvarCliente()">Cadastrar</button></div>`);
+}
+function crmEditarCliente(id){
+  const c=crmCliente(id);
+  if(!c){ toast('⚠ Cliente não encontrado'); renderCrm(); return; }
+  openModal(`<h3>Editar <span>cliente</span></h3>${crmClienteCampos(c)}
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="crmSalvarCliente('${esc(id)}')">Salvar alterações</button></div>`);
+}
+/* ViaCEP preenche o endereço. Se não responder, o campo continua digitável —
+   o cadastro não pode depender de um serviço de fora. */
+async function crmBuscarCep(){
+  const cep=(V('m_cli_cep')||'').replace(/\D/g,'');
+  if(cep.length!==8){ toast('⚠ CEP precisa de 8 dígitos'); return; }
+  try{
+    const r=await fetch('https://viacep.com.br/ws/'+cep+'/json/',{signal:AbortSignal.timeout(7000)});
+    const j=await r.json();
+    if(j.erro){ toast('⚠ CEP não encontrado — preencha à mão'); return; }
+    if(j.logradouro) $('m_cli_log').value=j.logradouro;
+    if(j.bairro) $('m_cli_bairro').value=j.bairro;
+    if(j.localidade) $('m_cli_cidade').value=j.localidade;
+    if(j.uf) $('m_cli_uf').value=j.uf;
+    $('m_cli_num').focus();
+  }catch(e){ toast('⚠ Não deu para consultar o CEP agora — preencha à mão'); }
+}
+function crmSalvarCliente(editId){
+  const nome=V('m_cli_nome').trim(), empresa=V('m_cli_emp').trim();
+  if(!nome && !empresa){ toast('⚠ Informe o nome do cliente ou a empresa'); return; }
+  const email=V('m_cli_mail').trim();
+  if(email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('⚠ E-mail parece incompleto'); return; }
+  const campos={nome,empresa,segmento:V('m_cli_seg').trim(),fone:V('m_cli_fone').trim(),email,
+    resp:V('m_cli_resp'),obs:V('m_cli_obs').trim(),
+    end:{cep:V('m_cli_cep').trim(),logradouro:V('m_cli_log').trim(),numero:V('m_cli_num').trim(),
+         compl:V('m_cli_compl').trim(),bairro:V('m_cli_bairro').trim(),cidade:V('m_cli_cidade').trim(),
+         uf:V('m_cli_uf').trim().toUpperCase()}};
+  if(editId){
+    const c=crmCliente(editId);
+    if(!c){ toast('⚠ Cliente não encontrado — talvez tenha sido apagado'); closeModal(); renderCrm(); return; }
+    Object.assign(c,campos);
+    saveDB(); closeModal(); renderCrm(); toast('Cliente atualizado ✓');
+    return;
+  }
+  const novo={_id:novoId(),...campos,interacoes:[],criadoEm:new Date().toISOString(),por:USER?USER.nome.split(' ')[0]:''};
+  DB.crm.unshift(novo);
+  saveDB(); closeModal(); renderCrm(); toast(`Cliente <b>${esc(empresa||nome)}</b> cadastrado ✓`);
+  if(_crmCotacaoPendente){
+    const qid=_crmCotacaoPendente; _crmCotacaoPendente=null;
+    setTimeout(()=>crmOportDaCotacao(qid),150);
+  }
+  return novo;
+}
+function crmDelCliente(id){
+  const i=(DB.crm||[]).findIndex(c=>c && c._id===id);
+  if(i<0){ toast('⚠ Cliente não encontrado'); renderCrm(); return; }
+  const n=crmOpsDoCliente(id).length;
+  // Apagar o cliente e deixar as oportunidades órfãs esconderia negócio em
+  // andamento — quem apaga precisa decidir isso de propósito.
+  if(n){ toast(`⚠ Este cliente tem <b>${n}</b> oportunidade(s) — apague ou mova antes`); return; }
+  DB.crm.splice(i,1); saveDB(); renderCrm(); updateNotifs();
+}
+function crmVerCliente(id){
+  const c=crmCliente(id);
+  if(!c){ toast('⚠ Cliente não encontrado'); renderCrm(); return; }
+  const e=c.end||{};
+  const endLinha=[[e.logradouro,e.numero].filter(Boolean).join(', '),e.compl,e.bairro,[e.cidade,e.uf].filter(Boolean).join('/'),e.cep].filter(Boolean).join(' · ');
+  const opos=crmOpsDoCliente(id);
+  const cots=crmCotacoesDoCliente(c);
+  const hist=(c.interacoes||[]).slice().sort((a,b)=>a.data<b.data?1:-1);
+  openModal(`<h3>${esc(c.empresa||c.nome)} <span>· ficha do cliente</span></h3>
+    <div class="frow" style="margin-bottom:4px">
+      <div><label>Contato</label><div>${esc(c.nome||'—')}</div></div>
+      <div><label>Segmento</label><div>${esc(c.segmento||'—')}</div></div>
+      <div><label>Responsável WindGate</label><div>${esc(c.resp||'—')}</div></div>
+    </div>
+    <div class="frow" style="margin-bottom:4px">
+      <div><label>Telefone</label><div>${esc(c.fone||'—')}</div></div>
+      <div style="grid-column:span 2"><label>E-mail</label><div>${esc(c.email||'—')}</div></div>
+    </div>
+    <div class="frow"><div style="grid-column:span 3"><label>Endereço</label><div class="note">${esc(endLinha||'não informado')}</div></div></div>
+    ${c.obs?`<p class="note" style="margin:2px 0 10px">${esc(c.obs)}</p>`:''}
+
+    <div class="grouph">Oportunidades (${opos.length})</div>
+    ${opos.length?`<div style="overflow-x:auto"><table><tbody>${opos.map(o=>`<tr>
+      <td><b>${esc(o.titulo||'—')}</b></td><td class="r num">${fmt(+o.valor||0)}</td>
+      <td><span class="pill" style="background:${crmEtapaCor(o.etapa)}22;color:${crmEtapaCor(o.etapa)}">${esc(o.etapa)}</span></td>
+      <td class="note">${esc(o.prox||'')}</td><td>${esc(o.resp||'')}</td></tr>`).join('')}</tbody></table></div>`
+      :'<p class="note">Nenhuma oportunidade registrada.</p>'}
+
+    <div class="grouph">Cotações no sistema (${cots.length})</div>
+    ${cots.length?`<div style="overflow-x:auto"><table><tbody>${cots.map(q=>{
+      const fq=(DB.quotes[q.id]||{}).fields||{};
+      return `<tr><td><b>${esc(fq.opNum||'—')}</b></td><td>${esc(fq.mercadoria||'—')}</td>
+        <td class="r num">${fmt(q.preco||0)}</td>
+        <td>${q.status==='ok'?'<span class="pill ok">APROVADA</span>':q.status==='wait'?'<span class="pill wait">AGUARD.</span>':'<span class="pill draft">RASCUNHO</span>'}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="crmAbrirCotacao('${esc(q.id)}')">Abrir</button></td></tr>`;
+    }).join('')}</tbody></table></div>`
+      :'<p class="note">Nenhuma cotação encontrada com este nome na aba Cotações.</p>'}
+
+    <div class="grouph">Histórico de contato</div>
+    <div class="crm-hist">${hist.length?hist.map(h=>`<div class="crm-hist-item">${esc(h.texto)}<div class="q">${esc((h.data||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(h.por||'')}</div></div>`).join(''):'<div class="note">Nada registrado ainda.</div>'}</div>
+    <div class="ag-sub-add">
+      <input id="m_cli_int" placeholder="Registrar contato — ligação, visita, e-mail… (Enter)" onkeydown="if(event.key==='Enter'){event.preventDefault();crmAddInteracao('${esc(id)}')}">
+      <button class="btn btn-ghost" style="padding:5px 12px;font-size:11px" onclick="crmAddInteracao('${esc(id)}')">Registrar</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-blue" onclick="crmEditarCliente('${esc(id)}')">Editar cadastro</button>
+      <button class="btn btn-mag" onclick="closeModal();openCrmOportModal(null,'${esc(id)}')">+ Oportunidade</button>
+    </div>`);
+}
+function crmAddInteracao(id){
+  const c=crmCliente(id); if(!c){ toast('⚠ Cliente não encontrado'); return; }
+  const el=$('m_cli_int'), txt=el?el.value.trim():'';
+  if(!txt){ if(el) el.focus(); return; }
+  if(!Array.isArray(c.interacoes)) c.interacoes=[];
+  c.interacoes.push({_id:novoId(),data:new Date().toISOString(),texto:txt,por:USER?USER.nome.split(' ')[0]:''});
+  saveDB(); crmVerCliente(id);            // reabre com o histórico atualizado
+}
+function crmAbrirCotacao(qid){
+  closeModal(); showTab('cotacoes'); loadQuote(qid);
+}
+
+/* ===== oportunidades ===== */
+function crmClienteOptions(sel){
+  const cs=[...(DB.crm||[])].sort((a,b)=>nrm(a.empresa||a.nome)<nrm(b.empresa||b.nome)?-1:1);
+  return `<option value="">— selecione —</option>`+cs.map(c=>`<option value="${esc(c._id)}"${c._id===sel?' selected':''}>${esc(c.empresa||c.nome)}${c.empresa&&c.nome?' · '+esc(c.nome):''}</option>`).join('');
+}
+function crmOportCampos(o,clienteId){
+  o=o||{};
+  const cotacoes=(DB.qindex||[]).map(q=>{
+    const fq=(DB.quotes[q.id]||{}).fields||{};
+    return `<option value="${esc(q.id)}"${q.id===o.quoteId?' selected':''}>${esc(fq.opNum||'sem nº')} · ${esc(q.cliente||'—')} · ${fmt(q.preco||0)}</option>`;
+  }).join('');
+  return `<div class="frow">
+      <div style="grid-column:span 2"><label>Cliente</label><select id="m_opo_cli">${crmClienteOptions(o.clienteId||clienteId)}</select></div>
+      <div><label>Etapa</label><select id="m_opo_etapa">${CRM_ETAPAS.map(e=>`<option${e.k===(o.etapa||'Novo contato')?' selected':''}>${e.k}</option>`).join('')}</select></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 2"><label>Oportunidade</label><input id="m_opo_tit" value="${esc(o.titulo||'')}" placeholder="Ex.: 2 contêineres de escoras metálicas"></div>
+      <div><label>Valor estimado (R$)</label><input id="m_opo_val" type="number" step="0.01" value="${o.valor!=null?o.valor:''}"></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 2"><label>Próximo passo</label><input id="m_opo_prox" value="${esc(o.prox||'')}" placeholder="Ex.: enviar proposta revisada"></div>
+      <div><label>Prazo do próximo passo</label><input type="date" id="m_opo_prazo" value="${esc(o.prazo||'')}"></div>
+    </div>
+    <div class="frow">
+      <div><label>Responsável</label><select id="m_opo_resp">${AG_RESP.map(r=>`<option${r===(o.resp||(USER?USER.nome.split(' ')[0]:''))?' selected':''}>${r}</option>`).join('')}</select></div>
+      <div style="grid-column:span 2"><label>Cotação vinculada (opcional)</label><select id="m_opo_quote"><option value="">— nenhuma —</option>${cotacoes}</select></div>
+    </div>
+    <div class="frow"><div style="grid-column:span 3"><label>Observações</label><input id="m_opo_obs" value="${esc(o.obs||'')}"></div></div>`;
+}
+function openCrmOportModal(pref,clienteId){
+  if(!(DB.crm||[]).length){ toast('⚠ Cadastre um cliente antes — a oportunidade é dele'); openCrmClienteModal(); return; }
+  openModal(`<h3>Nova <span>oportunidade</span></h3>${crmOportCampos(pref,clienteId)}
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="crmSalvarOport()">Criar</button></div>`);
+}
+function crmEditarOport(id){
+  const o=(DB.crmOps||[]).find(x=>x && x._id===id);
+  if(!o){ toast('⚠ Oportunidade não encontrada'); renderCrm(); return; }
+  openModal(`<h3>Editar <span>oportunidade</span></h3>${crmOportCampos(o)}
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="crmSalvarOport('${esc(id)}')">Salvar alterações</button></div>`);
+}
+function crmSalvarOport(editId){
+  const clienteId=V('m_opo_cli');
+  if(!clienteId){ toast('⚠ Selecione o cliente'); return; }
+  if(!V('m_opo_tit').trim()){ toast('⚠ Descreva a oportunidade'); return; }
+  const campos={clienteId,titulo:V('m_opo_tit').trim(),valor:N('m_opo_val'),etapa:V('m_opo_etapa'),
+    resp:V('m_opo_resp'),prox:V('m_opo_prox').trim(),prazo:V('m_opo_prazo'),
+    quoteId:V('m_opo_quote'),obs:V('m_opo_obs').trim()};
+  const eu=USER?USER.nome.split(' ')[0]:'';
+  if(editId){
+    const o=(DB.crmOps||[]).find(x=>x && x._id===editId);
+    if(!o){ toast('⚠ Oportunidade não encontrada — talvez tenha sido apagada'); closeModal(); renderCrm(); return; }
+    const mudouDono=o.resp!==campos.resp;
+    Object.assign(o,campos);
+    // Qualquer edição conta como movimento: é ela que zera o contador de dias
+    // parados e tira a oportunidade da lista de cobrança.
+    o.atualizadoEm=new Date().toISOString();
+    if(mudouDono) o.vistoEm = campos.resp===eu ? o.atualizadoEm : null;
+    saveDB(); closeModal(); renderCrm(); updateNotifs(); toast('Oportunidade atualizada ✓');
+    return;
+  }
+  const agora=new Date().toISOString();
+  DB.crmOps.unshift({_id:novoId(),...campos,criadoEm:agora,atualizadoEm:agora,por:eu,
+    vistoEm: campos.resp===eu ? agora : null});
+  saveDB(); closeModal(); renderCrm(); updateNotifs();
+  toast(campos.resp===eu ? 'Oportunidade criada ✓' : `Oportunidade atribuída a <b>${esc(campos.resp)}</b> ✓`);
+}
+function crmDelOport(id){
+  const i=(DB.crmOps||[]).findIndex(o=>o && o._id===id);
+  if(i<0){ toast('⚠ Oportunidade não encontrada'); renderCrm(); return; }
+  DB.crmOps.splice(i,1); saveDB(); renderCrm(); updateNotifs();
+}
+/* Atalhos a partir de uma cotação que estava fora do funil.
+   Cadastrar o cliente sem criar a oportunidade deixaria a cotação solta do
+   mesmo jeito, então o cadastro emenda direto na oportunidade. */
+let _crmCotacaoPendente=null;
+function crmClienteDaCotacao(qid){
+  const q=(DB.qindex||[]).find(x=>x.id===qid); if(!q) return;
+  openCrmClienteModal({nome:q.cliente||'',empresa:q.cliente||'',resp:q.criadoPor||''});
+  _crmCotacaoPendente=qid;
+}
+function crmOportDaCotacao(qid){
+  const q=(DB.qindex||[]).find(x=>x.id===qid); if(!q) return;
+  const f=(DB.quotes[qid]||{}).fields||{};
+  const cli=crmClientePorNome(q.cliente);
+  openCrmOportModal({titulo:f.mercadoria||('Cotação '+(f.opNum||'')),valor:q.preco||0,
+    etapa:q.status==='ok'?'Proposta enviada':'Cotando',resp:q.criadoPor||'',quoteId:qid,
+    prox:'Confirmar retorno do cliente'}, cli?cli._id:'');
+}
+
 /* ---------- PENDÊNCIAS / NOTIFICAÇÕES ---------- */
 function computeNotifs(){
   if(!USER) return [];
@@ -3751,6 +4216,17 @@ function computeNotifs(){
   DB.agendaTasks.filter(t=>t.status!=='feita'&&t.resp===eu&&t.vistoEm&&t.prazo&&t.prazo<=hj).forEach(t=>{
     const quando=agVencida(t)?'<b style="color:var(--red)">vencida</b>':(t.hora?`vence hoje às <b>${esc(t.hora)}</b>`:'vence hoje');
     n.push({tab:'agenda',ic:'📅',tx:`Tarefa <b>${esc(t.t)}</b> ${quando}`,tg:'Agenda'});
+  });
+  /* ---- CRM: o que existe para nenhuma oportunidade morrer parada ---- */
+  (DB.crmOps||[]).forEach(o=>{
+    if(!o || CRM_ENCERRADAS.includes(o.etapa) || o.resp!==eu) return;
+    const cli=crmNomeCli(o.clienteId);
+    if(!o.vistoEm){
+      n.push({tab:'crm',ic:'🤝',tx:`Nova oportunidade para você: <b>${esc(o.titulo)}</b> — ${esc(cli)}${o.por?` · de <b>${esc(o.por)}</b>`:''}`,tg:'CRM — Nova atribuição'});
+      return;                      // ainda nem viu; não cobra prazo nem parada
+    }
+    if(crmVencida(o)) n.push({tab:'crm',ic:'⏰',tx:`<b>${esc(o.titulo)}</b> (${esc(cli)}) — prazo do próximo passo <b style="color:var(--red)">vencido</b>${o.prox?': '+esc(o.prox):''}`,tg:'CRM — Prazo'});
+    else if(crmParada(o)) n.push({tab:'crm',ic:'😴',tx:`<b>${esc(o.titulo)}</b> (${esc(cli)}) está parada há <b>${crmDiasParado(o)} dias</b> em ${esc(o.etapa)}`,tg:'CRM — Oportunidade parada'});
   });
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
   DB.ops.filter(o=>o.status==='travada').forEach(o=>n.push({tab:'painel',ic:'⚠️',tx:`Operação <b>${esc(o.id)}</b> está <b style="color:var(--red)">travada</b>`,tg:'Painel'}));
