@@ -1211,8 +1211,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="">— Natureza (Todas) —</option>
         <option value="fixo">Apenas Fixas</option>
         <option value="pontual">Apenas Pontuais</option>
+      </select> &nbsp;
+      <select id="finStFiltro" style="width:170px" onchange="renderFin()">
+        <option value="">— Status (Todos) —</option>
+        <option value="Previsto">Apenas previstos</option>
+        <option value="Realizado">Apenas realizados</option>
       </select>
     </h2>
+    <p class="note" id="finResumo" style="margin:-2px 0 8px"></p>
     <div style="overflow-x:auto"><table><thead><tr><th>Vencimento</th><th>Lançamento</th><th>Operação</th><th>Tipo</th><th>Natureza</th><th>Categoria</th><th>Descrição</th><th class="r">Valor (R$)</th><th>Status</th><th>Comprovante</th><th>Nota Fiscal</th><th>Por</th><th></th></tr></thead><tbody id="finBody"></tbody></table></div>
     <div class="empty" id="finEmpty" style="display:none">Nenhum lançamento para o filtro selecionado.</div>
   </div>
@@ -3191,14 +3197,27 @@ function renderFin(){
 
   const opFilter = $('finFilter') ? $('finFilter').value : '';
   const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
+  const stFilter = $('finStFiltro') ? $('finStFiltro').value : '';
 
   const rows = effectiveItems.filter(l => {
     if (targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
     if (opFilter && l.op !== opFilter) return false;
     if (natFilter === 'fixo' && !l.fixo) return false;
     if (natFilter === 'pontual' && l.fixo) return false;
+    // Lançamento antigo pode não ter status gravado; sem isto ele sumiria dos
+    // dois filtros e ninguém acharia o lançamento.
+    if (stFilter && (l.status || 'Previsto') !== stFilter) return false;
     return true;
   });
+
+  // Filtrar sem somar obriga a conferir na mão o que ficou na tela.
+  if ($('finResumo')) {
+    const ent = rows.filter(l => l.tipo !== 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
+    const sai = rows.filter(l => l.tipo === 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
+    $('finResumo').innerHTML = rows.length
+      ? `${rows.length} lançamento(s) na tela · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
+      : '';
+  }
 
   $('finEmpty').style.display = rows.length ? 'none' : 'block';
   $('finBody').innerHTML = rows.map(l => {
