@@ -3936,13 +3936,19 @@ function renderCrm(){
   // ---- clientes
   const busca=nrm(V('crmBusca'));
   let cls=[...clientes].sort((a,b)=>nrm(a.empresa||a.nome)<nrm(b.empresa||b.nome)?-1:1);
-  if(busca) cls=cls.filter(c=>nrm([c.nome,c.empresa,c.segmento,c.email,c.fone,(c.end||{}).cidade,(c.end||{}).uf].join(' ')).includes(busca));
+  // A busca aceita o CNPJ com ou sem pontuação: quem copia de uma nota cola
+  // formatado, quem digita não põe ponto.
+  const buscaNum=cnpjNum(V('crmBusca'));
+  if(busca) cls=cls.filter(c=>
+    nrm([c.nome,c.empresa,c.segmento,c.email,c.fone,cnpjFmt(c.cnpj),(c.end||{}).cidade,(c.end||{}).uf].join(' ')).includes(busca)
+    || (buscaNum && cnpjNum(c.cnpj).includes(buscaNum)));
   $('crmCliEmpty').style.display=cls.length?'none':'block';
   $('crmCliBody').innerHTML=cls.map(c=>{
     const id=esc(c._id||''), e=c.end||{};
     const n=crmOpsDoCliente(c._id).length;
     return `<tr>
-      <td><b>${esc(c.nome||'—')}</b></td><td>${esc(c.empresa||'—')}</td>
+      <td><b>${esc(c.nome||'—')}</b></td>
+      <td>${esc(c.empresa||'—')}${c.cnpj?`<div style="font-size:9.5px;color:var(--mut2)">${esc(cnpjFmt(c.cnpj))}</div>`:''}</td>
       <td>${c.segmento?`<span class="pill draft">${esc(c.segmento)}</span>`:'<span class="note">—</span>'}</td>
       <td>${esc(c.fone||'—')}</td><td class="note">${esc(c.email||'—')}</td>
       <td>${esc([e.cidade,e.uf].filter(Boolean).join('/')||'—')}</td>
@@ -3967,17 +3973,61 @@ function marcarOportsVistas(){
 }
 
 /* ===== clientes ===== */
+const cnpjNum = v => String(v||'').replace(/\D/g,'').slice(0,14);
+function cnpjFmt(v){
+  const d=cnpjNum(v);
+  if(!d) return '';
+  return d.replace(/^(\d{2})(\d)/,'$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/,'$1.$2.$3')
+          .replace(/\.(\d{3})(\d)/,'.$1/$2').replace(/(\d{4})(\d)/,'$1-$2');
+}
+/* CNPJ errado é pior que CNPJ em branco: ele vai para a DUIMP e para a nota.
+   Os dois dígitos verificadores pegam erro de digitação na hora. */
+function cnpjValido(v){
+  const d=cnpjNum(v);
+  if(d.length!==14 || /^(\d)\1{13}$/.test(d)) return false;
+  const dv = base => {
+    let p=base.length-7, s=0;
+    for(let i=base.length;i>=1;i--){ s+=base.charAt(base.length-i)*p--; if(p<2) p=9; }
+    const r=s%11; return r<2?0:11-r;
+  };
+  return dv(d.slice(0,12))===+d[12] && dv(d.slice(0,13))===+d[13];
+}
+/* Puxa razão social e endereço pelo CNPJ. Só preenche campo vazio — quem já
+   digitou não perde o que escreveu. Sem rede, o cadastro segue na mão. */
+async function crmBuscarCnpj(){
+  const d=cnpjNum(V('m_cli_cnpj'));
+  if(d.length!==14){ toast('⚠ CNPJ precisa de 14 dígitos'); return; }
+  if(!cnpjValido(d)){ toast('⚠ CNPJ inválido — confira os dígitos'); return; }
+  const põe=(id,val)=>{ const el=$(id); if(el && !el.value.trim() && val) el.value=val; };
+  try{
+    const r=await fetch('https://brasilapi.com.br/api/cnpj/v1/'+d,{signal:AbortSignal.timeout(9000)});
+    if(!r.ok){ toast(r.status===404?'⚠ CNPJ não encontrado na Receita — preencha à mão':'⚠ Consulta indisponível agora — preencha à mão'); return; }
+    const j=await r.json();
+    põe('m_cli_emp', j.nome_fantasia || j.razao_social);
+    põe('m_cli_seg', j.cnae_fiscal_descricao);
+    põe('m_cli_fone', j.ddd_telefone_1);
+    põe('m_cli_mail', j.email);
+    põe('m_cli_cep', String(j.cep||'').replace(/\D/g,'').replace(/^(\d{5})(\d{3})$/,'$1-$2'));
+    põe('m_cli_log', [j.descricao_tipo_de_logradouro,j.logradouro].filter(Boolean).join(' '));
+    põe('m_cli_num', j.numero);
+    põe('m_cli_compl', j.complemento);
+    põe('m_cli_bairro', j.bairro);
+    põe('m_cli_cidade', j.municipio);
+    põe('m_cli_uf', j.uf);
+    toast(`Dados de <b>${esc(j.razao_social||'')}</b> preenchidos ✓`);
+  }catch(e){ toast('⚠ Não deu para consultar o CNPJ agora — preencha à mão'); }
+}
 function crmClienteCampos(c){
   c=c||{}; const e=c.end||{};
   return `<div class="frow">
       <div><label>Nome do cliente (pessoa)</label><input id="m_cli_nome" value="${esc(c.nome||'')}" placeholder="Ex.: João Custódio"></div>
       <div><label>Empresa do cliente</label><input id="m_cli_emp" value="${esc(c.empresa||'')}" placeholder="Ex.: Custódio Máquinas Ltda"></div>
-      <div><label>Segmento de atuação</label><input id="m_cli_seg" list="crmSegmentosLista" value="${esc(c.segmento||'')}" placeholder="Ex.: Construção civil"></div>
+      <div><label>CNPJ</label><div style="display:flex;gap:6px"><input id="m_cli_cnpj" value="${esc(cnpjFmt(c.cnpj))}" placeholder="00.000.000/0000-00" style="flex:1 1 auto;min-width:0" oninput="this.value=cnpjFmt(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();crmBuscarCnpj()}"><button class="btn btn-ghost" style="padding:6px 9px;font-size:12px;flex:0 0 auto" title="Buscar dados na Receita pelo CNPJ" onclick="crmBuscarCnpj()">🔍</button></div></div>
     </div>
     <div class="frow">
+      <div><label>Segmento de atuação</label><input id="m_cli_seg" list="crmSegmentosLista" value="${esc(c.segmento||'')}" placeholder="Ex.: Construção civil"></div>
       <div><label>Telefone / WhatsApp</label><input id="m_cli_fone" value="${esc(c.fone||'')}" placeholder="+55 85 9 0000-0000"></div>
       <div><label>E-mail</label><input id="m_cli_mail" type="email" value="${esc(c.email||'')}" placeholder="cliente@empresa.com.br"></div>
-      <div><label>Responsável WindGate</label><select id="m_cli_resp">${AG_RESP.map(r=>`<option${r===(c.resp||(USER?USER.nome.split(' ')[0]:''))?' selected':''}>${r}</option>`).join('')}</select></div>
     </div>
     <div class="grouph">Endereço completo</div>
     <div class="frow">
@@ -3993,7 +4043,10 @@ function crmClienteCampos(c){
       <div style="grid-column:span 2"><label>Cidade</label><input id="m_cli_cidade" value="${esc(e.cidade||'')}"></div>
       <div><label>UF</label><input id="m_cli_uf" value="${esc(e.uf||'')}" maxlength="2" placeholder="CE"></div>
     </div>
-    <div class="frow"><div style="grid-column:span 3"><label>Observações</label><input id="m_cli_obs" value="${esc(c.obs||'')}" placeholder="Como chegou até nós, histórico, preferências…"></div></div>`;
+    <div class="frow">
+      <div><label>Responsável WindGate</label><select id="m_cli_resp">${AG_RESP.map(r=>`<option${r===(c.resp||(USER?USER.nome.split(' ')[0]:''))?' selected':''}>${r}</option>`).join('')}</select></div>
+      <div style="grid-column:span 2"><label>Observações</label><input id="m_cli_obs" value="${esc(c.obs||'')}" placeholder="Como chegou até nós, histórico, preferências…"></div>
+    </div>`;
 }
 function openCrmClienteModal(pref){
   openModal(`<h3>Novo <span>cliente</span></h3>${crmClienteCampos(pref)}
@@ -4026,7 +4079,15 @@ function crmSalvarCliente(editId){
   if(!nome && !empresa){ toast('⚠ Informe o nome do cliente ou a empresa'); return; }
   const email=V('m_cli_mail').trim();
   if(email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('⚠ E-mail parece incompleto'); return; }
-  const campos={nome,empresa,segmento:V('m_cli_seg').trim(),fone:V('m_cli_fone').trim(),email,
+  const cnpj=cnpjNum(V('m_cli_cnpj'));
+  if(cnpj && !cnpjValido(cnpj)){ toast('⚠ CNPJ inválido — confira os dígitos'); return; }
+  // Dois cadastros com o mesmo CNPJ viram duas histórias do mesmo cliente,
+  // cada uma com metade das oportunidades.
+  if(cnpj){
+    const igual=(DB.crm||[]).find(x=>x && x._id!==editId && cnpjNum(x.cnpj)===cnpj);
+    if(igual){ toast(`⚠ Este CNPJ já está em <b>${esc(igual.empresa||igual.nome)}</b>`); return; }
+  }
+  const campos={nome,empresa,cnpj,segmento:V('m_cli_seg').trim(),fone:V('m_cli_fone').trim(),email,
     resp:V('m_cli_resp'),obs:V('m_cli_obs').trim(),
     end:{cep:V('m_cli_cep').trim(),logradouro:V('m_cli_log').trim(),numero:V('m_cli_num').trim(),
          compl:V('m_cli_compl').trim(),bairro:V('m_cli_bairro').trim(),cidade:V('m_cli_cidade').trim(),
@@ -4067,12 +4128,13 @@ function crmVerCliente(id){
   openModal(`<h3>${esc(c.empresa||c.nome)} <span>· ficha do cliente</span></h3>
     <div class="frow" style="margin-bottom:4px">
       <div><label>Contato</label><div>${esc(c.nome||'—')}</div></div>
+      <div><label>CNPJ</label><div>${esc(cnpjFmt(c.cnpj)||'—')}</div></div>
       <div><label>Segmento</label><div>${esc(c.segmento||'—')}</div></div>
-      <div><label>Responsável WindGate</label><div>${esc(c.resp||'—')}</div></div>
     </div>
     <div class="frow" style="margin-bottom:4px">
       <div><label>Telefone</label><div>${esc(c.fone||'—')}</div></div>
-      <div style="grid-column:span 2"><label>E-mail</label><div>${esc(c.email||'—')}</div></div>
+      <div><label>E-mail</label><div>${esc(c.email||'—')}</div></div>
+      <div><label>Responsável WindGate</label><div>${esc(c.resp||'—')}</div></div>
     </div>
     <div class="frow"><div style="grid-column:span 3"><label>Endereço</label><div class="note">${esc(endLinha||'não informado')}</div></div></div>
     ${c.obs?`<p class="note" style="margin:2px 0 10px">${esc(c.obs)}</p>`:''}
