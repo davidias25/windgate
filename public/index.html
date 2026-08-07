@@ -1200,7 +1200,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="fin-dash-grid" id="finDashGrid"></div>
 
   <div class="card">
-    <h2>Resultado por operação</h2>
+    <h2>Resultado por operação <span class="spacer"></span><span class="note">Operação inteira — todos os meses, sem o filtro de mês acima</span></h2>
     <div style="overflow-x:auto"><table><thead><tr><th>Operação</th><th class="r">Receita prevista</th><th class="r">Receita realizada</th><th class="r">Despesa prevista</th><th class="r">Despesa realizada</th><th class="r">Resultado real</th><th class="r">Margem</th></tr></thead><tbody id="finOpsBody"></tbody></table></div>
   </div>
 
@@ -3179,9 +3179,12 @@ function renderFin(){
     </div>
   `;
 
+  // Operação de importação atravessa meses: o sinal sai num mês, o saldo da
+  // fábrica em outro, os impostos na chegada e a receita depois da entrega.
+  // Recortar por mês mostrava pedaço de operação como se fosse o resultado
+  // dela — despesa sem a receita, ou o contrário. Aqui entra tudo.
   const ops = {};
   effectiveItems.forEach(l => {
-    if (targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return;
     ops[l.op] = ops[l.op] || { rp: 0, rr: 0, dp: 0, dr: 0 };
     const v = +l.valor || 0, o = ops[l.op];
     if (l.tipo === 'Receita') { l.status === 'Realizado' ? o.rr += v : o.rp += v; }
@@ -3190,10 +3193,10 @@ function renderFin(){
 
   $('finOpsBody').innerHTML = Object.entries(ops).map(([op, o]) => {
     const res = o.rr - o.dr, mg = o.rr > 0 ? (res / o.rr * 100).toFixed(1) + '%' : '—';
-    return `<tr><td><b>${esc(op)}</b></td><td class="r num">${fmt(o.rp + o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
+    return `<tr><td><b>${esc(op||'— sem operação —')}</b></td><td class="r num">${fmt(o.rp + o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
       <td class="r num">${fmt(o.dp + o.dr)}</td><td class="r num" style="color:#FF5A6E">${fmt(o.dr)}</td>
       <td class="r num" style="font-weight:800;color:${res >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(res)}</td><td class="r num">${mg}</td></tr>`;
-  }).join('') || '<tr><td colspan="7" class="note">Sem lançamentos para este período.</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="note">Nenhum lançamento vinculado a operações ainda.</td></tr>';
 
   const opFilter = $('finFilter') ? $('finFilter').value : '';
   const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
