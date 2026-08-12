@@ -552,6 +552,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 
 /* cota layout */
+/* cotação aprovada em somente-leitura até alguém pedir para editar */
+.cota-travada{position:relative}
+.cota-travada input,.cota-travada select,.cota-travada textarea,.cota-travada .del,.cota-travada .btn-add{pointer-events:none;opacity:.6}
+.cota-aviso{background:var(--amber-soft);border-left:3px solid var(--amber);color:var(--amber);font-size:11.5px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cota-aviso .btn{pointer-events:auto}
 .cota-grid{display:grid;grid-template-columns:1fr 350px;gap:16px;align-items:start}
 @media(max-width:1020px){.cota-grid{grid-template-columns:1fr}}
 .summary-stick{position:sticky;top:calc(var(--nav-h) + 14px)}
@@ -768,7 +773,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="empty" id="qEmpty" style="display:none">Nenhuma cotação salva ainda.</div>
   </div>
 
-  <div class="cota-grid">
+  <div class="cota-aviso" id="cotaAviso" style="display:none"></div>
+  <div class="cota-grid" id="cotaForm">
     <div>
       <section class="card">
         <h2>Dados da operação</h2>
@@ -1396,7 +1402,7 @@ const DBKEY='windgate_hub_v1';
 /* ---------- estado ---------- */
 let DB = null;
 let USER = null;          // usuário logado
-let state = {items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:null,aprovadoPor:null}; // cotação em edição
+let state = {items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:null,aprovadoPor:null,editando:false}; // cotação em edição
 
 const STATUS_OP = [
   {k:'cotacao',    l:'Cotação',              c:'#8FA0BC'},
@@ -5445,6 +5451,31 @@ function updateApprovalUI(){
     ? 'Cotação enviada. <b>Aguardando o Samir aprovar a margem</b> — o PDF será liberado em seguida.'
     : s==='ok' ? `Aprovada por <b>${esc(state.aprovadoPor||'Samir')}</b>. Proposta liberada — gere o PDF no padrão WindGate.`
     : 'Fluxo: <b>o Davi monta a cotação</b> → envia → <b>Samir revisa a margem e aprova</b> → proposta em PDF liberada. Nada sai sem aprovação.';
+  travarCotacao();
+}
+/* Cotação aprovada abre em somente-leitura: o PDF dela já foi para o cliente,
+   e alterar os números sem querer deixaria a tela dizendo "aprovada" sobre
+   uma conta que ninguém aprovou. Editar passa a ser uma decisão explícita. */
+function travarCotacao(){
+  const g=$('cotaForm'), av=$('cotaAviso');
+  if(!g||!av) return;
+  const aprovada=state.status==='ok', travada=aprovada&&!state.editando;
+  g.classList.toggle('cota-travada',travada);
+  if(travada){
+    av.style.display='flex';
+    av.innerHTML=`🔒 Cotação <b>aprovada</b>${state.aprovadoPor?' por <b>'+esc(state.aprovadoPor)+'</b>':''} — somente leitura.
+      <button class="btn btn-ghost btn-sm" onclick="editarCotacao()">✏️ Editar cotação</button>`;
+  } else if(aprovada){
+    av.style.display='flex';
+    av.innerHTML='✏️ Editando uma cotação já aprovada. Se o <b>preço ao cliente</b> mudar, ela volta para a aprovação do Samir — o resto pode ser corrigido sem refazer o fluxo.';
+  } else {
+    av.style.display='none';
+  }
+}
+function editarCotacao(){
+  if(state.status!=='ok'){ return; }
+  state.editando=true; travarCotacao();
+  toast('Cotação destravada — mudou o preço, volta para aprovação');
 }
 function sendApproval(){
   if(!state.items.length||!(R.custoReal>0)){ toast('⚠ Preencha a cotação antes de enviar.'); return; }
@@ -5496,21 +5527,46 @@ function snapshot(){
   return {fields,items:state.items,exps:state.exps,fotos:state.fotos||[],status:state.status,id:state.id,criadoPor:state.criadoPor,aprovadoPor:state.aprovadoPor,preco:R.preco||0};
 }
 function saveQuote(silent){
+  const anterior = state.id ? DB.quotes[state.id] : null;
+  const eraAprovada = !!(anterior && anterior.status==='ok');
+  if(eraAprovada && state.status==='ok' && !state.editando){
+    toast('🔒 Cotação aprovada — clique em <b>Editar cotação</b> para alterar'); return;
+  }
+  // Aprovar é aprovar um preço. Se o preço mudou, a aprovação anterior não
+  // vale mais para este número — volta para o Samir. Ajuste de texto, prazo
+  // ou dado do cliente não desfaz nada.
+  let revogou=false;
+  if(eraAprovada && state.editando){
+    const antes=+(+anterior.preco||0).toFixed(2), agora=+(+(R.preco||0)).toFixed(2);
+    if(Math.abs(agora-antes)>0.005){ state.aprovadoPor=null; setStatus('wait'); revogou=true; }
+  }
   if(!state.id) state.id='q_'+Date.now();
   const s=snapshot();
+  if(eraAprovada && state.editando){
+    s.editadoPor=USER?USER.nome.split(' ')[0]:''; s.editadoEm=new Date().toISOString();
+    s.precoAprovado = revogou ? null : (anterior.precoAprovado!=null?anterior.precoAprovado:+(+anterior.preco||0));
+  }
   DB.quotes[state.id]=s;
   const label=(V('opNum')||'sem nº')+' · '+(V('cliente')||'sem cliente');
   const entry={id:state.id,label,cliente:V('cliente'),status:state.status,preco:R.preco||0,criadoPor:state.criadoPor||USER.nome.split(' ')[0],ts:Date.now()};
   const ix=DB.qindex.findIndex(x=>x.id===state.id);
   if(ix>=0) DB.qindex[ix]=entry; else DB.qindex.unshift(entry);
   saveDB(); refreshSaved();
+  if(eraAprovada && state.editando){
+    state.editando=false; travarCotacao();       // volta a ficar protegida
+    try{ updateNotifs(); }catch(e){}
+    toast(revogou
+      ? '↩ O preço mudou — a cotação voltou para a <b>aprovação do Samir</b>'
+      : 'Cotação aprovada atualizada — o preço não mudou, a aprovação continua valendo ✓');
+    return;
+  }
   if(!silent) msg('Cotação salva ✓');
 }
 function loadQuote(id){
   const s=DB.quotes[id]; if(!s){ toast('⚠ Cotação não encontrada'); return; }
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
   state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.id=s.id;
-  state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor;
+  state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
   msg('Cotação carregada.');
 }
@@ -5521,13 +5577,17 @@ function refreshSaved(){
   tb.innerHTML=DB.qindex.map(q=>{
     const s=DB.quotes[q.id]||{};
     const pill=q.status==='ok'?'<span class="pill ok">APROVADA</span>':q.status==='wait'?'<span class="pill wait">AGUARD. SAMIR</span>':'<span class="pill draft">RASCUNHO</span>';
+    // Quem mexeu numa cotação já aprovada fica registrado na própria lista.
+    const marca=s.editadoEm
+      ? `<div style="font-size:9px;color:var(--mut2)">editada ${esc(s.editadoEm.slice(0,10).split('-').reverse().join('/'))}${s.editadoPor?' · '+esc(s.editadoPor):''}</div>`
+      : '';
     return `<tr><td><b>${esc((s.fields||{}).opNum||'—')}</b></td><td>${esc(q.cliente||'—')}</td><td>${esc((s.fields||{}).mercadoria||'—')}</td>
-      <td class="r num">${fmt(q.preco||0)}</td><td>${pill}</td><td>${esc(q.criadoPor||'—')}</td>
-      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="loadQuote('${q.id}')">Abrir</button> <button class="del" onclick="delQuote('${q.id}')">✕</button></td></tr>`;
+      <td class="r num">${fmt(q.preco||0)}</td><td>${pill}${marca}</td><td>${esc(q.criadoPor||'—')}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="loadQuote('${q.id}')">Abrir</button>${q.status==='ok'?` <button class="btn btn-blue btn-sm" onclick="loadQuote('${q.id}');editarCotacao()">Editar</button>`:''} <button class="del" onclick="delQuote('${q.id}')">✕</button></td></tr>`;
   }).join('');
 }
 function newQuote(){
-  state={items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null};
+  state={items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null,editando:false};
   renderFotos();
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
