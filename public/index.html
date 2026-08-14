@@ -5872,6 +5872,10 @@ async function gerarPropostaPDF(){
     doc.addPage(); pag++;
     pdfHeader(doc,cliente+' · Etapas & Cronograma · '+mesAno,pag);
     let ye=bandPDF(doc,120,'COMO A OPERAÇÃO ACONTECE — DO PEDIDO À ENTREGA',PDF_NAVY);
+    // Transporte terrestre zerado significa que a entrega no endereço do
+    // cliente não está no preço — anunciar a etapa seria prometer um serviço
+    // que não foi cobrado.
+    const temTerrestre = N('transporte') > 0;
     const etapas=[
       ['Contrato & OK','Aprovação da proposta e contrato em até 24h.'],
       ['Pagamento inicial','Libera a produção na fábrica (Parcela 01).'],
@@ -5879,7 +5883,7 @@ async function gerarPropostaPDF(){
       ['Saldo pré-embarque','Produto pronto e conferido; booking confirmado (Parcela 02).'],
       ['Embarque & trânsito','Navegação com tracking informado ao cliente.'],
       ['Chegada & desembaraço','Impostos, taxas e liberação — tudo pela WindGate (Parcela 03).'],
-      ['Logística nacional','Transporte terrestre até o endereço final.'],
+      ...(temTerrestre ? [['Logística nacional','Transporte terrestre até o endereço final.']] : []),
       ['Entrega & pós','Recebimento conferido + suporte de garantia do fabricante.']
     ];
     let yE=ye+22;
@@ -5894,7 +5898,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
       doc.text(doc.splitTextToSize(e[1],235),x+20,yy+6);
     });
-    let yD=yE+4*46+14;
+    let yD=yE+Math.ceil(etapas.length/2)*46+14;   // acompanha o número de etapas
     yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
     const recs=[[N('desR1'),'PARCELA 01','Assinatura · libera a produção'],
                 [N('desR2'),'PARCELA 02','Produto pronto · pré-embarque'],
