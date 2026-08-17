@@ -5798,8 +5798,16 @@ const PROPOSTA_BLOCOS=[
   {k:'etapas',     l:'Etapas da operação',                 d:'Do contrato à entrega, numeradas.'},
   {k:'cronograma', l:'Cronograma de desembolso',           d:'As 3 parcelas e o que cada uma libera.'},
   {k:'perks',      l:'Por que vale mais (diferenciais)',   d:'Página de argumentos comerciais.'},
-  {k:'cta',        l:'Página de contato',                  d:'"Vamos começar?" com responsável, telefone e e-mail.'}
+  {k:'cta',        l:'Página de contato',                  d:'"Vamos começar?" com responsável, telefone e e-mail.'},
+  {k:'banco',      l:'Dados bancários para pagamento',     d:'Titular, banco, agência, conta, PIX e contato. Fora por padrão.', pad:false}
 ];
+/* Dados de recebimento. Ficam num lugar só: mudar banco ou chave PIX é mexer
+   aqui, não caçar o número dentro do gerador de PDF. */
+const DADOS_BANCARIOS={
+  titular:'SF TRADING LTDA', cnpj:'58762606000144', banco:'Santander',
+  agencia:'4279', conta:'130085588', pix:'58762606000144',
+  fone:'+55 85 92000-6271', email:'samir@windgate.com.br'
+};
 /* Linhas de custo. Vêm desmarcadas: abrir a composição mostra ao cliente o que
    a WindGate paga em cada etapa, e com o total ao lado a margem fica dedutível
    por subtração. Quem quiser abrir, abre de propósito. */
@@ -5815,7 +5823,7 @@ const PROPOSTA_CUSTOS=[
 const PROPOSTA_DIFAL={k:'difal', l:'ICMS-DIFAL destacado', d:'Mostra, dentro do total, quanto é repasse à SEFAZ.'};
 const TODOS_BLOCOS = () => [...PROPOSTA_BLOCOS, ...PROPOSTA_CUSTOS, PROPOSTA_DIFAL];
 const propostaBlocosPadrao = () => Object.assign(
-  Object.fromEntries(PROPOSTA_BLOCOS.map(b=>[b.k,true])),
+  Object.fromEntries(PROPOSTA_BLOCOS.map(b=>[b.k,b.pad!==false])),
   Object.fromEntries(PROPOSTA_CUSTOS.map(b=>[b.k,false])),
   {difal:true});
 function propostaBlocos(){
@@ -6007,7 +6015,7 @@ async function gerarPropostaPDF(){
     // no meio não desalinha a numeração.
     const temFotos=B.fotos&&fotos.length>0;
     const temEtapasPag=B.etapas||B.cronograma;
-    const temCondPag=B.perks||B.cta;
+    const temCondPag=B.perks||B.cta||B.banco;
     let pag=1;
 
     /* ===== PÁGINA DE FOTOS — só existe quando há foto ===== */
@@ -6130,6 +6138,27 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(143,163,204); doc.text(l,x,cy+82,{align:'center'});
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
+    cy+=126;
+    }
+    if(B.banco){
+      const D=DADOS_BANCARIOS;
+      // Vai depois do CTA: primeiro o aceite, depois para onde pagar.
+      if(cy+108>780){ doc.addPage(); pdfHeader(doc,cliente+' · Dados para pagamento · '+mesAno); cy=120; }
+      let yb=bandPDF(doc,cy,'DADOS PARA PAGAMENTO',PDF_NAVY);
+      doc.setDrawColor(221,228,234); doc.setLineWidth(.8); doc.rect(36,yb,523,86);
+      doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(...PDF_NAVY);
+      doc.text(D.titular,44,yb+20);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_GRAY);
+      doc.text('CNPJ '+cnpjFmt(D.cnpj),44,yb+33);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
+      doc.text('Banco '+D.banco+'  ·  Agência '+D.agencia+'  ·  Conta '+D.conta,44,yb+50);
+      doc.setFont('helvetica','bold'); doc.setTextColor(...PDF_MAG);
+      doc.text('PIX  '+cnpjFmt(D.pix),44,yb+65);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...PDF_GRAY);
+      doc.text(D.fone+'  ·  '+D.email,44,yb+78);
+      doc.setFontSize(7.5);
+      // Alinhado à direita: fixado à esquerda, o texto passava da borda da caixa.
+      doc.text('Confirme estes dados por telefone antes de qualquer transferência.',551,yb+78,{align:'right'});
     }
     }
     const nPg=doc.getNumberOfPages();
@@ -6162,6 +6191,13 @@ function gerarPropostaPrint(){
       ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega — tudo contemplado.</div>`:''}
       ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Valores válidos por ${V('validade')||7} dias; o preço acompanha o câmbio do dia de cada pagamento.</div>`:''}
       ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>`:''}
+      ${B.banco?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
+        <div style="font-weight:800;color:#1B2A5B;font-size:13px">${esc(DADOS_BANCARIOS.titular)}</div>
+        <div style="font-size:9px;color:#64707D">CNPJ ${esc(cnpjFmt(DADOS_BANCARIOS.cnpj))}</div>
+        <div style="margin-top:6px">Banco ${esc(DADOS_BANCARIOS.banco)} · Agência ${esc(DADOS_BANCARIOS.agencia)} · Conta ${esc(DADOS_BANCARIOS.conta)}</div>
+        <div style="font-weight:800;color:#B5106B;margin-top:4px">PIX ${esc(cnpjFmt(DADOS_BANCARIOS.pix))}</div>
+        <div style="font-size:9px;color:#64707D;margin-top:6px">${esc(DADOS_BANCARIOS.fone)} · ${esc(DADOS_BANCARIOS.email)} — confirme estes dados por telefone antes de qualquer transferência.</div>
+      </div>`:''}
       <div style="font-size:8.5px;color:#64707D;margin-top:14px;border-top:1px solid #DDE4EA;padding-top:8px">WINDGATE · IMPORTAÇÃO E TRADING · Good winds open doors.</div>
     </div>
   </div>`;
