@@ -824,6 +824,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>ICMS destacado saída (%)</label><input type="number" id="icmsDest" value="4" step="0.1" oninput="calc()"></div>
           <div><label>PIS saída (%)</label><input type="number" id="pisS" value="1.6" step="0.05" oninput="calc()"></div>
           <div><label>COFINS saída (%)</label><input type="number" id="cofS" value="7.65" step="0.05" oninput="calc()"></div>
+          <div><label>IPI saída (%)</label><input type="number" id="ipiS" value="0" step="0.05" oninput="calc()" title="IPI destacado na nota de saída — entra por fora, sobre o valor da NF"></div>
           <div><label>Mark-up NF (%)</label><input type="number" id="mkp" value="1" step="0.1" oninput="calc()"></div>
           <div><label>Alíq. efetiva ST — CE (%)</label><input type="number" id="aliqST" value="16" step="0.1" oninput="calc()"></div>
         </div>
@@ -5267,6 +5268,7 @@ function calc(){
   if(!$('txFrete')) return;
   const txF=N('txFrete'), txD=N('txDesp'), pctInv=N('pctInv')/100, icmsE=N('icmsEnt')/100;
   const icmsD=N('icmsDest')/100, pisS=N('pisS')/100, cofS=N('cofS')/100, mkp=N('mkp')/100, aliqST=N('aliqST')/100;
+  const ipiS=N('ipiS')/100;
   const freteBRL = N('freteUSD')*txF + N('transporte');
   const seguro=N('seguro'), capat=N('capatazia'), sisc=N('siscomex'), afrmm=N('afrmm'), honor=N('honorarios');
 
@@ -5304,9 +5306,12 @@ function calc(){
   const baseICMS  = baseSaida/(1-icmsD);                     // L109
   const icmsDestV = baseICMS*icmsD;                          // L100
   // impostos de saída sobre NF grossada por item (aprox. nível operação, fator idêntico à planilha)
+  // ICMS, PIS e COFINS entram por dentro (compõem a própria base), por isso
+  // estão no fator. O IPI é por fora: incide sobre o valor da NF e é somado a
+  // ele, então fica de fora do fator e entra depois, no resultante.
   const fator = 1 - icmsD - pisS - cofS - mkp;
   const nfSaidaItens = fator>0 ? CHtot/fator : 0;
-  const pisSaida=nfSaidaItens*pisS, cofSaida=nfSaidaItens*cofS, ipiSaida=0;
+  const pisSaida=nfSaidaItens*pisS, cofSaida=nfSaidaItens*cofS, ipiSaida=nfSaidaItens*ipiS;
   const resultante = (pisSaida+cofSaida+ipiSaida) - creditos;    // M107
   const nfSaida = baseSaida + resultante + icmsDestV;        // L110
   const st = (V('ufDestino')==='CE') ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
@@ -5519,7 +5524,7 @@ function criarOpDaCotacao(){
 /* ===== persistência de cotações (no DB central) ===== */
 function snapshot(){
   const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','qtdCntr','prazo','validade',
-    'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','mkp','aliqST',
+    'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','ipiS','mkp','aliqST',
     'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
   // As fotos guardam só a URL no Storage — o arquivo em si não entra no banco,
@@ -5565,6 +5570,9 @@ function saveQuote(silent){
 function loadQuote(id){
   const s=DB.quotes[id]; if(!s){ toast('⚠ Cotação não encontrada'); return; }
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
+  // Cotação salva antes de um campo existir não traz esse campo. Sem zerar,
+  // ela herdaria o valor da cotação aberta antes dela e mudaria de preço.
+  if(s.fields.ipiS===undefined && $('ipiS')) $('ipiS').value=0;
   state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
@@ -5593,7 +5601,7 @@ function newQuote(){
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
   $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
   $('txFrete').value=5.30; $('txDesp').value=5.10; $('pctInv').value=70; $('icmsEnt').value=1.6;
-  $('icmsDest').value=4; $('pisS').value=1.6; $('cofS').value=7.65; $('mkp').value=1; $('aliqST').value=16;
+  $('icmsDest').value=4; $('pisS').value=1.6; $('cofS').value=7.65; $('ipiS').value=0; $('mkp').value=1; $('aliqST').value=16;
   $('freteUSD').value=0; $('seguro').value=0; $('capatazia').value=0; $('transporte').value=0;
   $('siscomex').value=416.46; $('afrmm').value=0; $('honorarios').value=1630;
   $('margemPct').value=25; $('margemBRL').value=0;
