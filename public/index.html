@@ -552,6 +552,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 
 /* cota layout */
+/* seletor de blocos da proposta */
+.prop-blocos{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:52vh;overflow-y:auto;margin-bottom:4px}
+@media(max-width:760px){.prop-blocos{grid-template-columns:1fr}}
+.prop-bloco{display:flex;gap:9px;align-items:flex-start;background:rgba(143,160,188,.07);border:1px solid var(--line);border-radius:9px;padding:9px 11px;cursor:pointer;font-size:12px}
+.prop-bloco input{width:auto;margin:2px 0 0}
+.prop-bloco.off{opacity:.5;cursor:not-allowed}
 /* cotação aprovada em somente-leitura até alguém pedir para editar */
 .cota-travada{position:relative}
 .cota-travada input,.cota-travada select,.cota-travada textarea,.cota-travada .del,.cota-travada .btn-add{pointer-events:none;opacity:.6}
@@ -763,7 +769,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div class="hd-actions">
       <button class="btn btn-ghost" onclick="newQuote()">+ Nova cotação</button>
       <button class="btn btn-ghost" onclick="saveQuote()">💾 Salvar</button>
-      <button class="btn btn-mag" id="btnProposta" onclick="gerarPropostaPDF()">📄 Gerar proposta (PDF)</button>
+      <button class="btn btn-mag" id="btnProposta" onclick="abrirPropostaModal()">📄 Gerar proposta (PDF)</button>
     </div>
   </div>
 
@@ -1407,7 +1413,7 @@ const DBKEY='windgate_hub_v1';
 /* ---------- estado ---------- */
 let DB = null;
 let USER = null;          // usuário logado
-let state = {items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:null,aprovadoPor:null,editando:false}; // cotação em edição
+let state = {items:[],exps:[],fotos:[],blocos:null,status:'draft',id:null,criadoPor:null,aprovadoPor:null,editando:false}; // cotação em edição
 
 const STATUS_OP = [
   {k:'cotacao',    l:'Cotação',              c:'#8FA0BC'},
@@ -5533,7 +5539,7 @@ function snapshot(){
     .forEach(id=>fields[id]=V(id));
   // As fotos guardam só a URL no Storage — o arquivo em si não entra no banco,
   // que é sincronizado inteiro a cada gravação.
-  return {fields,items:state.items,exps:state.exps,fotos:state.fotos||[],status:state.status,id:state.id,criadoPor:state.criadoPor,aprovadoPor:state.aprovadoPor,preco:R.preco||0};
+  return {fields,items:state.items,exps:state.exps,fotos:state.fotos||[],blocos:state.blocos||propostaBlocosPadrao(),status:state.status,id:state.id,criadoPor:state.criadoPor,aprovadoPor:state.aprovadoPor,preco:R.preco||0};
 }
 function saveQuote(silent){
   const anterior = state.id ? DB.quotes[state.id] : null;
@@ -5578,7 +5584,7 @@ function loadQuote(id){
   // ela herdaria o valor da cotação aberta antes dela e mudaria de preço.
   if(s.fields.ipiS===undefined && $('ipiS')) $('ipiS').value=0;
   if(s.fields.modalCntr===undefined && $('modalCntr')) $('modalCntr').value='FCL';
-  state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.id=s.id;
+  state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.blocos=s.blocos||propostaBlocosPadrao(); state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
   msg('Cotação carregada.');
@@ -5600,7 +5606,7 @@ function refreshSaved(){
   }).join('');
 }
 function newQuote(){
-  state={items:[],exps:[],fotos:[],status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null,editando:false};
+  state={items:[],exps:[],fotos:[],blocos:propostaBlocosPadrao(),status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null,editando:false};
   renderFotos();
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
@@ -5775,13 +5781,75 @@ function bandPDF(doc,y,txt,color){
   return y+20;
 }
 
+/* O que entra na proposta. Nem toda cotação quer o documento inteiro: às
+   vezes o cliente já conhece as etapas, às vezes o cronograma é combinado por
+   fora. Tudo marcado por padrão — quem não abrir o seletor recebe a proposta
+   completa, como sempre foi. */
+const PROPOSTA_BLOCOS=[
+  {k:'escopo',     l:'Escopo da operação',                 d:'Parágrafo de abertura com mercadoria, origem e modalidade.'},
+  {k:'itens',      l:'Relação de itens e investimento total', d:'Tabela de itens com preço unitário e a faixa do total.'},
+  {k:'fotos',      l:'Fotos do produto',                   d:'Página com as fotos anexadas à cotação.'},
+  {k:'verde',      l:'Cobertura total WindGate',           d:'Caixa verde: tudo contemplado, sem custo adicional.'},
+  {k:'amarelo',    l:'Validade e câmbio',                  d:'Caixa amarela: prazo de validade e regra cambial.'},
+  {k:'etapas',     l:'Etapas da operação',                 d:'Do contrato à entrega, numeradas.'},
+  {k:'cronograma', l:'Cronograma de desembolso',           d:'As 3 parcelas e o que cada uma libera.'},
+  {k:'perks',      l:'Por que vale mais (diferenciais)',   d:'Página de argumentos comerciais.'},
+  {k:'cta',        l:'Página de contato',                  d:'"Vamos começar?" com responsável, telefone e e-mail.'}
+];
+const propostaBlocosPadrao = () => Object.fromEntries(PROPOSTA_BLOCOS.map(b=>[b.k,true]));
+function propostaBlocos(){
+  const salvos=state.blocos||{};
+  const out=propostaBlocosPadrao();
+  // Só o que foi desmarcado de propósito muda; bloco novo nasce ligado.
+  Object.keys(out).forEach(k=>{ if(salvos[k]===false) out[k]=false; });
+  return out;
+}
+function abrirPropostaModal(){
+  if(state.status!=='ok'){ toast('🔒 A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.'); return; }
+  const dErr=desemErrors();
+  if(dErr.length){ toast('⛔ <b>Desembolso bloqueado:</b> '+dErr[0]); return; }
+  const b=propostaBlocos(), temFoto=(state.fotos||[]).length>0;
+  openModal(`<h3>O que entra na <span>proposta</span></h3>
+    <p class="note" style="margin-bottom:10px">Desmarque o que não deve aparecer no PDF deste cliente. A escolha fica salva na cotação.</p>
+    <div class="prop-blocos">${PROPOSTA_BLOCOS.map(x=>{
+      const semFoto = x.k==='fotos' && !temFoto;
+      return `<label class="prop-bloco${semFoto?' off':''}">
+        <input type="checkbox" id="pb_${x.k}" ${b[x.k]&&!semFoto?'checked':''} ${semFoto?'disabled':''}>
+        <span><b>${esc(x.l)}</b><br><span class="note">${semFoto?'Nenhuma foto anexada a esta cotação.':esc(x.d)}</span></span>
+      </label>`;
+    }).join('')}</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="marcarTodosBlocos(true)">Marcar tudo</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="gerarPropostaComBlocos()">📄 Gerar PDF</button>
+    </div>`);
+}
+function marcarTodosBlocos(v){
+  PROPOSTA_BLOCOS.forEach(x=>{ const el=$('pb_'+x.k); if(el && !el.disabled) el.checked=v; });
+}
+function gerarPropostaComBlocos(){
+  const escolha={}, antes=propostaBlocos();
+  // Caixa desabilitada (fotos numa cotação sem foto) mantém o valor anterior:
+  // gravá-la como desligada esconderia as fotos que fossem anexadas depois.
+  PROPOSTA_BLOCOS.forEach(x=>{
+    const el=$('pb_'+x.k);
+    escolha[x.k] = !el ? true : (el.disabled ? antes[x.k] : !!el.checked);
+  });
+  if(!Object.values(escolha).some(Boolean)){ toast('⚠ Marque ao menos um bloco'); return; }
+  state.blocos=escolha;
+  if(state.id){ const q=DB.quotes[state.id]; if(q){ q.blocos=escolha; saveDB(); } }
+  closeModal();
+  gerarPropostaPDF();
+}
+
 async function gerarPropostaPDF(){
   if(state.status!=='ok'){ toast('🔒 A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.'); return; }
   const dErr=desemErrors();
   if(dErr.length){ toast('⛔ <b>Desembolso bloqueado:</b> '+dErr[0]); return; }
   if(!window.jspdf || !window.jspdf.jsPDF){ gerarPropostaPrint(); return; }
+  const B=propostaBlocos();
   // Sem foto a proposta sai como sempre saiu; com foto, ganha uma página.
-  const pedidas=(state.fotos||[]).length;
+  const pedidas=B.fotos?(state.fotos||[]).length:0;
   if(pedidas) toast('📷 Preparando as fotos da proposta…');
   const fotos=pedidas?await carregarFotosDaProposta():[];
   if(pedidas && !fotos.length) toast('⚠ Nenhuma das fotos carregou — a proposta sai sem a página de fotos');
@@ -5807,64 +5875,72 @@ async function gerarPropostaPDF(){
       doc.text(String(v).slice(0,22),bx+9,146);
       bx+=bw+10;
     });
-    // escopo
-    let y=bandPDF(doc,176,'ESCOPO DA OPERAÇÃO',PDF_MAG);
     const nIt=itens.length;
-    // O cliente precisa saber se o contêiner é só dele: LCL divide espaço com
-    // outras cargas, o que muda prazo e manuseio.
-    const modalTxt = V('modalCntr')==='LCL'
-      ? 'LCL (carga consolidada em contêiner compartilhado)'
-      : 'FCL (contêiner completo, exclusivo desta carga)';
-    const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Embarque em ${modalTxt}. Valores finais ao cliente, entregues e nacionalizados${V('destino')?' em '+V('destino'):''}.`;
-    doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
-    const escLines=doc.splitTextToSize(escopo,515);
-    doc.text(escLines,36,y+16); y+=16+escLines.length*13;
-    // tabela de itens
-    y=bandPDF(doc,y+6,'RELAÇÃO DE ITENS · PREÇOS FINAIS',PDF_NAVY);
-    y+=16;
-    doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY);
-    doc.text('ITEM',44,y); doc.text('QTD',400,y,{align:'right'}); doc.text('PREÇO UNITÁRIO',478,y,{align:'right'}); doc.text('PREÇO TOTAL',552,y,{align:'right'});
-    y+=6; doc.setDrawColor(27,42,91); doc.setLineWidth(1.1); doc.line(36,y,559,y); y+=15;
-    itens.forEach(it=>{
-      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_NAVY);
-      doc.text(String(it.d).slice(0,52),44,y);
-      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...PDF_INK);
-      doc.text(String(it.q),400,y,{align:'right'});
-      doc.text(fmt(it.unit),478,y,{align:'right'});
-      doc.setFont('helvetica','bold'); doc.setTextColor(...PDF_MAG);
-      doc.text(fmt(it.total),552,y,{align:'right'});
-      let dy=12;
-      if(it.ncm){ doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY); doc.text('NCM '+it.ncm,44,y+10); dy=19; }
-      doc.setDrawColor(237,241,245); doc.setLineWidth(.6); doc.line(36,y+dy-4,559,y+dy-4);
-      y+=dy+8;
-    });
-    // total
-    doc.setFillColor(...PDF_NAVY); doc.rect(36,y,523,30,'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(255,255,255);
-    doc.text('INVESTIMENTO TOTAL · '+nIt+(nIt>1?' ITENS':' ITEM'),45,y+19);
-    doc.setFontSize(14); doc.text(fmt(R.preco||0),551,y+20,{align:'right'});
-    y+=44;
-    // caixa verde
-    doc.setFillColor(232,245,238); doc.rect(36,y,523,46,'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(30,90,60);
-    doc.text('Cobertura total WindGate.',44,y+14);
-    doc.setFont('helvetica','normal');
-    const gtxt=doc.splitTextToSize('Todos os custos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no endereço final. Nenhum custo operacional adicional é repassado ao cliente.',505);
-    doc.text(gtxt,44,y+25);
-    y+=56;
-    // caixa amarela
-    doc.setFillColor(252,247,227); doc.rect(36,y,523,44,'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
-    doc.text('Validade e câmbio.',44,y+14);
-    doc.setFont('helvetica','normal');
-    const ytxt=doc.splitTextToSize('Os valores acima são válidos por '+(V('validade')||'7')+' dias. A composição do preço acompanha a taxa de câmbio do dia de cada pagamento; qualquer variação é comunicada previamente ao cliente antes do desembolso.',505);
-    doc.text(ytxt,44,y+25);
-    const totalPag=fotos.length?4:3;
+    let y=176;
+    if(B.escopo){
+      y=bandPDF(doc,y,'ESCOPO DA OPERAÇÃO',PDF_MAG);
+      // O cliente precisa saber se o contêiner é só dele: LCL divide espaço com
+      // outras cargas, o que muda prazo e manuseio.
+      const modalTxt = V('modalCntr')==='LCL'
+        ? 'LCL (carga consolidada em contêiner compartilhado)'
+        : 'FCL (contêiner completo, exclusivo desta carga)';
+      const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Embarque em ${modalTxt}. Valores finais ao cliente, entregues e nacionalizados${V('destino')?' em '+V('destino'):''}.`;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
+      const escLines=doc.splitTextToSize(escopo,515);
+      doc.text(escLines,36,y+16); y+=16+escLines.length*13+6;
+    }
+    if(B.itens){
+      y=bandPDF(doc,y,'RELAÇÃO DE ITENS · PREÇOS FINAIS',PDF_NAVY);
+      y+=16;
+      doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY);
+      doc.text('ITEM',44,y); doc.text('QTD',400,y,{align:'right'}); doc.text('PREÇO UNITÁRIO',478,y,{align:'right'}); doc.text('PREÇO TOTAL',552,y,{align:'right'});
+      y+=6; doc.setDrawColor(27,42,91); doc.setLineWidth(1.1); doc.line(36,y,559,y); y+=15;
+      itens.forEach(it=>{
+        doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...PDF_NAVY);
+        doc.text(String(it.d).slice(0,52),44,y);
+        doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(...PDF_INK);
+        doc.text(String(it.q),400,y,{align:'right'});
+        doc.text(fmt(it.unit),478,y,{align:'right'});
+        doc.setFont('helvetica','bold'); doc.setTextColor(...PDF_MAG);
+        doc.text(fmt(it.total),552,y,{align:'right'});
+        let dy=12;
+        if(it.ncm){ doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY); doc.text('NCM '+it.ncm,44,y+10); dy=19; }
+        doc.setDrawColor(237,241,245); doc.setLineWidth(.6); doc.line(36,y+dy-4,559,y+dy-4);
+        y+=dy+8;
+      });
+      doc.setFillColor(...PDF_NAVY); doc.rect(36,y,523,30,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(255,255,255);
+      doc.text('INVESTIMENTO TOTAL · '+nIt+(nIt>1?' ITENS':' ITEM'),45,y+19);
+      doc.setFontSize(14); doc.text(fmt(R.preco||0),551,y+20,{align:'right'});
+      y+=44;
+    }
+    if(B.verde){
+      doc.setFillColor(232,245,238); doc.rect(36,y,523,46,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(30,90,60);
+      doc.text('Cobertura total WindGate.',44,y+14);
+      doc.setFont('helvetica','normal');
+      const gtxt=doc.splitTextToSize('Todos os custos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no endereço final. Nenhum custo operacional adicional é repassado ao cliente.',505);
+      doc.text(gtxt,44,y+25);
+      y+=56;
+    }
+    if(B.amarelo){
+      doc.setFillColor(252,247,227); doc.rect(36,y,523,44,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
+      doc.text('Validade e câmbio.',44,y+14);
+      doc.setFont('helvetica','normal');
+      const ytxt=doc.splitTextToSize('Os valores acima são válidos por '+(V('validade')||'7')+' dias. A composição do preço acompanha a taxa de câmbio do dia de cada pagamento; qualquer variação é comunicada previamente ao cliente antes do desembolso.',505);
+      doc.text(ytxt,44,y+25);
+    }
+    // Página só existe se sobrou conteúdo para ela; a numeração acompanha.
+    const temFotos=B.fotos&&fotos.length>0;
+    const temEtapasPag=B.etapas||B.cronograma;
+    const temCondPag=B.perks||B.cta;
+    const totalPag=1+(temFotos?1:0)+(temEtapasPag?1:0)+(temCondPag?1:0);
     let pag=1;
     pdfFooter(doc,pag,totalPag);
 
     /* ===== PÁGINA DE FOTOS — só existe quando há foto ===== */
-    if(fotos.length){
+    if(temFotos){
       doc.addPage(); pag++;
       pdfHeader(doc,cliente+' · O produto · '+mesAno,pag);
       const yf=bandPDF(doc,120,'FOTOS DO PRODUTO',PDF_NAVY);
@@ -5887,8 +5963,11 @@ async function gerarPropostaPDF(){
     }
 
     /* ===== ETAPAS + DESEMBOLSO ===== */
+    if(temEtapasPag){
     doc.addPage(); pag++;
     pdfHeader(doc,cliente+' · Etapas & Cronograma · '+mesAno,pag);
+    let yD=120;
+    if(B.etapas){
     let ye=bandPDF(doc,120,'COMO A OPERAÇÃO ACONTECE — DO PEDIDO À ENTREGA',PDF_NAVY);
     // Transporte terrestre zerado significa que a entrega no endereço do
     // cliente não está no preço — anunciar a etapa seria prometer um serviço
@@ -5916,7 +5995,9 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
       doc.text(doc.splitTextToSize(e[1],235),x+20,yy+6);
     });
-    let yD=yE+Math.ceil(etapas.length/2)*46+14;   // acompanha o número de etapas
+    yD=yE+Math.ceil(etapas.length/2)*46+14;   // acompanha o número de etapas
+    }
+    if(B.cronograma){
     yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
     const recs=[[N('desR1'),'PARCELA 01','Assinatura · libera a produção'],
                 [N('desR2'),'PARCELA 02','Produto pronto · pré-embarque'],
@@ -5933,11 +6014,16 @@ async function gerarPropostaPDF(){
     });
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
     doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. O serviço porta a porta está contemplado — sem custos ocultos.',36,yD+92);
+    }
     pdfFooter(doc,pag,totalPag);
+    }
 
     /* ===== DIFERENCIAIS + CTA ===== */
+    if(temCondPag){
     doc.addPage(); pag++;
     pdfHeader(doc,cliente+' · Condições · '+mesAno,pag);
+    let cy=130;
+    if(B.perks){
     let y2=bandPDF(doc,130,'POR QUE A OPERAÇÃO COM A WINDGATE VALE MAIS',PDF_MAG);
     const perks=[
       ['Preço competitivo no par','Cotação fechada com fábrica e frete negociados em conjunto, com preço ajustado à operação.'],
@@ -5961,8 +6047,9 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
       doc.text(doc.splitTextToSize(p[1],245),x+11,yy+11);
     });
-    // CTA
-    const cy=y2+5*50+16;
+    cy=y2+5*50+16;
+    }
+    if(B.cta){
     doc.setFillColor(...PDF_NAVY); doc.rect(36,cy,523,112,'F');
     doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.setTextColor(255,255,255);
     doc.text('Vamos começar?',297.5,cy+34,{align:'center'});
@@ -5974,7 +6061,9 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(143,163,204); doc.text(l,x,cy+82,{align:'center'});
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
+    }
     pdfFooter(doc,pag,totalPag);
+    }
 
     const nome='Proposta_WindGate_'+(cliente.replace(/[^\w\dÀ-ú]+/g,'_')||'Cliente')+(V('opNum')?'_'+V('opNum'):'')+'.pdf';
     doc.save(nome);
@@ -5984,7 +6073,7 @@ async function gerarPropostaPDF(){
 
 /* fallback: janela de impressão no mesmo padrão */
 function gerarPropostaPrint(){
-  const itens=propostaItens(); const hj=new Date();
+  const itens=propostaItens(); const hj=new Date(); const B=propostaBlocos();
   const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   $('printProposal').innerHTML=`
   <div style="font-family:'Segoe UI',Arial,sans-serif;color:#28323F;max-width:800px;margin:0 auto">
@@ -5993,16 +6082,16 @@ function gerarPropostaPrint(){
     </div>
     <div style="padding:24px 32px">
       <div style="display:flex;gap:10px;margin-bottom:18px">${[['CLIENTE',V('cliente')],['OPERAÇÃO','Turn-Key'],['VALIDADE',(V('validade')||7)+' dias'],['DATA',hj.toLocaleDateString('pt-BR')]].map(b=>`<div style="flex:1;border:1px solid #DDE4EA;padding:8px 10px"><div style="font-size:8px;color:#64707D;font-weight:700">${b[0]}</div><div style="font-size:13px;font-weight:800;color:#1B2A5B">${esc(b[1]||'—')}</div></div>`).join('')}</div>
-      <div style="background:#B5106B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin-bottom:8px">ESCOPO DA OPERAÇÃO</div>
-      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Embarque em ${V('modalCntr')==='LCL'?'LCL (carga consolidada em contêiner compartilhado)':'FCL (contêiner completo, exclusivo desta carga)'}. Valores finais ao cliente, entregues e nacionalizados.</p>
-      <div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
+      ${B.escopo?`<div style="background:#B5106B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin-bottom:8px">ESCOPO DA OPERAÇÃO</div>
+      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Embarque em ${V('modalCntr')==='LCL'?'LCL (carga consolidada em contêiner compartilhado)':'FCL (contêiner completo, exclusivo desta carga)'}. Valores finais ao cliente, entregues e nacionalizados.</p>`:''}
+      ${B.itens?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px">${itens.map(it=>`<tr><td style="padding:8px;border-bottom:1px solid #EDF1F5;color:#1B2A5B;font-weight:700">${esc(it.d)}<br><span style="font-size:8.5px;color:#64707D;font-weight:400">${it.ncm?'NCM '+esc(it.ncm):''}</span></td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${it.q}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${fmt(it.unit)}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5;color:#B5106B;font-weight:800">${fmt(it.total)}</td></tr>`).join('')}</table>
-      <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(R.preco||0)}</span></div>
-      ${(state.fotos||[]).length?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
+      <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(R.preco||0)}</span></div>`:''}
+      ${(B.fotos&&(state.fotos||[]).length)?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
       <div style="display:grid;grid-template-columns:repeat(${(state.fotos||[]).length<=2?1:2},1fr);gap:10px">${(state.fotos||[]).map(f=>`<img src="${esc(f.url)}" style="width:100%;border:1px solid #DDE4EA;object-fit:contain;background:#F5F7FA">`).join('')}</div>`:''}
-      <div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega — tudo contemplado.</div>
-      <div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Valores válidos por ${V('validade')||7} dias; o preço acompanha o câmbio do dia de cada pagamento.</div>
-      <div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>
+      ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega — tudo contemplado.</div>`:''}
+      ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Valores válidos por ${V('validade')||7} dias; o preço acompanha o câmbio do dia de cada pagamento.</div>`:''}
+      ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>`:''}
       <div style="font-size:8.5px;color:#64707D;margin-top:14px;border-top:1px solid #DDE4EA;padding-top:8px">WINDGATE · IMPORTAÇÃO E TRADING · Good winds open doors.</div>
     </div>
   </div>`;
