@@ -5327,7 +5327,11 @@ function calc(){
   const st = (V('ufDestino')==='CE') ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
   const custoReal = compra + impostos + despesas + resultante;   // L113
 
-  R={compra,impostos,despesas,resultante,custoReal,st,nfSaida,fob:fobBRLtot,
+  // Composição aberta, para a proposta poder mostrar linha a linha o que o
+  // cliente está pagando quando essa opção é marcada na hora de gerar.
+  const comp={fob:fobBRLtot, freteInt:N('freteUSD')*txF, terrestre:N('transporte'),
+              seguro, portuarias:capat+sisc+afrmm+despExtra, honorarios:honor};
+  R={comp,compra,impostos,despesas,resultante,custoReal,st,nfSaida,fob:fobBRLtot,
      // detalhamento por tributo, para conferência contra o Simulador Siscomex
      __ii:II,__ipi:IPI,__pis:PIS,__cof:COF,__icms:ICMSent};
   R.fobShares=[]; if(fobBRLtot>0) state.items.forEach(it=>R.fobShares.push({share:(it.q*it.u*txD)/fobBRLtot,c5291:!!it.c5291,mono:!!it.mono}));
@@ -5796,12 +5800,30 @@ const PROPOSTA_BLOCOS=[
   {k:'perks',      l:'Por que vale mais (diferenciais)',   d:'Página de argumentos comerciais.'},
   {k:'cta',        l:'Página de contato',                  d:'"Vamos começar?" com responsável, telefone e e-mail.'}
 ];
-const propostaBlocosPadrao = () => Object.fromEntries(PROPOSTA_BLOCOS.map(b=>[b.k,true]));
+/* Linhas de custo. Vêm desmarcadas: abrir a composição mostra ao cliente o que
+   a WindGate paga em cada etapa, e com o total ao lado a margem fica dedutível
+   por subtração. Quem quiser abrir, abre de propósito. */
+const PROPOSTA_CUSTOS=[
+  {k:'cFob',       l:'Mercadoria (FOB)',                 v:R=>R.comp.fob},
+  {k:'cFrete',     l:'Frete internacional',              v:R=>R.comp.freteInt},
+  {k:'cTerrestre', l:'Transporte terrestre',             v:R=>R.comp.terrestre},
+  {k:'cSeguro',    l:'Seguro internacional',             v:R=>R.comp.seguro},
+  {k:'cImpostos',  l:'Impostos de nacionalização',       v:R=>R.impostos, sub:'II, IPI, PIS, COFINS e ICMS de importação'},
+  {k:'cPorto',     l:'Despesas portuárias e de nacionalização', v:R=>R.comp.portuarias, sub:'capatazia, Siscomex, AFRMM e despesas do processo'},
+  {k:'cHonor',     l:'Honorários e despachante',         v:R=>R.comp.honorarios}
+];
+const PROPOSTA_DIFAL={k:'difal', l:'ICMS-DIFAL destacado', d:'Mostra, dentro do total, quanto é repasse à SEFAZ.'};
+const TODOS_BLOCOS = () => [...PROPOSTA_BLOCOS, ...PROPOSTA_CUSTOS, PROPOSTA_DIFAL];
+const propostaBlocosPadrao = () => Object.assign(
+  Object.fromEntries(PROPOSTA_BLOCOS.map(b=>[b.k,true])),
+  Object.fromEntries(PROPOSTA_CUSTOS.map(b=>[b.k,false])),
+  {difal:true});
 function propostaBlocos(){
   const salvos=state.blocos||{};
   const out=propostaBlocosPadrao();
-  // Só o que foi desmarcado de propósito muda; bloco novo nasce ligado.
-  Object.keys(out).forEach(k=>{ if(salvos[k]===false) out[k]=false; });
+  // Bloco do documento nasce ligado e só muda se alguém desmarcar; linha de
+  // custo nasce desligada e só entra se alguém marcar.
+  Object.keys(out).forEach(k=>{ if(salvos[k]===true||salvos[k]===false) out[k]=salvos[k]; });
   return out;
 }
 function abrirPropostaModal(){
@@ -5818,6 +5840,19 @@ function abrirPropostaModal(){
         <span><b>${esc(x.l)}</b><br><span class="note">${semFoto?'Nenhuma foto anexada a esta cotação.':esc(x.d)}</span></span>
       </label>`;
     }).join('')}</div>
+    <div class="grouph">Composição do investimento <span class="note" style="text-transform:none;letter-spacing:0">— o que aparece aberto para o cliente</span></div>
+    <p class="note" style="margin:-2px 0 8px;color:var(--amber)">⚠ Abrir estas linhas ao lado do total deixa a margem dedutível por subtração.</p>
+    <div class="prop-blocos">${PROPOSTA_CUSTOS.map(x=>{
+      const zero=!(+x.v(R)||0);
+      return `<label class="prop-bloco${zero?' off':''}">
+        <input type="checkbox" id="pb_${x.k}" ${b[x.k]&&!zero?'checked':''} ${zero?'disabled':''}>
+        <span><b>${esc(x.l)}</b><br><span class="note">${zero?'Sem valor nesta cotação.':fmt(+x.v(R)||0)+(x.sub?' · '+esc(x.sub):'')}</span></span>
+      </label>`;
+    }).join('')}
+      <label class="prop-bloco${(R.st>0)?'':' off'}" style="grid-column:span 2">
+        <input type="checkbox" id="pb_difal" ${b.difal&&R.st>0?'checked':''} ${R.st>0?'':'disabled'}>
+        <span><b>${esc(PROPOSTA_DIFAL.l)}</b><br><span class="note">${R.st>0?fmt(R.st)+' — mostrado dentro do total, com a nota de que é repasse à SEFAZ.':'Esta cotação não tem ICMS-ST/DIFAL (destino fora do CE).'}</span></span>
+      </label></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="marcarTodosBlocos(true)">Marcar tudo</button>
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -5825,17 +5860,17 @@ function abrirPropostaModal(){
     </div>`);
 }
 function marcarTodosBlocos(v){
-  PROPOSTA_BLOCOS.forEach(x=>{ const el=$('pb_'+x.k); if(el && !el.disabled) el.checked=v; });
+  TODOS_BLOCOS().forEach(x=>{ const el=$('pb_'+x.k); if(el && !el.disabled) el.checked=v; });
 }
 function gerarPropostaComBlocos(){
   const escolha={}, antes=propostaBlocos();
   // Caixa desabilitada (fotos numa cotação sem foto) mantém o valor anterior:
   // gravá-la como desligada esconderia as fotos que fossem anexadas depois.
-  PROPOSTA_BLOCOS.forEach(x=>{
+  TODOS_BLOCOS().forEach(x=>{
     const el=$('pb_'+x.k);
-    escolha[x.k] = !el ? true : (el.disabled ? antes[x.k] : !!el.checked);
+    escolha[x.k] = !el ? antes[x.k] : (el.disabled ? antes[x.k] : !!el.checked);
   });
-  if(!Object.values(escolha).some(Boolean)){ toast('⚠ Marque ao menos um bloco'); return; }
+  if(!PROPOSTA_BLOCOS.some(x=>escolha[x.k])){ toast('⚠ Marque ao menos um bloco do documento'); return; }
   state.blocos=escolha;
   if(state.id){ const q=DB.quotes[state.id]; if(q){ q.blocos=escolha; saveDB(); } }
   closeModal();
@@ -5914,6 +5949,42 @@ async function gerarPropostaPDF(){
       doc.setFontSize(14); doc.text(fmt(R.preco||0),551,y+20,{align:'right'});
       y+=44;
     }
+    // ---- DIFAL destacado: fica dentro do total, mas nomeado, porque não é
+    // receita da WindGate — é repasse ao estado.
+    if(B.difal && (R.st||0)>0){
+      const windgate=(R.preco||0)-(R.st||0);
+      doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
+      doc.text('DESTE VALOR:',44,y+2);
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...PDF_INK);
+      doc.text('Mercadoria e serviços WindGate',54,y+16);
+      doc.text(fmt(windgate),552,y+16,{align:'right'});
+      doc.text('ICMS-DIFAL — recolhido à SEFAZ',54,y+30);
+      doc.setFont('helvetica','bold'); doc.text(fmt(R.st||0),552,y+30,{align:'right'});
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
+      doc.text('O ICMS-DIFAL não é receita da WindGate: é repassado integralmente ao estado de destino.',54,y+42);
+      doc.setDrawColor(237,241,245); doc.setLineWidth(.6); doc.line(36,y+50,559,y+50);
+      y+=60;
+    }
+    // ---- composição aberta, só com as linhas marcadas
+    const linhasComp=PROPOSTA_CUSTOS.filter(x=>B[x.k] && (+x.v(R)||0)>0);
+    if(linhasComp.length){
+      const alturaComp=20+16+linhasComp.length*20+14;
+      if(y+alturaComp>780){ doc.addPage(); pdfHeader(doc,cliente+' · Composição · '+mesAno); y=120; }
+      y=bandPDF(doc,y,'COMPOSIÇÃO DO INVESTIMENTO',PDF_NAVY);
+      y+=18;
+      linhasComp.forEach(x=>{
+        doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
+        doc.text(x.l,44,y);
+        doc.setFont('helvetica','bold'); doc.setTextColor(...PDF_NAVY);
+        doc.text(fmt(+x.v(R)||0),552,y,{align:'right'});
+        if(x.sub){ doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY); doc.text(x.sub,44,y+8); }
+        doc.setDrawColor(237,241,245); doc.setLineWidth(.6); doc.line(36,y+12,559,y+12);
+        y+=20;
+      });
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
+      doc.text('Valores da operação, na composição do investimento acima.',44,y+2);
+      y+=14;
+    }
     if(B.verde){
       doc.setFillColor(232,245,238); doc.rect(36,y,523,46,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(30,90,60);
@@ -5931,13 +6002,13 @@ async function gerarPropostaPDF(){
       const ytxt=doc.splitTextToSize('Os valores acima são válidos por '+(V('validade')||'7')+' dias. A composição do preço acompanha a taxa de câmbio do dia de cada pagamento; qualquer variação é comunicada previamente ao cliente antes do desembolso.',505);
       doc.text(ytxt,44,y+25);
     }
-    // Página só existe se sobrou conteúdo para ela; a numeração acompanha.
+    // Página só existe se sobrou conteúdo para ela. Os rodapés são desenhados
+    // no fim, contando as páginas que de fato saíram — assim uma quebra a mais
+    // no meio não desalinha a numeração.
     const temFotos=B.fotos&&fotos.length>0;
     const temEtapasPag=B.etapas||B.cronograma;
     const temCondPag=B.perks||B.cta;
-    const totalPag=1+(temFotos?1:0)+(temEtapasPag?1:0)+(temCondPag?1:0);
     let pag=1;
-    pdfFooter(doc,pag,totalPag);
 
     /* ===== PÁGINA DE FOTOS — só existe quando há foto ===== */
     if(temFotos){
@@ -5959,7 +6030,6 @@ async function gerarPropostaPDF(){
         const w=f.w*k, h=f.h*k;
         doc.addImage(f.dataURL,'JPEG',x+(larg-w)/2,y+(alt-h)/2,w,h);
       });
-      pdfFooter(doc,pag,totalPag);
     }
 
     /* ===== ETAPAS + DESEMBOLSO ===== */
@@ -6015,7 +6085,6 @@ async function gerarPropostaPDF(){
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
     doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. O serviço porta a porta está contemplado — sem custos ocultos.',36,yD+92);
     }
-    pdfFooter(doc,pag,totalPag);
     }
 
     /* ===== DIFERENCIAIS + CTA ===== */
@@ -6062,8 +6131,9 @@ async function gerarPropostaPDF(){
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
     }
-    pdfFooter(doc,pag,totalPag);
     }
+    const nPg=doc.getNumberOfPages();
+    for(let i=1;i<=nPg;i++){ doc.setPage(i); pdfFooter(doc,i,nPg); }
 
     const nome='Proposta_WindGate_'+(cliente.replace(/[^\w\dÀ-ú]+/g,'_')||'Cliente')+(V('opNum')?'_'+V('opNum'):'')+'.pdf';
     doc.save(nome);
