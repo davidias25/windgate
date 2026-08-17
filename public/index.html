@@ -798,6 +798,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
         </div>
         <div class="frow">
           <div><label>Incoterm</label><select id="incoterm"><option>FOB</option><option>CIF</option><option>EXW</option><option>CFR</option></select></div>
+          <div><label>Modalidade do container</label><select id="modalCntr">
+            <option value="FCL">FCL — container completo</option>
+            <option value="LCL">LCL — container compartilhado</option>
+          </select></div>
           <div><label>Qtd. containers</label><input type="number" id="qtdCntr" value="1" min="0"></div>
           <div><label>Prazo estimado (dias)</label><input type="number" id="prazo" value="60"></div>
           <div><label>Validade da proposta (dias)</label><input type="number" id="validade" value="7"></div>
@@ -5523,7 +5527,7 @@ function criarOpDaCotacao(){
 
 /* ===== persistência de cotações (no DB central) ===== */
 function snapshot(){
-  const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','qtdCntr','prazo','validade',
+  const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','modalCntr','qtdCntr','prazo','validade',
     'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','ipiS','mkp','aliqST',
     'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
@@ -5573,6 +5577,7 @@ function loadQuote(id){
   // Cotação salva antes de um campo existir não traz esse campo. Sem zerar,
   // ela herdaria o valor da cotação aberta antes dela e mudaria de preço.
   if(s.fields.ipiS===undefined && $('ipiS')) $('ipiS').value=0;
+  if(s.fields.modalCntr===undefined && $('modalCntr')) $('modalCntr').value='FCL';
   state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
@@ -5599,7 +5604,7 @@ function newQuote(){
   renderFotos();
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
-  $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
+  $('modalCntr').value='FCL'; $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
   $('txFrete').value=5.30; $('txDesp').value=5.10; $('pctInv').value=70; $('icmsEnt').value=1.6;
   $('icmsDest').value=4; $('pisS').value=1.6; $('cofS').value=7.65; $('ipiS').value=0; $('mkp').value=1; $('aliqST').value=16;
   $('freteUSD').value=0; $('seguro').value=0; $('capatazia').value=0; $('transporte').value=0;
@@ -5805,7 +5810,12 @@ async function gerarPropostaPDF(){
     // escopo
     let y=bandPDF(doc,176,'ESCOPO DA OPERAÇÃO',PDF_MAG);
     const nIt=itens.length;
-    const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Valores finais ao cliente, entregues e nacionalizados${V('destino')?' em '+V('destino'):''}.`;
+    // O cliente precisa saber se o contêiner é só dele: LCL divide espaço com
+    // outras cargas, o que muda prazo e manuseio.
+    const modalTxt = V('modalCntr')==='LCL'
+      ? 'LCL (carga consolidada em contêiner compartilhado)'
+      : 'FCL (contêiner completo, exclusivo desta carga)';
+    const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Embarque em ${modalTxt}. Valores finais ao cliente, entregues e nacionalizados${V('destino')?' em '+V('destino'):''}.`;
     doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
     const escLines=doc.splitTextToSize(escopo,515);
     doc.text(escLines,36,y+16); y+=16+escLines.length*13;
@@ -5984,7 +5994,7 @@ function gerarPropostaPrint(){
     <div style="padding:24px 32px">
       <div style="display:flex;gap:10px;margin-bottom:18px">${[['CLIENTE',V('cliente')],['OPERAÇÃO','Turn-Key'],['VALIDADE',(V('validade')||7)+' dias'],['DATA',hj.toLocaleDateString('pt-BR')]].map(b=>`<div style="flex:1;border:1px solid #DDE4EA;padding:8px 10px"><div style="font-size:8px;color:#64707D;font-weight:700">${b[0]}</div><div style="font-size:13px;font-weight:800;color:#1B2A5B">${esc(b[1]||'—')}</div></div>`).join('')}</div>
       <div style="background:#B5106B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin-bottom:8px">ESCOPO DA OPERAÇÃO</div>
-      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Valores finais ao cliente, entregues e nacionalizados.</p>
+      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Embarque em ${V('modalCntr')==='LCL'?'LCL (carga consolidada em contêiner compartilhado)':'FCL (contêiner completo, exclusivo desta carga)'}. Valores finais ao cliente, entregues e nacionalizados.</p>
       <div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px">${itens.map(it=>`<tr><td style="padding:8px;border-bottom:1px solid #EDF1F5;color:#1B2A5B;font-weight:700">${esc(it.d)}<br><span style="font-size:8.5px;color:#64707D;font-weight:400">${it.ncm?'NCM '+esc(it.ncm):''}</span></td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${it.q}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${fmt(it.unit)}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5;color:#B5106B;font-weight:800">${fmt(it.total)}</td></tr>`).join('')}</table>
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(R.preco||0)}</span></div>
