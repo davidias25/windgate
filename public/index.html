@@ -2227,7 +2227,32 @@ function sincronizarClickUp(op){
   .catch(()=>{});
 }
 
-function delOp(id){ DB.ops=DB.ops.filter(x=>x.id!==id); saveDB(); closeModal(); renderOps(); toast('Operação excluída'); }
+/* Excluir a operação leva junto os lançamentos dela. Apagar só a operação
+   deixaria dinheiro previsto num código que não existe mais — some do
+   resultado por operação e continua pesando nos cartões do mês. */
+function delOp(id){
+  const lanc=(DB.fin||[]).filter(l=>l && l.op===id);
+  if(!lanc.length){ delOpConfirmado(id); return; }
+  const feitos=lanc.filter(l=>l.status==='Realizado');
+  const soma=v=>fmt(v.reduce((a,b)=>a+(+b.valor||0),0));
+  openModal(`<h3>Excluir a operação <span>${esc(id)}</span>?</h3>
+    <p class="note" style="font-size:12.5px;line-height:1.7">Vão junto <b>${lanc.length} lançamento(s)</b> do Financeiro desta operação — ${soma(lanc)} no total.
+    ${feitos.length?`<br><b style="color:var(--red)">⚠ ${feitos.length} já está(ão) marcado(s) como realizado(s)</b> (${soma(feitos)}): é dinheiro que já entrou ou saiu, e o registro se perde.`:''}</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" onclick="delOpConfirmado('${esc(id)}')">Excluir operação e lançamentos</button>
+    </div>`);
+}
+function delOpConfirmado(id){
+  const antes=(DB.fin||[]).length;
+  DB.ops=DB.ops.filter(x=>x.id!==id);
+  DB.fin=(DB.fin||[]).filter(l=>!(l && l.op===id));
+  const n=antes-(DB.fin||[]).length;
+  saveDB(); closeModal(); renderOps();
+  try{ if(USER&&USER.fin) renderFin(); }catch(e){}
+  updateNotifs();
+  toast(n?`Operação <b>${esc(id)}</b> excluída — ${n} lançamento(s) removido(s)`:'Operação excluída');
+}
 function fillOpSelect(selId,includeAll){
   const s=$(selId); if(!s) return; const cur=s.value;
   s.innerHTML=(includeAll?'<option value="">— todas as operações —</option>':'')+
@@ -3239,8 +3264,13 @@ function renderFin(){
   // fábrica em outro, os impostos na chegada e a receita depois da entrega.
   // Recortar por mês mostrava pedaço de operação como se fosse o resultado
   // dela — despesa sem a receita, ou o contrário. Aqui entra tudo.
+  // Operação excluída sai daqui junto: esta tabela é o resultado POR operação,
+  // e não há operação para reportar. Os lançamentos seguem na lista abaixo.
+  // 'WindGate' (estrutura fixa) e o vazio não são operações e continuam.
+  const opsVivas = new Set((DB.ops||[]).map(o=>o&&o.id).filter(Boolean));
   const ops = {};
   effectiveItems.forEach(l => {
+    if (l.op && l.op !== 'WindGate' && !opsVivas.has(l.op)) return;
     ops[l.op] = ops[l.op] || { rp: 0, rr: 0, dp: 0, dr: 0 };
     const v = +l.valor || 0, o = ops[l.op];
     if (l.tipo === 'Receita') { l.status === 'Realizado' ? o.rr += v : o.rp += v; }
