@@ -5530,17 +5530,58 @@ function reprove(){
   setStatus('draft'); saveQuote(true);
   toast('↩ Devolvida para ajuste.');
 }
+/* Cronograma da operação criada a partir da cotação.
+   Recebimento e pagamento andam em par na mesma data: é assim que se vê se o
+   dinheiro do cliente chega antes de a WindGate ter de pagar. Os recebimentos
+   são as 3 parcelas do desembolso aprovado; os pagamentos são as 3 saídas da
+   operação — sinal da fábrica, saldo pré-embarque e os custos de chegada. */
+const CRONO_OP = [
+  {dias:5,  rot:'1º'},   // 5 dias depois de criada a operação
+  {dias:35, rot:'2º'},   // 30 dias depois do 1º
+  {dias:95, rot:'3º'}    // 60 dias depois do 2º
+];
+const somaDias = (iso,n) => { const d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+
 function criarOpDaCotacao(){
   const id=(V('opNum')||('OP'+Math.floor(Math.random()*90+10))).toUpperCase();
   if(!DB.ops.find(o=>o.id===id)){
     DB.ops.push({id,nome:V('mercadoria')||V('cliente'),cliente:V('cliente'),status:'contrato',prox:'Emitir contrato e cobrar 1ª parcela',resp:'Davi',obs:'Criada a partir da cotação aprovada'});
     ensureChk(id);
   }
-  const hj=hoje();
-  DB.fin.unshift({data:hj,op:id,tipo:'Receita',desc:'Receita da operação (proposta aprovada)',valor:+(R.preco||0).toFixed(2),status:'Previsto',comp:'',por:USER.nome.split(' ')[0]});
-  DB.fin.unshift({data:hj,op:id,tipo:'Despesa',desc:'Custo total previsto (compra + impostos + despesas + saída)',valor:+(R.custoReal||0).toFixed(2),status:'Previsto',comp:'',por:USER.nome.split(' ')[0]});
-  if(R.st>0) DB.fin.unshift({data:hj,op:id,tipo:'Despesa',desc:'ICMS DIFAL — repasse SEFAZ-CE',valor:+R.st.toFixed(2),status:'Previsto',comp:'',por:USER.nome.split(' ')[0]});
-  saveDB(); closeModal(); toast(`Operação <b>${id}</b> criada + previsto lançado no Financeiro ✓`);
+  const marca='cotacao:'+(state.id||id);
+  // Aprovar de novo não pode duplicar o cronograma inteiro no financeiro.
+  if((DB.fin||[]).some(l=>l && l.origem===marca)){
+    saveDB(); closeModal();
+    toast(`Operação <b>${id}</b> já tinha o cronograma lançado — nada foi duplicado`);
+    return;
+  }
+
+  const hjISO=agHoje(), eu=USER.nome.split(' ')[0];
+  const {o1,o2,o3}=desemOuts();
+  const recebe=[N('desR1'),N('desR2'),N('desR3')];
+  const paga=[o1,o2,o3];
+  // Sem cronograma de desembolso preenchido, o preço inteiro entra na 1ª —
+  // melhor uma data para cobrar do que três linhas zeradas.
+  if(recebe.reduce((a,b)=>a+b,0)<=0){ recebe[0]=R.preco||0; recebe[1]=0; recebe[2]=0; }
+
+  const descPag=['Sinal da fábrica ('+(N('fabSinal')||30)+'% do FOB)',
+                 'Saldo da fábrica · pré-embarque',
+                 'Custos de chegada — impostos, frete, despesas e ICMS DIFAL'];
+  const lancar=(venc,tipo,desc,valor)=>{
+    if(!(valor>0)) return;
+    DB.fin.unshift({_id:novoId(),data:hjISO,vencimento:venc,op:id,tipo,categoria:'',fixo:false,
+      desc,valor:+(+valor).toFixed(2),status:'Previsto',comp:'',nf:'',por:eu,origem:marca});
+  };
+  // Do último para o primeiro: unshift inverte, e assim a lista fica em ordem.
+  for(let k=CRONO_OP.length-1;k>=0;k--){
+    const venc=somaDias(hjISO,CRONO_OP[k].dias);
+    lancar(venc,'Despesa',CRONO_OP[k].rot+' pagamento — '+descPag[k],paga[k]);
+    lancar(venc,'Receita',CRONO_OP[k].rot+' recebimento do cliente — parcela '+CRONO_OP[k].rot.replace('º',''),recebe[k]);
+  }
+
+  saveDB(); closeModal();
+  const d1=somaDias(hjISO,5).split('-').reverse().join('/');
+  toast(`Operação <b>${id}</b> criada · cronograma lançado no Financeiro — 1ª parcela em <b>${d1}</b> ✓`);
 }
 
 /* ===== persistência de cotações (no DB central) ===== */
