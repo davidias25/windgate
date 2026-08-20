@@ -1877,6 +1877,22 @@ function migrateDB(){
     Object.entries(padrao).forEach(([k, a]) => { if (!DB.agentes[k]) DB.agentes[k] = { ...a }; });
     DB.settings.schema = 9; ch = true;
   }
+  if ((DB.settings.schema || 9) < 10) {
+    // Lançamento criado a partir de cotação gravava a data em dd/mm/aaaa,
+    // enquanto o financeiro compara em aaaa-mm-dd. Eles existiam no banco mas
+    // não entravam em nenhum cartão, filtro de mês ou semana — invisíveis.
+    const paraISO = v => {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(v || '').trim());
+      return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+    };
+    (DB.fin || []).forEach(l => {
+      if (!l) return;
+      const d = paraISO(l.data), v = paraISO(l.vencimento);
+      if (d) l.data = d;
+      if (v) l.vencimento = v;
+    });
+    DB.settings.schema = 10; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -3165,16 +3181,16 @@ function setFinPeriod(mode){
   renderFin();
 }
 
+/* Segunda e domingo da semana corrente, pelo relógio local. Convertendo com
+   toISOString a data virava a do dia seguinte a partir das 21h no Brasil, e a
+   semana andava um dia — lançamento de domingo sumia do cartão. */
 function getISOWeekBounds(){
   const now = new Date();
   const day = now.getDay() || 7;
-  const monday = new Date(now);
-  if(day !== 1) monday.setDate(now.getDate() - (day - 1));
-  const mondayStr = monday.toISOString().slice(0, 10);
-  const sunday = new Date(monday);
-  sunday.setDate(sunday.getDate() + 6);
-  const sundayStr = sunday.toISOString().slice(0, 10);
-  return { mondayStr, sundayStr };
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day - 1));
+  const iso = d => new Date(d.getTime() - d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+  const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+  return { mondayStr: iso(monday), sundayStr: iso(sunday) };
 }
 
 function renderFin(){
@@ -3182,9 +3198,8 @@ function renderFin(){
   renderPlanilhaGeral();
   fillOpSelect('finFilter', true);
 
-  const hjISO = new Date().toISOString().slice(0, 10);
-  const dTom = new Date(); dTom.setDate(dTom.getDate() + 1);
-  const amIso = dTom.toISOString().slice(0, 10);
+  const hjISO = agHoje();                  // data local, não UTC
+  const amIso = somaDias(hjISO, 1);
   const weekBounds = getISOWeekBounds();
 
   const mesFiltroEl = $('finMesFiltro');
