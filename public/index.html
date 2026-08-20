@@ -1101,7 +1101,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="card" id="crmSoltasCard" style="display:none">
     <h2 class="amber">⚠ Cotações fora do funil <span class="spacer"></span><span class="note" id="crmSoltasCont"></span></h2>
     <p class="note" style="margin-bottom:10px">Cotação feita e sem oportunidade no CRM é cotação que ninguém está cobrando. Vincule a uma oportunidade ou registre o cliente.</p>
-    <div style="overflow-x:auto"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Mercadoria</th><th class="r">Preço</th><th>Status</th><th>Criada por</th><th></th></tr></thead><tbody id="crmSoltasBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Mercadoria</th><th>Status</th><th>Criada por</th><th></th></tr></thead><tbody id="crmSoltasBody"></tbody></table></div>
   </div>
 
   <div class="card">
@@ -1110,7 +1110,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       &nbsp;<select id="crmFiltroEtapa" style="width:170px" onchange="renderCrm()"><option value="abertas">Em aberto</option><option value="">Todas</option></select>
     </h2>
     <div class="crm-funil" id="crmFunil"></div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Oportunidade</th><th class="r">Valor</th><th>Etapa</th><th>Próximo passo</th><th>Prazo</th><th>Resp.</th><th>Parada há</th><th></th></tr></thead><tbody id="crmOporBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Oportunidade</th><th>Etapa</th><th>Próximo passo</th><th>Prazo</th><th>Resp.</th><th>Parada há</th><th></th></tr></thead><tbody id="crmOporBody"></tbody></table></div>
     <div class="empty" id="crmOporEmpty" style="display:none">Nenhuma oportunidade — clique em <b>+ Nova oportunidade</b>.</div>
   </div>
 
@@ -4087,7 +4087,7 @@ function renderCrm(){
     const pill=q.status==='ok'?'<span class="pill ok">APROVADA</span>':q.status==='wait'?'<span class="pill wait">AGUARD. SAMIR</span>':'<span class="pill draft">RASCUNHO</span>';
     const cli=crmClientePorNome(q.cliente);
     return `<tr><td><b>${esc(f.opNum||'—')}</b></td><td>${esc(q.cliente||'—')}</td><td>${esc(f.mercadoria||'—')}</td>
-      <td class="r num">${fmt(q.preco||0)}</td><td>${pill}</td><td>${esc(q.criadoPor||'—')}</td>
+      <td>${pill}</td><td>${esc(q.criadoPor||'—')}</td>
       <td style="white-space:nowrap">${cli
         ? `<button class="btn btn-mag btn-sm" onclick="crmOportDaCotacao('${esc(q.id)}')">Criar oportunidade</button>`
         : `<button class="btn btn-ghost btn-sm" onclick="crmClienteDaCotacao('${esc(q.id)}')">Cadastrar cliente</button>`}</td></tr>`;
@@ -4112,7 +4112,6 @@ function renderCrm(){
     return `<tr class="${parada?'crm-linha-parada':''}">
       <td><b>${esc(crmNomeCli(o.clienteId))}</b></td>
       <td>${esc(o.titulo||'—')}${quote?` <span class="pill teal" style="font-size:8.5px" title="cotação vinculada">${esc((DB.quotes[quote.id]&&DB.quotes[quote.id].fields&&DB.quotes[quote.id].fields.opNum)||'cotação')}</span>`:''}</td>
-      <td class="r num">${fmt(+o.valor||0)}</td>
       <td><span class="pill" style="background:${cor}22;color:${cor}">${esc(o.etapa)}</span></td>
       <td class="note">${esc(o.prox||'—')}</td>
       <td>${venc?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
@@ -4329,7 +4328,7 @@ function crmVerCliente(id){
 
     <div class="grouph">Oportunidades (${opos.length})</div>
     ${opos.length?`<div style="overflow-x:auto"><table><tbody>${opos.map(o=>`<tr>
-      <td><b>${esc(o.titulo||'—')}</b></td><td class="r num">${fmt(+o.valor||0)}</td>
+      <td><b>${esc(o.titulo||'—')}</b></td>
       <td><span class="pill" style="background:${crmEtapaCor(o.etapa)}22;color:${crmEtapaCor(o.etapa)}">${esc(o.etapa)}</span></td>
       <td class="note">${esc(o.prox||'')}</td><td>${esc(o.resp||'')}</td></tr>`).join('')}</tbody></table></div>`
       :'<p class="note">Nenhuma oportunidade registrada.</p>'}
@@ -4338,7 +4337,6 @@ function crmVerCliente(id){
     ${cots.length?`<div style="overflow-x:auto"><table><tbody>${cots.map(q=>{
       const fq=(DB.quotes[q.id]||{}).fields||{};
       return `<tr><td><b>${esc(fq.opNum||'—')}</b></td><td>${esc(fq.mercadoria||'—')}</td>
-        <td class="r num">${fmt(q.preco||0)}</td>
         <td>${q.status==='ok'?'<span class="pill ok">APROVADA</span>':q.status==='wait'?'<span class="pill wait">AGUARD.</span>':'<span class="pill draft">RASCUNHO</span>'}</td>
         <td><button class="btn btn-ghost btn-sm" onclick="crmAbrirCotacao('${esc(q.id)}')">Abrir</button></td></tr>`;
     }).join('')}</tbody></table></div>`
@@ -4377,7 +4375,7 @@ function crmOportCampos(o,clienteId){
   o=o||{};
   const cotacoes=(DB.qindex||[]).map(q=>{
     const fq=(DB.quotes[q.id]||{}).fields||{};
-    return `<option value="${esc(q.id)}"${q.id===o.quoteId?' selected':''}>${esc(fq.opNum||'sem nº')} · ${esc(q.cliente||'—')} · ${fmt(q.preco||0)}</option>`;
+    return `<option value="${esc(q.id)}"${q.id===o.quoteId?' selected':''}>${esc(fq.opNum||'sem nº')} · ${esc(q.cliente||'—')}${fq.mercadoria?' · '+esc(fq.mercadoria):''}</option>`;
   }).join('');
   return `<div class="frow">
       <div style="grid-column:span 2"><label>Cliente</label><select id="m_opo_cli">${crmClienteOptions(o.clienteId||clienteId)}</select></div>
