@@ -976,7 +976,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="view-head">
     <div><h1>Cotações de <span>Frete</span></h1><p>Empresas em lista fechada · R$ automático pela PTAX do Banco Central · memória de preços por rota. Área do Matheus.</p></div>
     <div class="hd-actions">
-      <button class="btn btn-ghost" onclick="openAgendaModal()">📇 Agenda de agentes</button>
+      <button class="btn btn-ghost" onclick="openAgendaModal()">📇 Agentes &amp; regra da PTAX</button>
       <button class="btn btn-blue" onclick="openParseModal()">🤖 Ler proposta (auto)</button>
       <button class="btn btn-mag" onclick="openFreteModal()">+ Nova cotação de frete</button>
     </div>
@@ -989,7 +989,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div><label>PTAX manual (R$/USD)</label><input type="number" id="ptaxManual" step="0.0001" placeholder="5.4300" onchange="setPtaxManual(this.value)"></div>
       <div style="grid-column:span 2"><p class="note" style="margin-top:18px">Sem acesso à internet neste ambiente — informe a PTAX de hoje (bcb.gov.br) que o sistema calcula tudo normalmente.</p></div>
     </div>
-    <p class="note" style="margin-top:8px">Regra WindGate: <b style="color:#fff">NSL e Suntrans = PTAX da chegada +2,5%</b> · <b style="color:#fff">Fontime e Next = PTAX da chegada +2%</b> · demais/armadores = PTAX (ajustável na Agenda). Antes da chegada o R$ é <i>projeção</i> com a PTAX mais recente; no dia da chegada o sistema trava a PTAX oficial daquele dia 🔒.</p>
+    <p class="note" style="margin-top:8px" id="freteRegras"></p>
   </div>
   <div class="card">
     <h2>Registro de cotações</h2>
@@ -2769,9 +2769,31 @@ function freteBRL(f){
   return {brl:convertido+extras, convertido, extras, usd, fx, regra, locked:!!f.ptaxLock};
 }
 
+/* As regras vinham escritas à mão no HTML. Bastava alguém ajustar o
+   percentual de um agente para a frase mentir — e foi o que fez parecer que
+   NSL e Suntrans eram fixas. Agora o texto sai do próprio banco. */
+function renderRegrasPtax(){
+  const el=$('freteRegras'); if(!el) return;
+  const porRegra={};
+  Object.entries(DB.agentes||{}).forEach(([nome,a])=>{
+    const r=+a.regra||0; (porRegra[r]=porRegra[r]||[]).push(nome);
+  });
+  const junta=n=>n.length>1 ? n.slice(0,-1).join(', ')+' e '+n[n.length-1] : n[0];
+  const partes=Object.keys(porRegra).map(Number).sort((a,b)=>b-a).map(r=>{
+    const nomes=junta(porRegra[r].sort());
+    return r>0
+      ? `<b style="color:#fff">${esc(nomes)} = PTAX da chegada +${r.toLocaleString('pt-BR')}%</b>`
+      : `${esc(nomes)} = PTAX da chegada, sem acréscimo`;
+  });
+  const podeRegra=USER&&USER.fin;
+  el.innerHTML='Regra WindGate: '+partes.join(' · ')
+    +`. Ajuste o percentual de qualquer um em <b>📇 Agentes & regra da PTAX</b>${podeRegra?'':' (só Samir e Davi)'}.`
+    +' Antes da chegada o R$ é <i>projeção</i> com a PTAX mais recente; no dia da chegada o sistema trava a PTAX oficial daquele dia 🔒.';
+}
 function renderFrete(skipLock){
   if(!$('freteBody')) return;
   renderPtaxInfo();
+  renderRegrasPtax();
   if(!skipLock){ refreshPtax(); lockArrivedPtax().then(()=>renderFrete(true)); }
   const abertas=DB.fretes.filter(f=>f.status==='Cotado'||f.status==='Negociando').length;
   const fechadas=DB.fretes.filter(f=>f.status==='Fechado').length;
@@ -2956,7 +2978,7 @@ function saveFrete(editId){
 function openAgendaModal(){
   const podeRegra=USER&&USER.fin;
   openModal(`<h3>Agenda de <span>agentes & armadores</span></h3>
-    <p class="note" style="margin-bottom:12px">Contato e telefone ficam salvos e preenchem sozinhos a próxima cotação. A regra de conversão (% sobre a PTAX) ${podeRegra?'pode ser ajustada por você':'só Samir/Davi ajustam'}.</p>
+    <p class="note" style="margin-bottom:12px">Contato e telefone ficam salvos e preenchem sozinhos a próxima cotação. A regra de conversão (% sobre a PTAX) vale para <b>todos</b> os agentes desta lista, NSL e Suntrans inclusive, e ${podeRegra?'<b>pode ser ajustada por você</b> — o frete em R$ recalcula na hora':'só Samir e Davi ajustam'}.</p>
     <div style="overflow-x:auto;max-height:55vh;overflow-y:auto"><table><thead><tr><th>Empresa</th><th>Tipo</th><th>Regra</th><th>Contato</th><th>Telefone</th></tr></thead><tbody>
     ${Object.entries(DB.agentes).map(([k,a])=>`<tr>
       <td><b>${esc(k)}</b></td><td class="note">${esc(a.tipo)}</td>
