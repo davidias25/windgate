@@ -792,7 +792,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <option value="triangular">Triangular via JeT — cliente NÃO contribuinte (SF/AL → JeT/ES → cliente)</option>
           </select></div>
           <div><label>Nº da operação</label><input id="opNum" placeholder="OP24"></div>
-          <div><label>UF destino</label><select id="ufDestino" onchange="calc()"><option>CE</option><!-- o value continua o texto antigo: cotação salva guarda esta string, e trocá-lo deixaria o campo em branco ao reabrir --><option value="Outro (sem ST)">Outro (sem DIFAL)</option></select></div>
+          <div><label>UF destino</label><select id="ufDestino" onchange="ufDestinoChanged()"></select></div>
         </div>
         <div class="frow">
           <div style="grid-column:span 2"><label>Cliente</label><input id="cliente" placeholder="Nome do cliente"></div>
@@ -838,9 +838,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>COFINS saída (%)</label><input type="number" id="cofS" value="7.65" step="0.05" oninput="calc()"></div>
           <div><label>IPI saída (%)</label><input type="number" id="ipiS" value="0" step="0.05" oninput="calc()" title="IPI destacado na nota de saída — entra por fora, sobre o valor da NF"></div>
           <div><label>Mark-up NF (%)</label><input type="number" id="mkp" value="1" step="0.1" oninput="calc()"></div>
-          <div><label>Alíq. efetiva DIFAL — CE (%)</label><input type="number" id="aliqST" value="16" step="0.1" oninput="calc()"></div>
+          <div><label>Alíq. efetiva DIFAL (%)</label><input type="number" id="aliqST" value="16" step="0.1" oninput="calc()"></div>
         </div>
-        <p class="note">PIS/COFINS de <b>saída</b> (venda). Os de <b>importação</b> vêm da NCM de cada item, na tabela abaixo. DIFAL CE = 20% interna − 4% destacado. Ajuste apenas com validação da contadora.</p>
+        <p class="note">PIS/COFINS de <b>saída</b> (venda). Os de <b>importação</b> vêm da NCM de cada item, na tabela abaixo. <span id="notaDifal"></span> Ajuste apenas com validação da contadora.</p>
         <p class="note" style="color:#F0B429;margin-top:6px">⚠ <b>% Invoice (base impostos)</b> abaixo de 100% calcula os tributos sobre um valor menor que o da invoice. O Simulador Siscomex usa sempre o valor aduaneiro integral — mantenha 100% para conferir com ele.</p>
       </section>
 
@@ -910,7 +910,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="sumline"><span class="lbl">3 · Despesas de nacionalização</span><span class="num" id="sDespesas">R$ 0,00</span></div>
         <div class="sumline"><span class="lbl">Resultante saída (impostos − créditos)</span><span class="num" id="sResultante">R$ 0,00</span></div>
         <div class="sumline cost"><span id="lblCusto">Custo real WindGate</span><span class="num" id="sCustoReal">R$ 0,00</span></div>
-        <div class="sumline" id="rowST"><span class="lbl">ICMS DIFAL (cliente CE)</span><span class="num" id="sST">R$ 0,00</span></div>
+        <div class="sumline" id="rowST"><span class="lbl" id="lblDifal">ICMS DIFAL</span><span class="num" id="sST">R$ 0,00</span></div>
         <div id="triLines" style="display:none">
           <div class="sumline"><span class="lbl">NF de compra da JeT (SF → JeT)</span><span class="num" id="sNFJT">R$ 0,00</span></div>
           <div class="sumline"><span class="lbl">DIFAL (JeT → cliente)</span><span class="num" id="sDifal">R$ 0,00</span></div>
@@ -1430,6 +1430,19 @@ const STATUS_OP = [
   {k:'travada',    l:'⚠ Travada',            c:'#FF5A6E'}
 ];
 const stMeta = k => STATUS_OP.find(s=>s.k===k)||STATUS_OP[0];
+
+/* Alíquota interna do ICMS por UF, usada para sugerir a alíquota efetiva do
+   DIFAL (interna − destacado na saída). É ponto de partida, não verdade
+   fiscal: muda por decreto, não inclui FCP/FECP (RJ soma 2%, entre outros) e
+   ignora produto com alíquota específica. O campo continua editável e a regra
+   da casa vale — ajustar só com a contadora.
+   Referência: tabelas estaduais vigentes em 2026. */
+const ICMS_INTERNO={
+  AC:19, AL:20, AM:20, AP:18, BA:20.5, CE:20, DF:20, ES:17, GO:19,
+  MA:23, MG:18, MS:17, MT:17, PA:19, PB:20, PE:20.5, PI:22.5, PR:19.5,
+  RJ:20, RN:20, RO:19.5, RR:20, RS:17, SC:17, SE:20, SP:18, TO:20
+};
+const SEM_DIFAL='Outro (sem ST)';   // valor antigo, preservado nas cotações salvas
 
 const CHK_TEMPLATE = [
   ['Fechamento','Contrato assinado'],
@@ -1956,6 +1969,7 @@ function enterApp(){
     nav.appendChild(b);
   });
   $('userChip').innerHTML=`<div class="avatar" style="background:${USER.cor}">${USER.nome[0]}</div><div><div class="nm">${esc(USER.nome.split(' ')[0])}</div><div class="rl">${esc(USER.papel)}</div></div><button title="Uso de Memória & Banco" onclick="mostrarUsoMemoria()" style="margin-right:6px">💾</button><button title="Sair" onclick="logout()">⏻</button>`;
+  montarUFDestino();
   showTab(USER.tabs[0]);
   renderFotos();
   updateNotifs();
@@ -5396,8 +5410,34 @@ function tipoOpChanged(){
 }
 
 let R = {}; // resultados
+/* O seletor é montado no código para não repetir 27 estados no HTML, e para
+   a opção sem DIFAL manter o valor antigo que já está gravado nas cotações. */
+function montarUFDestino(){
+  const el=$('ufDestino'); if(!el || el.options.length) return;
+  el.innerHTML=`<option value="${SEM_DIFAL}">— sem DIFAL —</option>`
+    +Object.keys(ICMS_INTERNO).sort().map(uf=>`<option value="${uf}">${uf} · interna ${ICMS_INTERNO[uf].toLocaleString('pt-BR')}%</option>`).join('');
+  el.value='CE';
+}
+/* Trocar a UF sugere a alíquota efetiva do estado; o campo segue editável
+   para o caso de produto com alíquota própria ou de FCP a somar. */
+function ufDestinoChanged(){
+  const uf=V('ufDestino'), interna=ICMS_INTERNO[uf];
+  if(interna!=null){
+    const efetiva=Math.max(interna-N('icmsDest'),0);
+    $('aliqST').value=+efetiva.toFixed(2);
+  }
+  calc();
+}
+function notaDifal(){
+  const el=$('notaDifal'); if(!el) return;
+  const uf=V('ufDestino'), interna=ICMS_INTERNO[uf];
+  el.innerHTML = interna==null
+    ? 'Destino <b>sem DIFAL</b> — nada é calculado de ICMS de destino.'
+    : `DIFAL ${esc(uf)} = ${interna.toLocaleString('pt-BR')}% interna − ${N('icmsDest').toLocaleString('pt-BR')}% destacado. Não inclui FCP/FECP nem produto com alíquota própria.`;
+}
 function calc(){
   if(!$('txFrete')) return;
+  montarUFDestino();
   const txF=N('txFrete'), txD=N('txDesp'), pctInv=N('pctInv')/100, icmsE=N('icmsEnt')/100;
   const icmsD=N('icmsDest')/100, pisS=N('pisS')/100, cofS=N('cofS')/100, mkp=N('mkp')/100, aliqST=N('aliqST')/100;
   const ipiS=N('ipiS')/100;
@@ -5446,7 +5486,9 @@ function calc(){
   const pisSaida=nfSaidaItens*pisS, cofSaida=nfSaidaItens*cofS, ipiSaida=nfSaidaItens*ipiS;
   const resultante = (pisSaida+cofSaida+ipiSaida) - creditos;    // M107
   const nfSaida = baseSaida + resultante + icmsDestV;        // L110
-  const st = (V('ufDestino')==='CE') ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
+  // Antes só o CE calculava DIFAL; agora qualquer UF da tabela calcula, e a
+  // opção "sem DIFAL" continua zerando.
+  const st = (ICMS_INTERNO[V('ufDestino')]!=null) ? Math.max(nfSaida*aliqST - icmsDestV,0) : 0; // L112
   const custoReal = compra + impostos + despesas + resultante;   // L113
 
   // Composição aberta, para a proposta poder mostrar linha a linha o que o
@@ -5463,6 +5505,9 @@ function calc(){
   $('sResultante').textContent=fmt(resultante);
   $('sCustoReal').textContent=fmt(custoReal);
   $('sST').textContent=fmt(st);
+  { const l=$('lblDifal'), uf=V('ufDestino');
+    if(l) l.textContent = ICMS_INTERNO[uf]!=null ? `ICMS DIFAL (cliente ${uf})` : 'ICMS DIFAL'; }
+  notaDifal();
   $('warnNCM').style.display =
     state.items.some(it=>it.ncm && it.ncm.replace(/\D/g,'').length<8)?'block':'none';
   marginFromPct(true);
@@ -5746,6 +5791,7 @@ function saveQuote(silent){
 }
 function loadQuote(id){
   const s=DB.quotes[id]; if(!s){ toast('⚠ Cotação não encontrada'); return; }
+  montarUFDestino();
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
   // Cotação salva antes de um campo existir não traz esse campo. Sem zerar,
   // ela herdaria o valor da cotação aberta antes dela e mudaria de preço.
@@ -5773,6 +5819,7 @@ function refreshSaved(){
   }).join('');
 }
 function newQuote(){
+  montarUFDestino();
   state={items:[],exps:[],fotos:[],blocos:propostaBlocosPadrao(),status:'draft',id:null,criadoPor:USER?USER.nome.split(' ')[0]:null,aprovadoPor:null,editando:false};
   renderFotos();
   ['opNum','cliente','mercadoria','origem'].forEach(id=>$(id).value='');
