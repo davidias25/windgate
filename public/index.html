@@ -3205,8 +3205,14 @@ function renderFin(){
   let despMesTot = 0, recMesTot = 0;
 
   const effectiveItems = [];
+  // Operação em "Cotação" ainda não é negócio fechado: o previsto dela não
+  // pode entrar no caixa e fazer o mês parecer comprometido com dinheiro que
+  // talvez nunca saia. Volta sozinho quando a operação avança de etapa.
+  const opsCotacao = new Set((DB.ops||[]).filter(o=>o && o.status==='cotacao').map(o=>o.id));
+  let ocultosCotacao = 0;
 
   DB.fin.forEach((l, realIdx) => {
+    if (l.op && opsCotacao.has(l.op)) { ocultosCotacao++; return; }
     if (!l.vencimento) l.vencimento = l.data || hjISO;
     if (l.fixo === undefined) l.fixo = false;
 
@@ -3386,9 +3392,13 @@ function renderFin(){
   if ($('finResumo')) {
     const ent = rows.filter(l => l.tipo !== 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     const sai = rows.filter(l => l.tipo === 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
-    $('finResumo').innerHTML = rows.length
-      ? `${rows.length} lançamento(s) na tela · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
+    // Esconder sem dizer faria a conta não fechar contra a Torre de Controle.
+    const aviso = ocultosCotacao
+      ? ` <span style="color:var(--amber)">· ${ocultosCotacao} lançamento(s) de operações ainda em <b>Cotação</b> estão fora desta tela</span>`
       : '';
+    $('finResumo').innerHTML = (rows.length
+      ? `${rows.length} lançamento(s) na tela · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
+      : (ocultosCotacao?'Nenhum lançamento para o filtro selecionado.':'')) + aviso;
   }
 
   $('finEmpty').style.display = rows.length ? 'none' : 'block';
