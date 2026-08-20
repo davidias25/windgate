@@ -1893,6 +1893,18 @@ function migrateDB(){
     });
     DB.settings.schema = 10; ch = true;
   }
+  if ((DB.settings.schema || 10) < 11) {
+    // Realizado que já existia não guardava o dia da liquidação. Para o
+    // vencido, o melhor palpite é o próprio vencimento; para o que ainda vai
+    // vencer, é impossível ter sido liquidado no futuro — no máximo hoje.
+    const hojeLocal = (() => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); })();
+    (DB.fin || []).forEach(l => {
+      if (!l || l.status !== 'Realizado' || l.liquidadoEm) return;
+      const v = l.vencimento || l.data || hojeLocal;
+      l.liquidadoEm = v > hojeLocal ? hojeLocal : v;
+    });
+    DB.settings.schema = 11; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -3184,6 +3196,11 @@ function setFinPeriod(mode){
 /* Segunda e domingo da semana corrente, pelo relógio local. Convertendo com
    toISOString a data virava a do dia seguinte a partir das 21h no Brasil, e a
    semana andava um dia — lançamento de domingo sumia do cartão. */
+/* Previsto se posiciona pelo vencimento; realizado, pelo dia em que o dinheiro
+   de fato entrou ou saiu. Sem isso, uma conta paga adiantado ficava arquivada
+   na semana do vencimento e sumia do "recebidas na semana" de quem recebeu. */
+const dataCaixa = l => (l && l.status==='Realizado' && l.liquidadoEm) ? l.liquidadoEm : (l && (l.vencimento||l.data)) || '';
+
 function getISOWeekBounds(){
   const now = new Date();
   const day = now.getDay() || 7;
@@ -3246,6 +3263,8 @@ function renderFin(){
 
     // o _id acompanha a cópia: as linhas mensais de uma conta fixa apontam
     // todas para o mesmo lançamento de origem
+    // Realizado com data de liquidação entra pelo caixa; o resto, pelo vencimento.
+    if (l.status==='Realizado' && l.liquidadoEm && !isFixo) vencCalc = l.liquidadoEm;
     const itemObj = { ...l, vencimentoCalc: vencCalc };
     effectiveItems.push(itemObj);
 
@@ -3419,7 +3438,9 @@ function renderFin(){
   $('finEmpty').style.display = rows.length ? 'none' : 'block';
   $('finBody').innerHTML = rows.map(l => {
     const id = esc(l._id || '');
-    const vDisp = l.vencimentoCalc ? l.vencimentoCalc.split('-').reverse().join('/') : '—';
+    const vDisp = (l.vencimento||l.vencimentoCalc||'').split('-').reverse().join('/') || '—';
+    const liqDisp = (l.status==='Realizado' && l.liquidadoEm && l.liquidadoEm!==l.vencimento)
+      ? `<div style="font-size:9px;color:#34C77C">pago/recebido ${esc(l.liquidadoEm.split('-').reverse().join('/'))}</div>` : '';
     const dDisp = l.data ? l.data.split('-').reverse().join('/') : '—';
     const isFixo = !!l.fixo;
 
@@ -3442,7 +3463,7 @@ function renderFin(){
     `;
 
     return `<tr>
-      <td><b>${vDisp}</b></td>
+      <td><b>${vDisp}</b>${liqDisp}</td>
       <td class="note">${dDisp}</td>
       <td><b>${esc(l.op)}</b></td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
@@ -3478,10 +3499,19 @@ const finPorId = id => DB.fin.find(l => l && l._id === id);
 /* Classificação do lançamento, independente de ser receita ou despesa. */
 const FIN_CATEGORIAS = ['Empréstimo','Estudo impo','Imposto geral','Imposto importação'];
 
+function finLiqToggle(){
+  const b=$('m_lliqBox'); if(b) b.style.display = V('m_lst')==='Realizado' ? 'block' : 'none';
+}
 function setFinStatus(id, status){
   const l = finPorId(id);
   if(!l){ toast('⚠ Lançamento não encontrado'); renderFin(); return; }
-  l.status = status; saveDB(); renderFin(); updateNotifs();
+  l.status = status;
+  // A data de liquidação é o que coloca o lançamento na semana certa.
+  if(status==='Realizado'){ if(!l.liquidadoEm) l.liquidadoEm=agHoje(); }
+  else l.liquidadoEm=null;
+  saveDB(); renderFin(); updateNotifs();
+  if(status==='Realizado' && l.liquidadoEm!==(l.vencimento||''))
+    toast(`Lançado como realizado em <b>${l.liquidadoEm.split('-').reverse().join('/')}</b> — dá para ajustar a data no lápis`);
 }
 
 function deleteFin(id){
@@ -3541,7 +3571,8 @@ function openLancModal(id){
       <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01" value="${l?(+l.valor||0):''}" placeholder="0.00"></div>
     </div>
     <div class="frow">
-      <div><label>Status</label><select id="m_lst"><option${sel(l&&l.status,'Previsto')}>Previsto</option><option${sel(l&&l.status,'Realizado')}>Realizado</option></select></div>
+      <div><label>Status</label><select id="m_lst" onchange="finLiqToggle()"><option${sel(l&&l.status,'Previsto')}>Previsto</option><option${sel(l&&l.status,'Realizado')}>Realizado</option></select></div>
+      <div id="m_lliqBox" style="display:${l&&l.status==='Realizado'?'block':'none'}"><label>Pago / recebido em</label><input type="date" id="m_lliq" value="${l&&l.liquidadoEm?esc(l.liquidadoEm):(l&&l.status==='Realizado'?esc(l.vencimento||l.data||hjIso):hjIso)}" title="Dia em que o dinheiro entrou ou saiu — é por ele que o lançamento entra na semana e no mês"></div>
       <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" value="${l?esc(l.desc||''):''}" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
     </div>
     <div class="frow">
@@ -3567,6 +3598,7 @@ function saveLanc(id){
     }
     const hjIso = new Date().toISOString().slice(0,10);
     const dataLanc = V('m_ldata') || hjIso;
+    const liq = V('m_lst')==='Realizado' ? (V('m_lliq') || V('m_lvenc') || dataLanc) : null;
     const vencLanc = V('m_lvenc') || dataLanc;
     const isFixo = V('m_lfixo') === 'true';
     const opFinal = isFixo ? 'WindGate' : (V('m_lop') || 'WindGate');
@@ -3589,6 +3621,7 @@ function saveLanc(id){
       desc: desc,
       valor: rawVal,
       status: status,
+      liquidadoEm: liq,
       comp: comp,
       nf: nf
     };
