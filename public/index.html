@@ -677,6 +677,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .prio-baixa{background:var(--blue-soft);color:#7FA6FF}
 .ag-late td{background:rgba(255,90,110,.05)}
 .ag-done{opacity:.5;text-decoration:line-through}
+.ag-travada td{background:rgba(255,90,110,.06)}
+.ag-situ{font-size:10.5px;font-weight:800;padding:3px 6px;height:auto;width:118px;border-radius:7px}
 .ag-exp{background:none;border:0;color:var(--mut);cursor:pointer;font:inherit;font-size:11px;padding:0 5px 0 0;line-height:1}
 .ag-exp:hover{color:var(--txt)}
 .ag-sub>td{background:rgba(255,255,255,.025);padding-top:4px;padding-bottom:10px}
@@ -1077,12 +1079,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="card">
     <h2>Tarefas <span class="spacer"></span>
       <select id="agFiltroResp" style="width:150px" onchange="renderAgenda()"><option value="">— todos —</option><option>Samir</option><option>Davi</option><option>Ívina</option><option>Matheus</option></select>
-      &nbsp;<select id="agFiltroSt" style="width:130px" onchange="renderAgenda()"><option value="abertas">Abertas</option><option value="todas">Todas</option><option value="feitas">Feitas</option></select>
+      &nbsp;<select id="agFiltroSt" style="width:150px" onchange="renderAgenda()"><option value="abertas">Em aberto</option><option value="aberta">Só em progresso</option><option value="travada">Só travadas</option><option value="feita">Só concluídas</option><option value="todas">Todas</option></select>
     </h2>
-    <div style="overflow-x:auto"><table><thead><tr><th></th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th>Obs</th><th>Criada por</th><th></th></tr></thead><tbody id="agBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Situação</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th>Obs</th><th>Criada por</th><th></th></tr></thead><tbody id="agBody"></tbody></table></div>
     <div class="empty" id="agEmpty" style="display:none">Nenhuma tarefa — clique em <b>+ Nova tarefa</b>.</div>
   </div>
-  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, cada um com seu responsável, que é avisado igual ao da tarefa.</div>
+  <div class="rulebox blue"><b>Regra da agenda:</b> compromisso com data (pagar bônus dia 30, reservar restaurante, enviar doc à contabilidade) entra AQUI na hora em que surge — não fica na cabeça nem no WhatsApp. Tarefa vencida pisca em vermelho para o responsável. A situação tem três estados: <b>em progresso</b>, <b>travada</b> (depende de alguém de fora, e continua cobrando prazo) e <b>concluída</b>. Clique na <b>▸</b> ao lado da tarefa para abrir as subtarefas — os passos dela, cada um com seu responsável, que é avisado igual ao da tarefa.</div>
 </section>
 
 <!-- ========== CRM ========== -->
@@ -3782,6 +3784,16 @@ function agPrazoTxt(t){
   if(!t.prazo) return '—';
   return t.prazo.split('-').reverse().join('/')+(t.hora?' · '+t.hora:'');
 }
+/* Três situações no lugar do antes-e-depois do check. "Travada" é a que
+   faltava: tarefa que ninguém largou, mas que depende de outra pessoa — sem
+   ela, ou ficava aberta parecendo esquecida, ou era marcada como feita. */
+const AG_SITU=[
+  {k:'aberta',  l:'Em progresso', c:'#7FA6FF'},
+  {k:'travada', l:'Travada',      c:'#FF5A6E'},
+  {k:'feita',   l:'Concluída',    c:'#34C77C'}
+];
+const agSitu = t => AG_SITU.find(x=>x.k===(t&&t.status)) || AG_SITU[0];
+
 /* Subtarefas são os passos de uma tarefa, guardadas dentro dela — não têm
    prazo nem responsável próprios, senão virariam tarefas soltas fora da lista.
    Tarefas criadas antes disso simplesmente não têm o campo. */
@@ -3868,7 +3880,8 @@ function renderAgenda(){
   const abertas=all.filter(t=>t.status!=='feita');
   const atras=abertas.filter(agVencida);
   $('agStats').innerHTML=`
-    <div class="stat" style="--sc:#2563EB"><div class="n" style="color:#7FA6FF">${abertas.length}</div><div class="l">Abertas</div></div>
+    <div class="stat" style="--sc:#2563EB"><div class="n" style="color:#7FA6FF">${abertas.filter(t=>t.status!=='travada').length}</div><div class="l">Em progresso</div></div>
+    <div class="stat" style="--sc:#FF5A6E"><div class="n" style="color:#FF5A6E">${abertas.filter(t=>t.status==='travada').length}</div><div class="l">Travadas</div></div>
     <div class="stat" style="--sc:#FF5A6E"><div class="n" style="color:#FF5A6E">${atras.length}</div><div class="l">Vencidas</div></div>
     <div class="stat" style="--sc:#F0B429"><div class="n" style="color:#F0B429">${abertas.filter(t=>t.prio==='Alta').length}</div><div class="l">Prioridade alta</div></div>
     <div class="stat" style="--sc:#34C77C"><div class="n" style="color:#34C77C">${all.filter(t=>t.status==='feita').length}</div><div class="l">Concluídas</div></div>`;
@@ -3877,7 +3890,8 @@ function renderAgenda(){
   // subtarefa nela — e é justamente o que essa pessoa precisa ver.
   if(fR) rows=rows.filter(t=>t.resp===fR||agSubs(t).some(s=>s&&s.resp===fR));
   if(fS==='abertas') rows=rows.filter(t=>t.status!=='feita');
-  if(fS==='feitas') rows=rows.filter(t=>t.status==='feita');
+  else if(fS==='aberta') rows=rows.filter(t=>t.status!=='feita'&&t.status!=='travada');
+  else if(fS==='travada'||fS==='feita') rows=rows.filter(t=>t.status===fS);
   $('agEmpty').style.display=rows.length?'none':'block';
   $('agBody').innerHTML=rows.map(t=>{
     const id=esc(t._id||'');
@@ -3887,8 +3901,9 @@ function renderAgenda(){
     const subs=agSubs(t), feitas=subs.filter(s=>s.feita).length;
     const aberto=_agExpandidas.has(t._id);
     const cont=subs.length?` <span class="pill ${feitas===subs.length?'ok':'blue'}" style="font-size:9px">${feitas}/${subs.length}</span>`:'';
-    return `<tr class="${late?'ag-late':''} ${t.status==='feita'?'ag-done':''}">
-      <td><input type="checkbox" style="width:auto" ${t.status==='feita'?'checked':''} onchange="agToggle('${id}',this.checked)"></td>
+    const su=agSitu(t);
+    return `<tr class="${late?'ag-late':''} ${t.status==='travada'?'ag-travada':''} ${t.status==='feita'?'ag-done':''}">
+      <td><select class="ag-situ" style="color:${su.c}" onchange="agSituar('${id}',this.value)">${AG_SITU.map(x=>`<option value="${x.k}"${x.k===su.k?' selected':''}>${x.l}</option>`).join('')}</select></td>
       <td><button class="ag-exp" onclick="agExpandir('${id}')" title="${subs.length?'subtarefas':'adicionar subtarefas'}">${aberto?'▾':'▸'}</button><b>${esc(t.t)}</b>${cont}${nova?' <span class="pill mag" style="font-size:9px">nova</span>':''}</td>
       <td>${esc(t.resp)}</td>
       <td>${late?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
@@ -3901,15 +3916,17 @@ function renderAgenda(){
 }
 /* Tarefas são localizadas pelo `_id`: a sincronização reordena a lista quando
    traz tarefas de outro usuário, e um índice velho concluiria a tarefa errada. */
-function agToggle(id,done){
+function agSituar(id,novo){
   const t=(DB.agendaTasks||[]).find(x=>x && x._id===id);
   if(!t){ toast('⚠ Tarefa não encontrada'); renderAgenda(); return; }
   // Concluir a tarefa não fecha as subtarefas por conta própria — quem marca
   // sabe se sobrou passo por fazer; só avisamos que sobrou.
   const pendentes=agSubs(t).filter(s=>!s.feita).length;
-  t.status=done?'feita':'aberta'; t.doneAt=done?new Date().toISOString().slice(0,10):null;
+  t.status=novo;
+  t.doneAt = novo==='feita' ? new Date().toISOString().slice(0,10) : null;
   saveDB(); renderAgenda(); updateNotifs();
-  if(done&&pendentes) toast(`Tarefa concluída — <b>${pendentes}</b> subtarefa${pendentes>1?'s':''} ainda em aberto`);
+  if(novo==='feita'&&pendentes) toast(`Tarefa concluída — <b>${pendentes}</b> subtarefa${pendentes>1?'s':''} ainda em aberto`);
+  if(novo==='travada') toast('Tarefa marcada como <b>travada</b> — continua cobrando prazo');
 }
 function agDel(id){
   const i=(DB.agendaTasks||[]).findIndex(x=>x && x._id===id);
