@@ -1511,6 +1511,7 @@ function defaultDB(){
     crm:[],             // clientes {nome,empresa,segmento,fone,email,end:{...},resp,obs,interacoes:[]}
     crmOps:[],          // oportunidades {clienteId,titulo,valor,etapa,resp,prox,prazo,quoteId}
     parceiros:[],       // fornecedores/despachantes/agentes {nome,empresa,cnpj,tipo,servico,end:{...}}
+    portos:{},          // portos além da lista base: nome → [lat,lon] (ou null, sem mapa)
     gestao:{},          // 'YYYY-MM' → {gestor,destaques,desafios,prox,metas:[{t,resp,prio,done}]}
     settings:{criadoEm:new Date().toISOString(),schema:4}
   };
@@ -1647,6 +1648,7 @@ function ensureDBStructure(){
   if (!Array.isArray(DB.crm)) DB.crm = [];        // clientes
   if (!Array.isArray(DB.crmOps)) DB.crmOps = [];  // oportunidades
   if (!Array.isArray(DB.parceiros)) DB.parceiros = []; // fornecedores, despachantes, agentes
+  if (!DB.portos || typeof DB.portos !== 'object') DB.portos = {}; // portos criados pela equipe
   if (!DB.checklists) DB.checklists = {};
   if (!DB.agentes) DB.agentes = def.agentes || {};
   if (!DB.gestao) DB.gestao = {};
@@ -2125,8 +2127,17 @@ function openOpModal(id){
     </div>
     <div class="grouph">Logística & mapa</div>
     <div class="frow">
-      <div><label>Porto origem</label><select id="m_oporig"><option value="">—</option>${Object.keys(GEO.portos).map(p=>`<option ${o&&o.origemPorto===p?'selected':''}>${p}</option>`).join('')}</select></div>
-      <div><label>Porto destino</label><select id="m_opdest"><option value="">—</option>${Object.keys(GEO.portos).map(p=>`<option ${o&&o.destinoPorto===p?'selected':(!o&&p==='Pecém'?'selected':'')}>${p}</option>`).join('')}</select></div>
+      <div><label>Porto origem</label><select id="m_oporig" onchange="portoOutro('orig')">${portoOptions(o&&o.origemPorto)}</select></div>
+      <div><label>Porto destino</label><select id="m_opdest" onchange="portoOutro('dest')">${portoOptions(o?o.destinoPorto:'Pecém')}</select></div>
+      <div id="m_opnovoBox" style="display:none;grid-column:span 3">
+        <label>Novo porto <span style="opacity:.55;font-weight:400">· nome e, se souber, a posição no mapa</span></label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <input id="m_opnovo" placeholder="Ex.: Itaguaí/RJ" style="flex:2 1 200px;min-width:0">
+          <input id="m_opnovoLat" type="number" step="0.01" placeholder="latitude" style="flex:1 1 110px;min-width:0">
+          <input id="m_opnovoLon" type="number" step="0.01" placeholder="longitude" style="flex:1 1 110px;min-width:0">
+        </div>
+        <p class="note" style="margin-top:4px">Sem latitude e longitude o porto fica registrado na operação, mas a rota não é desenhada no mapa.</p>
+      </div>
       <div><label>Cidade da fábrica</label><select id="m_opfab"><option value="">—</option>${Object.keys(GEO.cidades).map(p=>`<option ${o&&o.fabricaCidade===p?'selected':''}>${p}</option>`).join('')}</select></div>
     </div>
     <div class="frow">
@@ -2143,13 +2154,42 @@ function openOpModal(id){
       <button class="btn btn-mag" onclick="saveOp(${o?`'${esc(o.id)}'`:'null'})">Salvar</button>
     </div>`);
 }
+/* Mesmo padrão do seletor de empresa no frete: "Outro…" abre o campo de nome. */
+function portoOptions(sel){
+  const nomes=Object.keys(portosTodos());
+  const conhecido=!sel||nomes.includes(sel);
+  return '<option value="">—</option>'
+    +nomes.map(p=>`<option${p===sel?' selected':''}>${esc(p)}</option>`).join('')
+    // porto de uma operação antiga que saiu da lista não pode sumir do cadastro
+    +(conhecido?'':`<option selected>${esc(sel)}</option>`)
+    +'<option value="__outro">Outro…</option>';
+}
+function portoOutro(){
+  const box=$('m_opnovoBox'); if(!box) return;
+  const abrir = V('m_oporig')==='__outro' || V('m_opdest')==='__outro';
+  box.style.display=abrir?'block':'none';
+  if(abrir && $('m_opnovo')) $('m_opnovo').focus();
+}
+/* Grava o porto novo e devolve o nome; sem nome, devolve vazio em vez de
+   deixar a string "__outro" viajar para dentro da operação. */
+function resolverPorto(valor){
+  if(valor!=='__outro') return valor;
+  const nome=(V('m_opnovo')||'').trim();
+  if(!nome) return '';
+  const la=$('m_opnovoLat')&&$('m_opnovoLat').value.trim(), lo=$('m_opnovoLon')&&$('m_opnovoLon').value.trim();
+  if(!DB.portos) DB.portos={};
+  if(!GEO.portos[nome] || (la!==''&&lo!=='')){
+    DB.portos[nome] = (la!==''&&lo!=='') ? [+la,+lo] : (DB.portos[nome]||null);
+  }
+  return nome;
+}
 function saveOp(id){
   try {
     const nid=(id||V('m_opid').trim().toUpperCase());
     if(!nid){ toast('⚠ Informe o código da operação'); return; }
     let o=DB.ops.find(x=>x.id===nid);
     const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),status:V('m_opst'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
-      origemPorto:V('m_oporig'),destinoPorto:V('m_opdest'),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
+      origemPorto:resolverPorto(V('m_oporig')),destinoPorto:resolverPorto(V('m_opdest')),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
     if(o) Object.assign(o,data); else { DB.ops.push(data); o=data; }
     if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
     saveDB(); closeModal(); renderOps(); toast('Operação salva ✓');
@@ -3698,6 +3738,10 @@ function importAll(inp){
 /* ============================================================
    GEO · AGENDA · PENDÊNCIAS · GESTÃO DO MÊS · MAPA · SOURCING IA
    ============================================================ */
+/* Portos da lista base mais os que a equipe cadastrou. Sem isto, porto fora
+   da lista obrigava a escolher um parecido — e a operação passava a dizer que
+   chegou onde não chegou. */
+const portosTodos = () => Object.assign({}, GEO.portos, DB.portos||{});
 const GEO={
   portos:{
     'Shanghai':[31.23,121.47],'Ningbo':[29.87,121.54],'Qingdao':[36.07,120.38],'Tianjin':[39.08,117.72],
@@ -4872,7 +4916,8 @@ let _mapVB='0 0 1000 500';
 function mapView(m){ _mapVB = m==='rota' ? '250 110 640 260' : '0 0 1000 500'; const s=$('mapSvg'); if(s) s.setAttribute('viewBox',_mapVB); }
 function opWhere(o){
   const hj=new Date();
-  const orig=GEO.portos[o.origemPorto], dest=GEO.portos[o.destinoPorto], fab=GEO.cidades[o.fabricaCidade];
+  const P=portosTodos();
+  const orig=P[o.origemPorto], dest=P[o.destinoPorto], fab=GEO.cidades[o.fabricaCidade];
   const early=['cotacao','contrato','producao'];
   if(early.includes(o.status)) return fab?{lat:fab[0],lon:fab[1],modo:'🏭 Na fábrica · '+o.fabricaCidade}:(orig?{lat:orig[0],lon:orig[1],modo:'🏭 Região de origem'}:null);
   if(o.status==='embarcado'){
@@ -4889,7 +4934,7 @@ function renderMapa(){
   const svg=$('mapSvg'); if(!svg) return;
   let inner=`<rect x="-50" y="-50" width="1100" height="600" fill="#0A1220"/><path class="map-land" d="${WORLD_PATH}"/>`;
   // portos base
-  Object.entries(GEO.portos).forEach(([n,[la,lo]])=>{ inner+=`<circle class="map-port" cx="${gX(lo).toFixed(1)}" cy="${gY(la).toFixed(1)}" r="1.6" opacity=".55"/>`; });
+  Object.entries(portosTodos()).forEach(([n,c])=>{ if(!c) return; const [la,lo]=c; inner+=`<circle class="map-port" cx="${gX(lo).toFixed(1)}" cy="${gY(la).toFixed(1)}" r="1.6" opacity=".55"/>`; });
   const rows=[];
   // agrupamento: mesmo link de rastreio (ou mesmo navio) = mesmo contêiner/navio → um ponto só com todas as OPs
   const ativos=DB.ops.filter(o=>!['entregue','concluida'].includes(o.status));
