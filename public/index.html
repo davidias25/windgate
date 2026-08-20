@@ -1252,6 +1252,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="fixo">Apenas Fixas</option>
         <option value="pontual">Apenas Pontuais</option>
       </select> &nbsp;
+      <input id="finBusca" placeholder="Buscar por descrição, operação, categoria, valor…" style="width:290px" oninput="renderFin()"> &nbsp;
       <select id="finStFiltro" style="width:170px" onchange="renderFin()">
         <option value="">— Status (Todos) —</option>
         <option value="Previsto">Apenas previstos</option>
@@ -3199,6 +3200,17 @@ function setFinPeriod(mode){
 /* Previsto se posiciona pelo vencimento; realizado, pelo dia em que o dinheiro
    de fato entrou ou saiu. Sem isso, uma conta paga adiantado ficava arquivada
    na semana do vencimento e sumia do "recebidas na semana" de quem recebeu. */
+/* Casa o texto digitado com o que a pessoa vê na linha: descrição, operação,
+   categoria, quem lançou, tipo, status, as datas em dd/mm/aaaa e o valor —
+   com e sem separador, porque uns digitam 79166 e outros 79.166,99. */
+function finCombina(l, termo){
+  const v = +l.valor || 0;
+  const br = d => (d||'').split('-').reverse().join('/');
+  const campos = [l.desc, l.op, l.categoria, l.por, l.tipo, l.status, l.nf,
+    br(l.vencimento), br(l.vencimentoCalc), br(l.liquidadoEm),
+    v.toFixed(2), v.toFixed(2).replace('.', ','), fmt(v), String(Math.round(v))];
+  return nrm(campos.filter(Boolean).join(' ')).includes(termo);
+}
 const dataCaixa = l => (l && l.status==='Realizado' && l.liquidadoEm) ? l.liquidadoEm : (l && (l.vencimento||l.data)) || '';
 
 function getISOWeekBounds(){
@@ -3411,8 +3423,13 @@ function renderFin(){
   const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
   const stFilter = $('finStFiltro') ? $('finStFiltro').value : '';
 
+  const busca = nrm($('finBusca') ? $('finBusca').value : '');
+  // Procurar dentro do mês selecionado esconderia justamente o lançamento que
+  // se procura quando ele é de outro mês. Buscando, o filtro de mês sai de
+  // cena — e o resumo avisa que a lista deixou de ser só daquele mês.
   const rows = effectiveItems.filter(l => {
-    if (targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
+    if (!busca && targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
+    if (busca && !finCombina(l, busca)) return false;
     if (opFilter && l.op !== opFilter) return false;
     if (natFilter === 'fixo' && !l.fixo) return false;
     if (natFilter === 'pontual' && l.fixo) return false;
@@ -3427,12 +3444,13 @@ function renderFin(){
     const ent = rows.filter(l => l.tipo !== 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     const sai = rows.filter(l => l.tipo === 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     // Esconder sem dizer faria a conta não fechar contra a Torre de Controle.
-    const aviso = ocultosCotacao
+    const aviso = (busca ? ' <span style="color:#7FA6FF">· busca em <b>todos os meses</b>, ignorando o filtro acima</span>' : '')
+      + (ocultosCotacao
       ? ` <span style="color:var(--amber)">· ${ocultosCotacao} lançamento(s) de operações ainda em <b>Cotação</b> estão fora desta tela</span>`
-      : '';
+      : '');
     $('finResumo').innerHTML = (rows.length
       ? `${rows.length} lançamento(s) na tela · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
-      : (ocultosCotacao?'Nenhum lançamento para o filtro selecionado.':'')) + aviso;
+      : ((ocultosCotacao||busca)?'Nenhum lançamento encontrado.':'')) + aviso;
   }
 
   $('finEmpty').style.display = rows.length ? 'none' : 'block';
