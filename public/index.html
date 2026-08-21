@@ -1223,6 +1223,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('mesAtual')">Este Mês</button>
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('proxMes')">Próximo Mês ↗</button>
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('todos')">Todos</button>
+      <button class="btn btn-ghost" onclick="openTransfModal()">⇄ Transferência entre empresas</button>
       <button class="btn btn-mag" onclick="openLancModal()">+ Novo Lançamento</button>
     </div>
   </div>
@@ -3420,6 +3421,8 @@ function renderFin(){
   const opsVivas = new Set((DB.ops||[]).map(o=>o&&o.id).filter(Boolean));
   const ops = {};
   effectiveItems.forEach(l => {
+    // Passar dinheiro de um bolso para o outro não é resultado de operação.
+    if (l.transf) return;
     if (l.op && l.op !== 'WindGate' && !opsVivas.has(l.op)) return;
     ops[l.op] = ops[l.op] || { rp: 0, rr: 0, dp: 0, dr: 0 };
     const v = +l.valor || 0, o = ops[l.op];
@@ -3507,7 +3510,7 @@ function renderFin(){
     return `<tr>
       <td><b>${vDisp}</b>${liqDisp}</td>
       <td class="note">${dDisp}</td>
-      <td><b>${esc(l.op)}</b>${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}</td>
+      <td>${l.transf?'<span class="pill teal" style="font-size:8.5px">⇄ TRANSF.</span>':`<b>${esc(l.op||'—')}</b>`}${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}</td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
       <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? '📌 Fixa' : 'Pontual'}</span></td>
       <td>${l.categoria ? `<span class="pill mag">${esc(l.categoria)}</span>` : '<span class="note">—</span>'}</td>
@@ -3561,8 +3564,16 @@ function deleteFin(id){
   if(idx < 0){ toast('⚠ Lançamento não encontrado'); return; }
   const item = DB.fin[idx];
   const desc = item.desc || item.op || 'este lançamento';
-  if(confirm(`Deseja remover o lançamento "${desc}"?`)){
-    DB.fin.splice(idx, 1);
+  // Meia transferência deixaria um caixa com dinheiro que o outro não perdeu.
+  const par = item.transfId ? DB.fin.filter(l => l && l.transfId === item.transfId) : [item];
+  const pergunta = par.length > 1
+    ? `Remover a transferência "${desc}"?
+
+Os dois lados são apagados juntos: a saída e a entrada.`
+    : `Deseja remover o lançamento "${desc}"?`;
+  if(confirm(pergunta)){
+    if(par.length > 1) DB.fin = DB.fin.filter(l => !(l && l.transfId === item.transfId));
+    else DB.fin.splice(idx, 1);
     saveDB();
     renderFin();
     updateNotifs();
@@ -3586,6 +3597,40 @@ function toggleNatLanc(isFixoStr){
 }
 
 /* Sem argumento cria um lançamento; com o `_id` de um lançamento, edita. */
+/* Transferência entre as empresas do grupo. Vira duas linhas espelhadas —
+   saída de uma, entrada na outra —, senão o caixa de origem some com o
+   dinheiro e o de destino recebe do nada. As duas nascem ligadas pelo mesmo
+   `transfId` e são apagadas juntas, para os dois lados nunca desencontrarem. */
+function openTransfModal(){
+  const hjIso=agHoje();
+  openModal(`<h3>Transferência entre <span>empresas</span></h3>
+    <p class="note" style="margin-bottom:10px">Gera dois lançamentos: saída na empresa de origem e entrada na de destino, com o mesmo valor e a mesma data.</p>
+    <div class="frow">
+      <div><label>De (sai de)</label><select id="m_tde">${FIN_EMPRESAS.map(e=>`<option>${e.k}</option>`).join('')}</select></div>
+      <div><label>Para (entra em)</label><select id="m_tpara">${FIN_EMPRESAS.map((e,i)=>`<option${i===1?' selected':''}>${e.k}</option>`).join('')}</select></div>
+      <div><label>Valor (R$)</label><input type="number" id="m_tval" step="0.01" placeholder="0,00"></div>
+    </div>
+    <div class="frow">
+      <div><label>Data</label><input type="date" id="m_tdata" value="${hjIso}"></div>
+      <div><label>Situação</label><select id="m_tst"><option>Realizado</option><option>Previsto</option></select></div>
+      <div style="grid-column:span 1"><label>Observação</label><input id="m_tobs" placeholder="Ex.: aporte para o câmbio"></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="salvarTransferencia()">Lançar transferência</button></div>`);
+}
+function salvarTransferencia(){
+  const de=V('m_tde'), para=V('m_tpara'), val=N('m_tval'), data=V('m_tdata')||agHoje(), st=V('m_tst'), obs=V('m_tobs').trim();
+  if(de===para){ toast('⚠ Origem e destino são a mesma empresa'); return; }
+  if(!(val>0)){ toast('⚠ Informe o valor'); return; }
+  const tid=novoId(), eu=USER?USER.nome.split(' ')[0]:'';
+  const liq = st==='Realizado' ? data : null;
+  const base={data,vencimento:data,op:'',categoria:'Transferência',fixo:false,valor:+val.toFixed(2),
+    status:st,liquidadoEm:liq,comp:'',nf:'',por:eu,transf:true,transfId:tid};
+  const sufixo=obs?' · '+obs:'';
+  DB.fin.unshift({_id:novoId(),...base,empresa:para,tipo:'Receita',desc:`Transferência recebida de ${de}${sufixo}`});
+  DB.fin.unshift({_id:novoId(),...base,empresa:de,tipo:'Despesa',desc:`Transferência enviada para ${para}${sufixo}`});
+  saveDB(); closeModal(); renderFin(); updateNotifs();
+  toast(`Transferência de <b>${fmt(val)}</b> — saída em ${esc(de)} e entrada em ${esc(para)} ✓`);
+}
 function openLancModal(id){
   const l = (typeof id === 'string' && id) ? finPorId(id) : null;
   if(typeof id === 'string' && id && !l){ toast('⚠ Lançamento não encontrado'); return; }
