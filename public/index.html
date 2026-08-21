@@ -1212,6 +1212,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="view-head">
     <div><h1>Finan<span>ceiro</span></h1><p>Acesso restrito — Samir e Davi. Controle de vencimentos, contas a pagar/receber, despesas fixas recorrentes e fluxo de caixa.</p></div>
     <div class="hd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:#94A3B8;margin:0">Empresa:</label>
+      <select id="finEmpresa" style="width:180px" onchange="renderFin()">
+        <option value="">Todas (WindGate + JeT)</option>
+        <option>WindGate</option>
+        <option>JeT</option>
+      </select>
       <label style="font-size:12px;color:#94A3B8;margin:0">Filtrar Mês:</label>
       <input type="month" id="finMesFiltro" style="width:160px" onchange="renderFin()">
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('mesAtual')">Este Mês</button>
@@ -1240,7 +1246,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="fin-dash-grid" id="finDashGrid"></div>
 
   <div class="card">
-    <h2>Resultado por operação <span class="spacer"></span><span class="note">Operação inteira — todos os meses, sem o filtro de mês acima</span></h2>
+    <h2>Resultado por operação <span class="spacer"></span><span class="note" id="finOpsNota">Operação inteira — todos os meses, sem o filtro de mês acima</span></h2>
     <div style="overflow-x:auto"><table><thead><tr><th>Operação</th><th class="r">Receita prevista</th><th class="r">Receita realizada</th><th class="r">Despesa prevista</th><th class="r">Despesa realizada</th><th class="r">Resultado previsto</th><th class="r">Resultado real</th><th class="r">Margem real</th></tr></thead><tbody id="finOpsBody"></tbody></table></div>
   </div>
 
@@ -1905,6 +1911,11 @@ function migrateDB(){
       l.liquidadoEm = v > hojeLocal ? hojeLocal : v;
     });
     DB.settings.schema = 11; ch = true;
+  }
+  if ((DB.settings.schema || 11) < 12) {
+    // Tudo que existe até aqui é movimento da WindGate; a JeT começa vazia.
+    (DB.fin || []).forEach(l => { if (l && !l.empresa) l.empresa = 'WindGate'; });
+    DB.settings.schema = 12; ch = true;
   }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
@@ -3206,11 +3217,18 @@ function setFinPeriod(mode){
 function finCombina(l, termo){
   const v = +l.valor || 0;
   const br = d => (d||'').split('-').reverse().join('/');
-  const campos = [l.desc, l.op, l.categoria, l.por, l.tipo, l.status, l.nf,
+  const campos = [l.desc, l.op, l.categoria, l.por, l.tipo, l.status, l.nf, finEmpresa(l),
     br(l.vencimento), br(l.vencimentoCalc), br(l.liquidadoEm),
     v.toFixed(2), v.toFixed(2).replace('.', ','), fmt(v), String(Math.round(v))];
   return nrm(campos.filter(Boolean).join(' ')).includes(termo);
 }
+/* Duas empresas do grupo, cada uma com o seu caixa. Tudo que existe hoje é da
+   WindGate; a JeT entra agora com movimento próprio. Misturar as duas num
+   cartão só responderia uma pergunta que ninguém faz. */
+const FIN_EMPRESAS=[{k:'WindGate', c:'#E91E63'},{k:'JeT', c:'#22B8CF'}];
+const finEmpresa = l => (l && l.empresa) || 'WindGate';
+const finEmpresaCor = e => (FIN_EMPRESAS.find(x=>x.k===e)||FIN_EMPRESAS[0]).c;
+
 const dataCaixa = l => (l && l.status==='Realizado' && l.liquidadoEm) ? l.liquidadoEm : (l && (l.vencimento||l.data)) || '';
 
 function getISOWeekBounds(){
@@ -3254,8 +3272,10 @@ function renderFin(){
   // talvez nunca saia. Volta sozinho quando a operação avança de etapa.
   const opsCotacao = new Set((DB.ops||[]).filter(o=>o && o.status==='cotacao').map(o=>o.id));
   let ocultosCotacao = 0;
+  const empFiltro = $('finEmpresa') ? $('finEmpresa').value : '';
 
   DB.fin.forEach((l, realIdx) => {
+    if (empFiltro && finEmpresa(l) !== empFiltro) return;
     if (l.op && opsCotacao.has(l.op)) { ocultosCotacao++; return; }
     if (!l.vencimento) l.vencimento = l.data || hjISO;
     if (l.fixo === undefined) l.fixo = false;
@@ -3407,6 +3427,9 @@ function renderFin(){
     else { l.status === 'Realizado' ? o.dr += v : o.dp += v; }
   });
 
+  { const n=$('finOpsNota');
+    if(n) n.innerHTML='Operação inteira — todos os meses, sem o filtro de mês acima'
+      + (empFiltro?` · só <b style="color:${finEmpresaCor(empFiltro)}">${esc(empFiltro)}</b>`:''); }
   $('finOpsBody').innerHTML = Object.entries(ops).map(([op, o]) => {
     const res = o.rr - o.dr, mg = o.rr > 0 ? (res / o.rr * 100).toFixed(1) + '%' : '—';
     // Enquanto a operação corre quase nada está realizado, e o resultado real
@@ -3444,7 +3467,8 @@ function renderFin(){
     const ent = rows.filter(l => l.tipo !== 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     const sai = rows.filter(l => l.tipo === 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     // Esconder sem dizer faria a conta não fechar contra a Torre de Controle.
-    const aviso = (busca ? ' <span style="color:#7FA6FF">· busca em <b>todos os meses</b>, ignorando o filtro acima</span>' : '')
+    const aviso = (empFiltro ? ` <span style="color:${finEmpresaCor(empFiltro)}">· só <b>${esc(empFiltro)}</b></span>` : '')
+      + (busca ? ' <span style="color:#7FA6FF">· busca em <b>todos os meses</b>, ignorando o filtro acima</span>' : '')
       + (ocultosCotacao
       ? ` <span style="color:var(--amber)">· ${ocultosCotacao} lançamento(s) de operações ainda em <b>Cotação</b> estão fora desta tela</span>`
       : '');
@@ -3483,7 +3507,7 @@ function renderFin(){
     return `<tr>
       <td><b>${vDisp}</b>${liqDisp}</td>
       <td class="note">${dDisp}</td>
-      <td><b>${esc(l.op)}</b></td>
+      <td><b>${esc(l.op)}</b>${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}</td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
       <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? '📌 Fixa' : 'Pontual'}</span></td>
       <td>${l.categoria ? `<span class="pill mag">${esc(l.categoria)}</span>` : '<span class="note">—</span>'}</td>
@@ -3589,6 +3613,7 @@ function openLancModal(id){
       <div><label>Valor (R$)</label><input id="m_lval" type="number" step="0.01" value="${l?(+l.valor||0):''}" placeholder="0.00"></div>
     </div>
     <div class="frow">
+      <div><label>Empresa</label><select id="m_lemp">${FIN_EMPRESAS.map(e=>`<option${sel(l?finEmpresa(l):(V('finEmpresa')||'WindGate'),e.k)}>${e.k}</option>`).join('')}</select></div>
       <div><label>Status</label><select id="m_lst" onchange="finLiqToggle()"><option${sel(l&&l.status,'Previsto')}>Previsto</option><option${sel(l&&l.status,'Realizado')}>Realizado</option></select></div>
       <div id="m_lliqBox" style="display:${l&&l.status==='Realizado'?'block':'none'}"><label>Pago / recebido em</label><input type="date" id="m_lliq" value="${l&&l.liquidadoEm?esc(l.liquidadoEm):(l&&l.status==='Realizado'?esc(l.vencimento||l.data||hjIso):hjIso)}" title="Dia em que o dinheiro entrou ou saiu — é por ele que o lançamento entra na semana e no mês"></div>
       <div style="grid-column:span 2"><label>Descrição</label><input id="m_ldesc" value="${l?esc(l.desc||''):''}" placeholder="Ex.: Aluguel / Contabilidade / Softwares / Pró-labore"></div>
@@ -3639,6 +3664,7 @@ function saveLanc(id){
       desc: desc,
       valor: rawVal,
       status: status,
+      empresa: V('m_lemp') || 'WindGate',
       liquidadoEm: liq,
       comp: comp,
       nf: nf
@@ -5802,7 +5828,7 @@ function criarOpDaCotacao(){
                  'Custos de chegada — impostos, frete, despesas e ICMS DIFAL'];
   const lancar=(venc,tipo,desc,valor)=>{
     if(!(valor>0)) return;
-    DB.fin.unshift({_id:novoId(),data:hjISO,vencimento:venc,op:id,tipo,categoria:'',fixo:false,
+    DB.fin.unshift({_id:novoId(),data:hjISO,vencimento:venc,op:id,tipo,categoria:'',fixo:false,empresa:'WindGate',
       desc,valor:+(+valor).toFixed(2),status:'Previsto',comp:'',nf:'',por:eu,origem:marca});
   };
   // Do último para o primeiro: unshift inverte, e assim a lista fica em ordem.
