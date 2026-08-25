@@ -5868,17 +5868,23 @@ function criarOpDaCotacao(){
   // melhor uma data para cobrar do que três linhas zeradas.
   if(recebe.reduce((a,b)=>a+b,0)<=0){ recebe[0]=R.preco||0; recebe[1]=0; recebe[2]=0; }
 
+  // O DIFAL sai da 3ª parcela e vira lançamento próprio: ele não é custo da
+  // WindGate, é repasse à SEFAZ, e o valor é estimativa — a guia fechada pode
+  // vir diferente. Junto no mesmo saco, ninguém saberia quanto conferir.
+  const difal=Math.min(R.st||0, paga[2]);
+  paga[2]=Math.max(paga[2]-difal,0);
   const descPag=['Sinal da fábrica ('+(N('fabSinal')||30)+'% do FOB)',
                  'Saldo da fábrica · pré-embarque',
-                 'Custos de chegada — impostos, frete, despesas e ICMS DIFAL'];
-  const lancar=(venc,tipo,desc,valor)=>{
+                 'Custos de chegada — impostos de importação, frete e despesas'];
+  const lancar=(venc,tipo,desc,valor,extra)=>{
     if(!(valor>0)) return;
     DB.fin.unshift({_id:novoId(),data:hjISO,vencimento:venc,op:id,tipo,categoria:'',fixo:false,empresa:'WindGate',
-      desc,valor:+(+valor).toFixed(2),status:'Previsto',comp:'',nf:'',por:eu,origem:marca});
+      desc,valor:+(+valor).toFixed(2),status:'Previsto',comp:'',nf:'',por:eu,origem:marca, ...(extra||{})});
   };
   // Do último para o primeiro: unshift inverte, e assim a lista fica em ordem.
   for(let k=CRONO_OP.length-1;k>=0;k--){
     const venc=somaDias(hjISO,CRONO_OP[k].dias);
+    if(k===2) lancar(venc,'Despesa','ICMS DIFAL — repasse à SEFAZ (valor previsto, confirmar na guia)',difal,{categoria:'Imposto importação'});
     lancar(venc,'Despesa',CRONO_OP[k].rot+' pagamento — '+descPag[k],paga[k]);
     lancar(venc,'Receita',CRONO_OP[k].rot+' recebimento do cliente — parcela '+CRONO_OP[k].rot.replace('º',''),recebe[k]);
   }
