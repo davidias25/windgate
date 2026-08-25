@@ -7,3 +7,6 @@ credentials-drive.json
 data/db.json
 data/db.json.bak
 backups/
+
+# propostas geradas para clientes — não versionar
+Proposta_*.pdf

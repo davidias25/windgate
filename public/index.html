@@ -813,6 +813,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>Qtd. containers</label><input type="number" id="qtdCntr" value="1" min="0"></div>
           <div><label>Prazo estimado (dias)</label><input type="number" id="prazo" value="60"></div>
           <div><label>Validade da proposta (dias)</label><input type="number" id="validade" value="7"></div>
+          <div><label>Data de validade do frete</label><input type="date" id="validadeFrete"></div>
         </div>
       </section>
 
@@ -2139,7 +2140,7 @@ function renderOps(){
    agora que a aba Docs não existe. Aparecem aqui até serem vinculados. */
 function renderDocsSemOp(){
   const box=$('docsSemOp'); if(!box) return;
-  const soltos=(DB.docs||[]).filter(d=>d && !d.op);
+  const soltos=(DB.docs||[]).filter(d=>d && !d.op && docVisivel(d));
   if(!soltos.length){ box.style.display='none'; return; }
   box.style.display='block';
   box.innerHTML=`<h2>📎 Documentos sem operação <span class="spacer"></span><span class="note">${soltos.length} — escolha a operação de cada um</span></h2>
@@ -2156,6 +2157,7 @@ function renderDocsSemOp(){
 function vincularDocOp(id,op){
   if(!op) return;
   const d=DB.docs.find(x=>x && x._id===id);
+  if(d && !docVisivel(d)){ toast('🔒 Documento restrito — só Samir e Davi'); return; }
   if(!d) return;
   d.op=op;
   if(!d.grupo) d.grupo='outros';
@@ -2460,9 +2462,17 @@ function addChkItem(){
 const DOC_GRUPOS=[
   {k:'embarque', l:'Docs de embarque', ic:'📦', tipos:['Invoice','Packing List','BL']},
   {k:'chegada',  l:'Docs de chegada',  ic:'🛬', tipos:['DUIMP','AFRMM','NF de Entrada','NF de Saída']},
+  // Contrato traz preço fechado, margem e condição de pagamento — mesma
+  // restrição do Financeiro, que hoje é Samir e Davi.
+  {k:'contratos',l:'Contratos',        ic:'📜', tipos:['Contrato de câmbio','Contrato com o cliente','Contrato com o fornecedor','Aditivo'], restrito:true},
   {k:'outros',   l:'Outros documentos',ic:'📎', tipos:[]}
 ];
-const grupoMeta = k => DOC_GRUPOS.find(g=>g.k===k) || DOC_GRUPOS[2];
+const grupoMeta = k => DOC_GRUPOS.find(g=>g.k===k) || DOC_GRUPOS[DOC_GRUPOS.length-1];
+/* Quem enxerga documento restrito. Está preso ao mesmo acesso do Financeiro —
+   mudar aqui muda em todo lugar que trata documento. */
+const podeVerRestrito = () => !!(USER && USER.fin);
+const grupoVisivel = g => !g.restrito || podeVerRestrito();
+const docVisivel = d => grupoVisivel(grupoMeta(grupoDoDoc(d)));
 
 /* Categorias antigas → bloco e tipo novos, para nenhum documento já lançado
    ficar órfão quando a aba Docs deixa de existir. */
@@ -2475,7 +2485,7 @@ const DOC_CAT_LEGADO={
   'AFRMM':['chegada','AFRMM'],
   'NF':['chegada','NF de Entrada']
 };
-const docsDaOp = op => DB.docs.filter(d=>d && d.op===op);
+const docsDaOp = op => DB.docs.filter(d=>d && d.op===op && docVisivel(d));
 
 /* A migração grava `grupo` em cada documento, mas ela roda no navegador de cada
    usuário. Enquanto alguém ainda não abriu a versão nova, o bloco é deduzido da
@@ -2501,7 +2511,7 @@ function openOpDocsModal(op){
   const o = DB.ops.find(x=>x && x.id===op);
   const todos = docsDaOp(op);
 
-  const blocos = DOC_GRUPOS.map(g=>{
+  const blocos = DOC_GRUPOS.filter(grupoVisivel).map(g=>{
     const doGrupo = todos.filter(d=>grupoDoDoc(d)===g.k);
     // tipos padrão + os nomes avulsos que já existem neste bloco
     const avulsos = [...new Set(doGrupo.map(d=>d.cat).filter(c=>c && !g.tipos.includes(c)))];
@@ -2696,6 +2706,7 @@ function importarArquivosStorage(){
    documentos de outro usuário, e um índice velho apagaria o documento errado. */
 async function deleteDoc(id){
   const idx = DB.docs.findIndex(d=>d && d._id===id);
+  if(idx>=0 && !docVisivel(DB.docs[idx])){ toast('🔒 Documento restrito — só Samir e Davi'); return; }
   const d = DB.docs[idx];
   if(!d) return;
 
@@ -2718,6 +2729,10 @@ async function deleteDoc(id){
 }
 /* Registrar (sem id, recebendo operação/bloco/tipo do painel) ou editar (com id). */
 function openDocModal(id, op, grupo, tipo){
+  // Documento restrito não abre para quem não tem acesso, nem pelo id direto.
+  { const alvo=id?DB.docs.find(x=>x && x._id===id):null;
+    if((alvo && !docVisivel(alvo)) || (!id && grupo && !grupoVisivel(grupoMeta(grupo)))){
+      toast('🔒 Documento restrito — só Samir e Davi'); return; } }
   const d = id ? DB.docs.find(x=>x && x._id===id) : null;
   if(id && !d){ toast('⚠ Documento não encontrado'); return; }
 
@@ -2731,9 +2746,9 @@ function openDocModal(id, op, grupo, tipo){
   openModal(`<h3>${d?'Editar':'Anexar'} <span>documento</span></h3>
     <div class="frow">
       <div><label>Operação</label><select id="m_dop">${opcoesOperacaoDoc(opAtual)}</select></div>
-      <div><label>Bloco</label><select id="m_dgrupo">${DOC_GRUPOS.map(g=>`<option value="${g.k}"${grAtual===g.k?' selected':''}>${g.ic} ${esc(g.l)}</option>`).join('')}</select></div>
+      <div><label>Bloco</label><select id="m_dgrupo">${DOC_GRUPOS.filter(grupoVisivel).map(g=>`<option value="${g.k}"${grAtual===g.k?' selected':''}>${g.ic} ${esc(g.l)}</option>`).join('')}</select></div>
       <div><label>Tipo</label><input id="m_dcat" value="${esc(tpAtual)}" placeholder="Invoice, BL, DUIMP…" list="lista_tipos_doc">
-        <datalist id="lista_tipos_doc">${DOC_GRUPOS.flatMap(g=>g.tipos).map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+        <datalist id="lista_tipos_doc">${DOC_GRUPOS.filter(grupoVisivel).flatMap(g=>g.tipos).map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
       </div>
       <div><label>Status</label><select id="m_dst">${['pendente','recebido','revisado','aprovado'].map(s=>`<option${st===s?' selected':''}>${s}</option>`).join('')}</select></div>
     </div>
@@ -6335,7 +6350,7 @@ async function gerarPropostaPDF(){
     }
     // ---- DIFAL por fora: não é receita da WindGate, é guia paga à SEFAZ, e o
     // valor é previsão pela alíquota vigente — a guia fechada pode vir outra.
-    if(difalV>0){
+    if(difalV>=0){
       doc.setFillColor(252,247,227); doc.rect(36,y,523,54,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(120,95,20);
       doc.text('+ ICMS-DIFAL · valor previsto',44,y+17);
@@ -6375,7 +6390,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(30,90,60);
       doc.text('Cobertura total WindGate.',44,y+14);
       doc.setFont('helvetica','normal');
-      const gtxt=doc.splitTextToSize('Todos os custos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no endereço final. Nenhum custo operacional adicional é repassado ao cliente.',505);
+      const gtxt=doc.splitTextToSize('Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no endereço final, nas condições e prazos descritos nesta proposta.',505);
       doc.text(gtxt,44,y+25);
       y+=56;
     }
@@ -6384,7 +6399,8 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
       doc.text('Validade e câmbio.',44,y+14);
       doc.setFont('helvetica','normal');
-      const ytxt=doc.splitTextToSize('Os valores acima são válidos por '+(V('validade')||'7')+' dias. A composição do preço acompanha a taxa de câmbio do dia de cada pagamento; qualquer variação é comunicada previamente ao cliente antes do desembolso.',505);
+      const fDate = V('validadeFrete') ? V('validadeFrete').split('-').reverse().join('/') : '[DATA_VALIDADE_FRETE]';
+      const ytxt=doc.splitTextToSize(`Os valores desta proposta são válidos por ${V('validade')||7} dias. Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente. Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, válida para embarque até ${fDate}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.`,505);
       doc.text(ytxt,44,y+25);
     }
     // Página só existe se sobrou conteúdo para ela. Os rodapés são desenhados
@@ -6450,7 +6466,9 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8); doc.setTextColor(...PDF_GRAY);
       doc.text(doc.splitTextToSize(e[1],235),x+20,yy+6);
     });
-    yD=yE+Math.ceil(etapas.length/2)*46+14;   // acompanha o número de etapas
+    doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_NAVY);
+    doc.text('Prazo estimado da operação: 110 a 120 dias a partir da confirmação do pedido e do pagamento da 1ª parcela, sujeito a janelas de embarque e liberação aduaneira.', 36, yE+Math.ceil(etapas.length/2)*46+4);
+    yD=yE+Math.ceil(etapas.length/2)*46+24;   // acompanha o número de etapas
     }
     if(B.cronograma){
     yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
@@ -6469,7 +6487,7 @@ async function gerarPropostaPDF(){
     });
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
     let yN=yD+92;
-    if(difalV>0){
+    if(difalV>=0){
       doc.setFillColor(252,247,227); doc.rect(36,yN-10,523,30,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
       doc.text('+ ICMS-DIFAL na chegada · '+fmt(difalV)+' (previsto)',44,yN+2);
@@ -6478,7 +6496,7 @@ async function gerarPropostaPDF(){
       yN+=34;
     }
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
-    doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. O serviço porta a porta está contemplado — sem custos ocultos.',36,yN);
+    doc.text('Os valores das parcelas acompanham o câmbio do dia de cada pagamento. Frete internacional conforme condições de validade e variação descritas nesta proposta.',36,yN);
     }
     }
 
@@ -6491,8 +6509,8 @@ async function gerarPropostaPDF(){
     let y2=bandPDF(doc,130,'POR QUE A OPERAÇÃO COM A WINDGATE VALE MAIS',PDF_MAG);
     const perks=[
       ['Preço competitivo no par','Cotação fechada com fábrica e frete negociados em conjunto, com preço ajustado à operação.'],
-      ['Operação porta a porta','Da fábrica até o endereço final — uma única responsável por todas as etapas.'],
-      ['Custos operacionais por nossa conta','Demurrage, armazenagem, atrasos e taxas portuárias — absorvidos pela WindGate.'],
+      ['Operação porta a porta','Da fábrica até o porto — uma única responsável por todas as etapas.'],
+      ['Custos operacionais por nossa conta','Armazenagem padrão, taxas portuárias regulares e despacho aduaneiro absorvidos pela WindGate dentro das condições contratadas.'],
       ['Acompanhamento cambial transparente','A taxa de cada pagamento segue o câmbio do dia · variações comunicadas antes.'],
       ['Benefício fiscal do ICMS aplicado','Operação estruturada com benefício fiscal próprio, sem habilitação fiscal do cliente.'],
       ['Zero responsabilidade aduaneira','Importação 100% no CNPJ da trading. O cliente não assume risco de processo.'],
@@ -6574,14 +6592,14 @@ function gerarPropostaPrint(){
       ${B.itens?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px">${itens.map(it=>`<tr><td style="padding:8px;border-bottom:1px solid #EDF1F5;color:#1B2A5B;font-weight:700">${esc(it.d)}<br><span style="font-size:8.5px;color:#64707D;font-weight:400">${it.ncm?'NCM '+esc(it.ncm):''}</span></td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${it.q}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${fmt(it.unit)}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5;color:#B5106B;font-weight:800">${fmt(it.total)}</td></tr>`).join('')}</table>
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(totalWG)}</span></div>
-      ${difalV>0?`<div style="background:#FCF7E3;color:#785F14;padding:10px 14px;margin-top:8px;font-size:10px;line-height:1.6">
+      ${difalV>=0?`<div style="background:#FCF7E3;color:#785F14;padding:10px 14px;margin-top:8px;font-size:10px;line-height:1.6">
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px"><span>+ ICMS-DIFAL · valor previsto</span><span>${fmt(difalV)}</span></div>
         Não está incluído no investimento acima: é imposto do estado de destino, recolhido em guia própria à SEFAZ e não é receita da WindGate. O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.</div>
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:10px 16px;margin-top:6px;font-weight:800"><span style="font-size:10px">TOTAL ESTIMADO DA OPERAÇÃO</span><span style="font-size:14px">${fmt(R.preco||0)}</span></div>`:''}`:''}
       ${(B.fotos&&(state.fotos||[]).length)?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
       <div style="display:grid;grid-template-columns:repeat(${(state.fotos||[]).length<=2?1:2},1fr);gap:10px">${(state.fotos||[]).map(f=>`<img src="${esc(f.url)}" style="width:100%;border:1px solid #DDE4EA;object-fit:contain;background:#F5F7FA">`).join('')}</div>`:''}
-      ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega — tudo contemplado.</div>`:''}
-      ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Valores válidos por ${V('validade')||7} dias; o preço acompanha o câmbio do dia de cada pagamento.</div>`:''}
+      ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no endereço final, nas condições e prazos descritos nesta proposta.</div>`:''}
+      ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Os valores desta proposta são válidos por ${V('validade')||7} dias. Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente. Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, válida para embarque até ${(V('validadeFrete')?V('validadeFrete').split('-').reverse().join('/'):'[DATA_VALIDADE_FRETE]')}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.</div>`:''}
       ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>`:''}
       ${B.banco?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
         <div style="font-weight:800;color:#1B2A5B;font-size:13px">${esc(DADOS_BANCARIOS.titular)}</div>
