@@ -898,8 +898,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <tr><td><b>3 · Chegada ao porto</b><div class="note">frete · impostos · despesas · entrega</div></td><td class="r num" id="desO3">—</td><td><input type="number" id="desR3" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS3">—</td></tr>
           </tbody>
         </table></div>
+        <p class="note" id="desemBase" style="margin-top:6px"></p>
         <div class="warn" id="desemErr" style="display:none"></div>
-        <div class="rulebox green" id="desemOk" style="display:none"><b>✓ Regra do desembolso atendida</b> — em todas as etapas o recebimento cobre a saída, e a soma fecha com o preço aprovado. Fluxo de caixa sempre positivo.</div>
+        <div class="rulebox green" id="desemOk" style="display:none"><b>✓ Regra do desembolso atendida</b> — em todas as etapas o recebimento cobre a saída, e a soma fecha com o valor a receber. Fluxo de caixa sempre positivo.</div>
       </section>
     </div>
 
@@ -5731,19 +5732,23 @@ function updatePrice(m){
 
 
 /* ===== Cronograma de desembolso — regra: recebimento cobre a saída em toda etapa ===== */
+/* O DIFAL fica fora do desembolso dos dois lados: o cliente recolhe em guia
+   própria à SEFAZ, então ele não entra como recebimento nem sai como despesa
+   nossa. As parcelas passam a fechar com o valor da WindGate. */
+const precoDesem = () => Math.max((R.preco||0)-(R.st||0),0);
 function desemOuts(){
   const fob=R.fob||0;
   const sin=Math.min(100,Math.max(0,N('fabSinal')||30))/100;
-  const base=(R.tri?R.tri.custoGrupo:(R.custoReal||0)+(R.st||0));
+  const base=(R.tri?R.tri.custoGrupo:(R.custoReal||0));
   const o1=fob*sin, o2=fob*(1-sin), o3=Math.max(base-fob,0);
   return {o1,o2,o3,base};
 }
 function desemSugerir(){
   if(!(R.preco>0)){ toast('⚠ Complete a cotação primeiro.'); return; }
   const {o1,o2,o3}=desemOuts();
-  const M=Math.max((R.preco||0)-(o1+o2+o3),0);          // margem total
+  const M=Math.max(precoDesem()-(o1+o2+o3),0);          // margem total
   const r1=o1+M*0.21, r2=o2+M*0.14;                     // ~35% da margem nas 2 primeiras
-  const r3=(R.preco||0)-r1-r2;
+  const r3=precoDesem()-r1-r2;
   $('desR1').value=r1.toFixed(2); $('desR2').value=r2.toFixed(2); $('desR3').value=r3.toFixed(2);
   desemCheck(); toast('⚖ Distribuição sugerida: 35% da margem já nas parcelas 1 e 2.');
 }
@@ -5755,7 +5760,7 @@ function desemErrors(){
   if(r1<o1-0.01) errs.push('Parcela 1 ('+fmt(r1)+') MENOR que a saída da etapa ('+fmt(o1)+') — o cliente precisa cobrir o sinal da fábrica.');
   if(r2<o2-0.01) errs.push('Parcela 2 ('+fmt(r2)+') MENOR que o saldo da fábrica ('+fmt(o2)+').');
   if(r3<o3-0.01) errs.push('Parcela 3 ('+fmt(r3)+') MENOR que os custos de chegada ('+fmt(o3)+').');
-  if(Math.abs((r1+r2+r3)-(R.preco||0))>0.05) errs.push('A soma das parcelas ('+fmt(r1+r2+r3)+') difere do preço aprovado ('+fmt(R.preco||0)+').');
+  if(Math.abs((r1+r2+r3)-precoDesem())>0.05) errs.push('A soma das parcelas ('+fmt(r1+r2+r3)+') difere do valor a receber ('+fmt(precoDesem())+(R.st>0?' = preço aprovado '+fmt(R.preco||0)+' − DIFAL '+fmt(R.st||0):'')+').');
   return errs;
 }
 function desemCheck(){
@@ -5770,6 +5775,10 @@ function desemCheck(){
       ? '<span class="pill ok">cobre ✓ (+'+fmt(r-os[i])+')</span>'
       : '<span class="pill red travada-tag">NÃO cobre</span>';
   });
+  { const b=$('desemBase');
+    if(b) b.innerHTML = (R.st||0)>0
+      ? `As parcelas fecham com <b>${fmt(precoDesem())}</b> — preço aprovado ${fmt(R.preco||0)} menos o ICMS-DIFAL ${fmt(R.st||0)}, que o cliente recolhe em guia própria à SEFAZ e não passa pelo nosso caixa.`
+      : `As parcelas fecham com <b>${fmt(precoDesem())}</b>, o preço aprovado.`; }
   const errs=desemErrors();
   const bloqueia=errs.length&&(rs[0]||rs[1]||rs[2]);
   $('desemErr').style.display=bloqueia?'block':'none';
@@ -5883,14 +5892,12 @@ function criarOpDaCotacao(){
   // melhor uma data para cobrar do que três linhas zeradas.
   if(recebe.reduce((a,b)=>a+b,0)<=0){ recebe[0]=R.preco||0; recebe[1]=0; recebe[2]=0; }
 
-  // O DIFAL sai da 3ª parcela e vira lançamento próprio: ele não é custo da
-  // WindGate, é repasse à SEFAZ, e o valor é estimativa — a guia fechada pode
-  // vir diferente. Junto no mesmo saco, ninguém saberia quanto conferir.
-  const difal=Math.min(R.st||0, paga[2]);
-  paga[2]=Math.max(paga[2]-difal,0);
+  // O DIFAL não entra no cronograma: o cliente recolhe direto à SEFAZ, então
+  // ele não é recebimento nosso nem saída nossa. desemOuts() já devolve a
+  // etapa 3 sem ele — subtrair de novo aqui tiraria o valor duas vezes.
   const descPag=['Sinal da fábrica ('+(N('fabSinal')||30)+'% do FOB)',
                  'Saldo da fábrica · pré-embarque',
-                 'Custos de chegada — impostos de importação, frete e despesas'];
+                 'Custos de chegada — impostos de importação, frete e despesas'];  // sem o DIFAL
   const lancar=(venc,tipo,desc,valor,extra)=>{
     if(!(valor>0)) return;
     DB.fin.unshift({_id:novoId(),data:hjISO,vencimento:venc,op:id,tipo,categoria:'',fixo:false,empresa:'WindGate',
@@ -5899,7 +5906,6 @@ function criarOpDaCotacao(){
   // Do último para o primeiro: unshift inverte, e assim a lista fica em ordem.
   for(let k=CRONO_OP.length-1;k>=0;k--){
     const venc=somaDias(hjISO,CRONO_OP[k].dias);
-    if(k===2) lancar(venc,'Despesa','ICMS DIFAL — repasse à SEFAZ (valor previsto, confirmar na guia)',difal,{categoria:'Imposto importação'});
     lancar(venc,'Despesa',CRONO_OP[k].rot+' pagamento — '+descPag[k],paga[k]);
     lancar(venc,'Receita',CRONO_OP[k].rot+' recebimento do cliente — parcela '+CRONO_OP[k].rot.replace('º',''),recebe[k]);
   }
@@ -6474,7 +6480,7 @@ async function gerarPropostaPDF(){
     yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
     const recs=[[N('desR1'),'PARCELA 01','Assinatura · libera a produção'],
                 [N('desR2'),'PARCELA 02','Produto pronto · pré-embarque'],
-                [Math.max(N('desR3')-difalV,0),'PARCELA 03','Chegada ao porto · liberação e entrega']];
+                [N('desR3'),'PARCELA 03','Chegada ao porto · liberação e entrega']];   // já sem o DIFAL
     let xD=36;
     recs.forEach(r=>{
       doc.setDrawColor(221,228,234); doc.setLineWidth(.8); doc.rect(xD,yD+14,167.7,64);
