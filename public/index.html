@@ -891,11 +891,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div style="grid-column:span 3"><p class="note" style="margin-top:16px">Padrão das fábricas: <b>30%</b> para iniciar a produção e <b>70%</b> na finalização. A regra WindGate: <b>o recebimento do cliente em cada etapa SEMPRE cobre a nossa saída</b> — e 30–40% da margem entra já nas duas primeiras parcelas.</p></div>
         </div>
         <div style="overflow-x:auto"><table>
-          <thead><tr><th>Etapa</th><th class="r">Nossa saída (auto)</th><th class="r">Recebimento do cliente (R$)</th><th>Situação</th></tr></thead>
+          <thead><tr><th>Etapa</th><th class="r">Nossa saída (auto)</th><th class="r">% do total</th><th class="r">Recebimento do cliente (R$)</th><th>Situação</th></tr></thead>
           <tbody>
-            <tr><td><b>1 · Assinatura</b><div class="note">sinal à fábrica → produção</div></td><td class="r num" id="desO1">—</td><td><input type="number" id="desR1" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS1">—</td></tr>
-            <tr><td><b>2 · Produto pronto</b><div class="note">saldo à fábrica · pré-embarque</div></td><td class="r num" id="desO2">—</td><td><input type="number" id="desR2" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS2">—</td></tr>
-            <tr><td><b>3 · Chegada ao porto</b><div class="note">frete · impostos · despesas · entrega</div></td><td class="r num" id="desO3">—</td><td><input type="number" id="desR3" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS3">—</td></tr>
+            <tr><td><b>1 · Assinatura</b><div class="note">sinal à fábrica → produção</div></td><td class="r num" id="desO1">—</td><td><input type="number" id="desP1" step="0.1" oninput="desemPct(1)" style="max-width:86px;margin-left:auto" title="participação desta parcela no valor a receber"></td><td><input type="number" id="desR1" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS1">—</td></tr>
+            <tr><td><b>2 · Produto pronto</b><div class="note">saldo à fábrica · pré-embarque</div></td><td class="r num" id="desO2">—</td><td><input type="number" id="desP2" step="0.1" oninput="desemPct(2)" style="max-width:86px;margin-left:auto" title="participação desta parcela no valor a receber"></td><td><input type="number" id="desR2" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS2">—</td></tr>
+            <tr><td><b>3 · Chegada ao porto</b><div class="note">frete · impostos · despesas · entrega</div></td><td class="r num" id="desO3">—</td><td><input type="number" id="desP3" step="0.1" oninput="desemPct(3)" style="max-width:86px;margin-left:auto" title="participação desta parcela no valor a receber"></td><td><input type="number" id="desR3" step="0.01" oninput="desemCheck()" style="max-width:170px;margin-left:auto"></td><td id="desS3">—</td></tr>
           </tbody>
         </table></div>
         <p class="note" id="desemBase" style="margin-top:6px"></p>
@@ -5763,6 +5763,15 @@ function desemErrors(){
   if(Math.abs((r1+r2+r3)-precoDesem())>0.05) errs.push('A soma das parcelas ('+fmt(r1+r2+r3)+') difere do valor a receber ('+fmt(precoDesem())+(R.st>0?' = preço aprovado '+fmt(R.preco||0)+' − DIFAL '+fmt(R.st||0):'')+').');
   return errs;
 }
+/* Digitar a porcentagem escreve o valor da parcela; digitar o valor devolve a
+   porcentagem. Os dois campos são a mesma informação em unidades diferentes. */
+function desemPct(n){
+  const base=precoDesem();
+  if(!(base>0)){ toast('⚠ Complete a cotação primeiro.'); return; }
+  const el=$('desP'+n); if(!el) return;
+  $('desR'+n).value=(base*(parseFloat(el.value)||0)/100).toFixed(2);
+  desemCheck();
+}
 function desemCheck(){
   if(!$('desO1')) return;
   const {o1,o2,o3}=desemOuts();
@@ -5775,10 +5784,23 @@ function desemCheck(){
       ? '<span class="pill ok">cobre ✓ (+'+fmt(r-os[i])+')</span>'
       : '<span class="pill red travada-tag">NÃO cobre</span>';
   });
-  { const b=$('desemBase');
-    if(b) b.innerHTML = (R.st||0)>0
-      ? `As parcelas fecham com <b>${fmt(precoDesem())}</b> — preço aprovado ${fmt(R.preco||0)} menos o ICMS-DIFAL ${fmt(R.st||0)}, que o cliente recolhe em guia própria à SEFAZ e não passa pelo nosso caixa.`
-      : `As parcelas fecham com <b>${fmt(precoDesem())}</b>, o preço aprovado.`; }
+  // Reescreve as porcentagens a partir dos valores, sem mexer no campo que
+  // está sendo digitado — senão o número muda debaixo do dedo.
+  { const base=precoDesem();
+    rs.forEach((r,i)=>{ const el=$('desP'+(i+1));
+      if(!el || el===document.activeElement) return;
+      el.value = base>0 && r ? (r/base*100).toFixed(1) : '';
+    });
+  }
+  { const b=$('desemBase'), base=precoDesem(), soma=rs.reduce((a,x)=>a+x,0);
+    const pct = (base>0 && soma)
+      ? (Math.abs(soma-base)<=0.05
+          ? ' <span class="pill ok">as 3 somam 100%</span>'
+          : ` <span class="pill red travada-tag">as 3 somam ${(soma/base*100).toFixed(1)}%</span>`)
+      : '';
+    if(b) b.innerHTML = ((R.st||0)>0
+      ? `As parcelas fecham com <b>${fmt(base)}</b> — preço aprovado ${fmt(R.preco||0)} menos o ICMS-DIFAL ${fmt(R.st||0)}, que o cliente recolhe em guia própria à SEFAZ e não passa pelo nosso caixa.`
+      : `As parcelas fecham com <b>${fmt(base)}</b>, o preço aprovado.`) + pct; }
   const errs=desemErrors();
   const bloqueia=errs.length&&(rs[0]||rs[1]||rs[2]);
   $('desemErr').style.display=bloqueia?'block':'none';
