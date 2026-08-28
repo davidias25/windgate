@@ -4093,7 +4093,7 @@ function renderAgenda(){
       <td>${late?'<span class="pill red travada-tag">'+pr+'</span>':pr}</td>
       <td><span class="pill prio-${nrm(t.prio)}">${esc(t.prio)}</span></td>
       <td class="note">${esc(t.obs||'')}</td><td class="note">${esc(t.por||'')}</td>
-      <td><button class="del" onclick="agDel('${id}')">✕</button></td></tr>`
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="openAgendaTaskModal('${id}')">Editar</button> <button class="del" onclick="agDel('${id}')">✕</button></td></tr>`
       + (aberto?agSubRow(t,id,subs):'');
   }).join('');
   marcarTarefasVistas();
@@ -4117,23 +4117,44 @@ function agDel(id){
   if(i<0){ toast('⚠ Tarefa não encontrada'); return; }
   DB.agendaTasks.splice(i,1); saveDB(); renderAgenda(); updateNotifs();
 }
-function openAgendaTaskModal(){
-  openModal(`<h3>Nova tarefa na <span>agenda</span></h3>
-    <div class="frow"><div style="grid-column:span 3"><label>Tarefa</label><input id="m_agt" placeholder="Ex.: Pagar bônus de Matheus e Davi dia 30"></div></div>
+/* O mesmo modal cria e edita: com `editId` preenchido, salva por cima da
+   tarefa em vez de criar outra. */
+function openAgendaTaskModal(editId){
+  const t = editId ? (DB.agendaTasks||[]).find(x=>x && x._id===editId) : null;
+  if(editId && !t){ toast('⚠ Tarefa não encontrada'); renderAgenda(); return; }
+  const respAtual = t ? t.resp : (USER?USER.nome.split(' ')[0]:'');
+  openModal(`<h3>${t?'Editar tarefa da':'Nova tarefa na'} <span>agenda</span></h3>
+    <div class="frow"><div style="grid-column:span 3"><label>Tarefa</label><input id="m_agt" value="${t?esc(t.t||''):''}" placeholder="Ex.: Pagar bônus de Matheus e Davi dia 30"></div></div>
     <div class="frow">
-      <div><label>Responsável</label><select id="m_agresp">${['Samir','Davi','Ívina','Matheus'].map(r=>`<option ${USER&&USER.nome.startsWith(r)?'selected':''}>${r}</option>`).join('')}</select></div>
-      <div><label>Prazo</label><input type="date" id="m_agprazo"></div>
-      <div><label>Hora <span style="opacity:.55;font-weight:400">· opcional</span></label><input type="time" id="m_aghora"></div>
+      <div><label>Responsável</label><select id="m_agresp">${AG_RESP.map(r=>`<option${r===respAtual?' selected':''}>${r}</option>`).join('')}</select></div>
+      <div><label>Prazo</label><input type="date" id="m_agprazo" value="${t?esc(t.prazo||''):''}"></div>
+      <div><label>Hora <span style="opacity:.55;font-weight:400">· opcional</span></label><input type="time" id="m_aghora" value="${t?esc(t.hora||''):''}"></div>
     </div>
     <div class="frow">
-      <div><label>Prioridade</label><select id="m_agprio"><option>Alta</option><option selected>Média</option><option>Baixa</option></select></div>
-      <div style="grid-column:span 2"><label>Observação</label><input id="m_agobs"></div>
+      <div><label>Prioridade</label><select id="m_agprio">${['Alta','Média','Baixa'].map(x=>`<option${x===(t?t.prio:'Média')?' selected':''}>${x}</option>`).join('')}</select></div>
+      <div style="grid-column:span 2"><label>Observação</label><input id="m_agobs" value="${t?esc(t.obs||''):''}"></div>
     </div>
-    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveAgendaTask()">Adicionar</button></div>`);
+    ${t&&agSubs(t).length?`<p class="note">${agSubs(t).length} subtarefa(s) — editadas na própria linha, ao abrir a tarefa.</p>`:''}
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="saveAgendaTask(${t?`'${esc(editId)}'`:''})">${t?'Salvar alterações':'Adicionar'}</button></div>`);
 }
-function saveAgendaTask(){
+function saveAgendaTask(editId){
   if(!V('m_agt')){ toast('⚠ Descreva a tarefa'); return; }
   const eu=USER.nome.split(' ')[0], resp=V('m_agresp');
+  if(editId){
+    const t=(DB.agendaTasks||[]).find(x=>x && x._id===editId);
+    if(!t){ toast('⚠ Tarefa não encontrada — talvez tenha sido apagada'); closeModal(); renderAgenda(); return; }
+    const prazoE=V('m_agprazo'), mudouDono=t.resp!==resp;
+    Object.assign(t,{t:V('m_agt'),resp,prazo:prazoE,hora:prazoE?V('m_aghora'):'',
+      prio:V('m_agprio'),obs:V('m_agobs')});
+    // Passar a tarefa para outra pessoa a devolve ao estado de não vista, senão
+    // ela mudaria de dono sem ninguém ser avisado.
+    if(mudouDono) t.vistoEm = resp===eu ? new Date().toISOString() : null;
+    saveDB(); closeModal(); renderAgenda(); updateNotifs();
+    toast(mudouDono && resp!==eu
+      ? `Tarefa passada para <b>${esc(resp)}</b> — ele(a) será notificado(a) ✓`
+      : 'Tarefa atualizada ✓');
+    return;
+  }
   // `vistoEm` vazio é o que faz a tarefa aparecer como nova para o responsável.
   // Quem atribui para si mesmo já sabe da tarefa, então nasce como vista.
   // Hora só faz sentido presa a uma data: sem prazo ela é descartada.
