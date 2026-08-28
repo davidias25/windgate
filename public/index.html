@@ -1434,17 +1434,23 @@ let DB = null;
 let USER = null;          // usuário logado
 let state = {items:[],exps:[],fotos:[],blocos:null,status:'draft',id:null,criadoPor:null,aprovadoPor:null,editando:false}; // cotação em edição
 
+/* Etapas da operação, na ordem do fluxo. Fonte única: o select do painel, os
+   quadros de contagem, o mapa e as cores dos cartões saem todos daqui.
+   `tile` é o rótulo curto de quem aparece na contagem por etapa — etapa sem
+   `tile` existe no fluxo mas não ganha quadro próprio. */
 const STATUS_OP = [
   {k:'cotacao',    l:'Cotação',              c:'#8FA0BC'},
   {k:'contrato',   l:'Contrato / Fechamento',c:'#22B8CF'},
-  {k:'producao',   l:'Em produção',          c:'#F0B429'},
-  {k:'embarcado',  l:'Embarcado · Em trânsito',c:'#2563EB'},
-  {k:'chegada',    l:'Chegada · Desembaraço',c:'#9B6EF3'},
-  {k:'logistica',  l:'Logística nacional',   c:'#E91E63'},
-  {k:'documentacao',l:'Trâmite documental',  c:'#6E9BFF'},
+  {k:'producao',   l:'Em produção',          c:'#F0B429', tile:'Em produção'},
+  {k:'preparacao_embarque',     l:'Em preparação p/ embarque', c:'#F97316', tile:'Preparando embarque'},
+  {k:'container_enviado_porto', l:'Container enviado ao porto',c:'#14B8A6', tile:'Cntr. no porto'},
+  {k:'embarcado',  l:'Embarcado · Em trânsito',c:'#2563EB', tile:'Em trânsito'},
+  {k:'chegada',    l:'Chegada · Desembaraço',c:'#9B6EF3', tile:'Desembaraço'},
+  {k:'logistica',  l:'Logística nacional',   c:'#E91E63', tile:'Log. nacional'},
+  {k:'documentacao',l:'Trâmite documental',  c:'#6E9BFF', tile:'Documentação'},
   {k:'entregue',   l:'Entregue',             c:'#34C77C'},
   {k:'concluida',  l:'Concluída',            c:'#34C77C'},
-  {k:'travada',    l:'⚠ Travada',            c:'#FF5A6E'}
+  {k:'travada',    l:'⚠ Travada',            c:'#FF5A6E', tile:'Travadas'}
 ];
 const stMeta = k => STATUS_OP.find(s=>s.k===k)||STATUS_OP[0];
 
@@ -2100,12 +2106,7 @@ function renderOps(){
     const sr=$('opStats'); if(sr) sr.innerHTML='';
     const tiles=[
       {n:ativos,l:'Operações ativas',c:'#E91E63'},
-      {n:counts.producao||0,l:'Em produção',c:'#F0B429'},
-      {n:counts.embarcado||0,l:'Em trânsito',c:'#2563EB'},
-      {n:counts.chegada||0,l:'Desembaraço',c:'#9B6EF3'},
-      {n:counts.logistica||0,l:'Log. nacional',c:'#E91E63'},
-      {n:counts.documentacao||0,l:'Documentação',c:'#6E9BFF'},
-      {n:counts.travada||0,l:'Travadas',c:'#FF5A6E'}
+      ...STATUS_OP.filter(s=>s.tile).map(s=>({n:counts[s.k]||0,l:s.tile,c:s.c}))
     ];
     if(sr){
       tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div></div>`; });
@@ -4904,6 +4905,15 @@ function computeNotifs(){
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
   DB.ops.filter(o=>o.status==='travada').forEach(o=>n.push({tab:'painel',ic:'⚠️',tx:`Operação <b>${esc(o.id)}</b> está <b style="color:var(--red)">travada</b>`,tg:'Painel'}));
 
+  /* Contêiner no porto é a janela curta em que booking, BL e rastreio precisam
+     estar fechados. Cobra quem responde pela operação e quem cuida de frete &
+     tracking — pelo papel, não pelo nome, para o aviso seguir a função. */
+  const cuidaTracking = /tracking|log[íi]stica|frete/i.test((USER.papel)||'');
+  DB.ops.filter(o=>o.status==='container_enviado_porto').forEach(o=>{
+    if(o.resp!==eu && !cuidaTracking) return;
+    n.push({tab:'painel',ic:'📦',tx:`Operação <b>${esc(o.id)}</b> — contêiner no porto, <b>aguardando embarque</b>${o.navio?` · navio ${esc(o.navio)}`:''}`,tg:'Painel'});
+  });
+
   /* ---- Notificações Financeiras (Contas a Pagar — status Previsto) ---- */
   if(USER.fin && (DB.fin||[]).length > 0){
     const dTom = new Date(); dTom.setDate(dTom.getDate()+1);
@@ -5138,8 +5148,12 @@ function opWhere(o){
   const hj=new Date();
   const P=portosTodos();
   const orig=P[o.origemPorto], dest=P[o.destinoPorto], fab=GEO.cidades[o.fabricaCidade];
-  const early=['cotacao','contrato','producao'];
+  const early=['cotacao','contrato','producao','preparacao_embarque'];
   if(early.includes(o.status)) return fab?{lat:fab[0],lon:fab[1],modo:'🏭 Na fábrica · '+o.fabricaCidade}:(orig?{lat:orig[0],lon:orig[1],modo:'🏭 Região de origem'}:null);
+  // Contêiner entregue no porto de origem: ainda em terra, esperando o navio.
+  if(o.status==='container_enviado_porto')
+    return orig?{lat:orig[0],lon:orig[1],modo:'📦 No porto de origem · aguardando embarque'}
+               :(fab?{lat:fab[0],lon:fab[1],modo:'📦 A caminho do porto'}:null);
   if(o.status==='embarcado'){
     if(!orig||!dest) return null;
     let t=.5, fonte='estimado pelo ETA';
