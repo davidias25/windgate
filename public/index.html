@@ -547,6 +547,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .chk-inline input{width:auto;margin:0}
 .op-prazo{font-size:11px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
 .op-prazo.late{color:var(--red)}
+.op-prazo.edit{cursor:pointer;border-bottom:1px dashed currentColor}
+.op-prazo.edit:hover{opacity:.75}
 .op-est{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);border-radius:20px;padding:1px 6px}
 .stat .sub{font-size:9.5px;font-weight:800;color:var(--red);margin-top:3px;letter-spacing:.04em}
 .ops-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
@@ -1526,9 +1528,11 @@ function opPrazoChip(o){
   const cor = p.sit==='atrasado'?'var(--red)':p.sit==='atencao'?'var(--amber)':'var(--mut)';
   const txt = p.prazo==null ? `${p.dias} dia(s) na etapa`
                             : `${p.dias} / ${p.prazo} dias${p.atraso?` · +${p.atraso}`:''}`;
-  const dica = `Nesta etapa desde ${dataBR(p.inicio)}${p.estimado?' — data estimada pela migração, ainda não confirmada':''}`;
-  return `<span class="op-prazo${p.sit==='atrasado'?' late':''}" style="color:${cor}" title="${esc(dica)}">⏱ ${txt}`
-       + (p.estimado?' <span class="op-est" title="Data herdada da migração">estimada</span>':'') + '</span>';
+  const pode=podeAjustarStatus();
+  const dica = `Nesta etapa desde ${dataBR(p.inicio)}${p.estimado?' — data estimada, ainda não confirmada':''}${pode?' · clique para corrigir o dia':''}`;
+  const clique = pode?` role="button" tabindex="0" onclick="event.stopPropagation();openDiaModal('${esc(o.id)}')"`:'';
+  return `<span class="op-prazo${p.sit==='atrasado'?' late':''}${pode?' edit':''}" style="color:${cor}" title="${esc(dica)}"${clique}>⏱ ${txt}`
+       + (p.estimado?' <span class="op-est" title="Data estimada — clique para confirmar">estimada</span>':'') + '</span>';
 }
 
 /* Ajustar a data de início da etapa reescreve a contagem de prazo e o histórico,
@@ -2391,6 +2395,44 @@ function opGrupo(o){
 /* "Início do status atual": a contagem de prazo não pode ficar presa à data em
    que o sistema carimbou. Quem não pode ajustar continua vendo desde quando a
    etapa corre — o número é de todos, a caneta é de quem responde. */
+/* Dizer "está no dia 18" é mais direto do que calcular que dia era 18 dias
+   atrás — os dois campos são a mesma informação, então andam juntos. */
+const diaParaData = n => {
+  const d=new Date(); d.setDate(d.getDate()-Math.max(0,Math.round(+n)||0));
+  return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+};
+function sincDia(idDia,idData){ const a=$(idDia),b=$(idData); if(a&&b) b.value=diaParaData(a.value); }
+function sincData(idData,idDia){ const a=$(idData),b=$(idDia); if(!a||!b) return; const n=diasCorridos(a.value); if(n!=null) b.value=n; }
+
+/* Atalho a partir do contador no cartão: corrigir o dia de uma operação não
+   deveria custar percorrer o formulário inteiro da operação. */
+function openDiaModal(id){
+  const o=(DB.ops||[]).find(x=>x.id===id); if(!o) return;
+  if(!podeAjustarStatus()){ toast('⚠ Só Samir e Davi ajustam a contagem'); return; }
+  const p=opPrazo(o), desde=o.statusEm?String(o.statusEm).slice(0,10):agHoje();
+  openModal(`<h3>Contagem de <span>${esc(stMeta(o.status).l)}</span> · ${esc(o.id)}</h3>
+    <p class="note">${esc(o.nome||'')}${o.cliente?' · '+esc(o.cliente):''}${p&&p.prazo!=null?` — prazo de <b>${p.prazo}</b> dia(s).`:' — etapa sem prazo acordado.'}${o.statusEstimado?' <b style="color:var(--amber)">Data estimada</b>, ainda não confirmada.':''}</p>
+    <div class="frow">
+      <div><label>Está no dia</label><input type="number" min="0" step="1" id="q_dia" value="${p?p.dias:0}" oninput="sincDia('q_dia','q_since')"></div>
+      <div><label>Começou em</label><input type="date" id="q_since" max="${agHoje()}" value="${esc(desde)}" oninput="sincData('q_since','q_dia')"></div>
+    </div>
+    <div class="frow"><div style="grid-column:1/-1"><label>Motivo <span style="opacity:.55;font-weight:400">· opcional, fica no histórico</span></label><input id="q_why" placeholder="Ex.: entrou em produção em 12/08"></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="salvarDia('${esc(id)}')">Salvar contagem</button>
+    </div>`);
+}
+function salvarDia(id){
+  const o=(DB.ops||[]).find(x=>x.id===id); if(!o) return;
+  if(!podeAjustarStatus()){ toast('⚠ Sem permissão'); return; }
+  const iso=V('q_since'), erro=opInicioInvalido(o,iso);
+  if(erro){ toast('⚠ '+erro); return; }
+  const mudou=opAjustarInicio(o,iso,V('q_why'));
+  delete o.statusEstimado;             // salvar aqui é confirmar a data
+  saveDB(); closeModal(); renderOps(); updateNotifs();
+  toast(mudou?`${esc(id)} agora no dia <b>${diasCorridos(iso)}</b> de ${esc(stMeta(o.status).l)} ✓`:'Data confirmada ✓');
+}
+
 function opInicioCampo(o){
   const p=opPrazo(o);
   const desde = o.statusEm ? String(o.statusEm).slice(0,10) : agHoje();
@@ -2400,8 +2442,9 @@ function opInicioCampo(o){
   if(!podeAjustarStatus())
     return `<p class="note">⏱ Nesta etapa desde <b>${dataBR(desde)}</b> — ${resumo}.${o.statusEstimado?' <b>Data estimada</b>, ainda não confirmada.':''}<br>Só Samir e Davi ajustam essa data.</p>`;
   return `<div class="frow">
-      <div><label>Início do status atual</label><input type="date" id="m_opsince" max="${agHoje()}" value="${esc(desde)}"></div>
-      <div style="grid-column:span 2"><label>Motivo do ajuste <span style="opacity:.55;font-weight:400">· opcional, fica no histórico</span></label><input id="m_opsincewhy" placeholder="Ex.: status trocado por engano em 12/08"></div>
+      <div><label>Está no dia <span style="opacity:.55;font-weight:400">· da etapa</span></label><input type="number" min="0" step="1" id="m_opdia" value="${p?p.dias:0}" oninput="sincDia('m_opdia','m_opsince')"></div>
+      <div><label>Início do status atual</label><input type="date" id="m_opsince" max="${agHoje()}" value="${esc(desde)}" data-orig="${esc(desde)}" oninput="sincData('m_opsince','m_opdia')"></div>
+      <div><label>Motivo do ajuste <span style="opacity:.55;font-weight:400">· opcional, fica no histórico</span></label><input id="m_opsincewhy" placeholder="Ex.: status trocado por engano em 12/08"></div>
     </div>
     <p class="note">⏱ ${resumo}.${o.statusEstimado?' <b style="color:var(--amber)">Data estimada</b> pela migração — confirme salvando.':''} ${(DB.opStatusHist||[]).some(h=>h.op===o.id)?`<a href="#" onclick="event.preventDefault();openOpHistModal('${esc(o.id)}')" style="color:#7FA6FF">ver histórico de etapas</a>`:''}</p>`;
 }
@@ -2543,12 +2586,16 @@ function saveOp(id){
     const novoSt=V('m_opst');
     const inicioForm = (o && podeAjustarStatus() && $('m_opsince')) ? V('m_opsince') : '';
     const motivo = $('m_opsincewhy') ? V('m_opsincewhy') : '';
+    // O campo vem preenchido com o início da etapa ATUAL. Se mudar de etapa sem
+    // ninguém tocar nele, esse valor é do passado e não pode virar o começo da
+    // etapa nova — só vale quando o usuário digitou.
+    const inicioTocado = !!($('m_opsince') && $('m_opsince').value !== $('m_opsince').dataset.orig);
 
     if(o && inicioForm){
       const erro=opInicioInvalido(o,inicioForm);
       if(erro){ toast('⚠ '+erro); return; }
     }
-    _opPend={nid,data,novoSt,inicioForm,motivo};
+    _opPend={nid,data,novoSt,inicioForm,motivo,inicioTocado};
 
     // Voltar a uma etapa por onde a operação já passou, pouco depois de ter
     // saído dela, quase sempre é conserto de engano — e reiniciar a contagem
@@ -2584,18 +2631,20 @@ function perguntarReversao(o,novoSt,anterior){
 function saveOpAplicar(escolha){
   try{
     if(!_opPend) return;
-    const {nid,data,novoSt,inicioForm,motivo}=_opPend; _opPend=null;
+    const {nid,data,novoSt,inicioForm,motivo,inicioTocado}=_opPend; _opPend=null;
     let o=DB.ops.find(x=>x.id===nid);
     const novo=!o;
     if(o) Object.assign(o,data);
     else { o=Object.assign({criadaEm:new Date().toISOString()},data); DB.ops.push(o); }
 
     const mudou = o.status!==novoSt;
-    const em = escolha==='restaurar' ? opInicioAnterior(nid,novoSt) : null;
+    // Data da etapa nova, por ordem: a devolvida pela reversão, a digitada por
+    // quem está lançando a mudança com atraso, ou o instante de agora.
+    const em = escolha==='restaurar' ? opInicioAnterior(nid,novoSt)
+             : (mudou && inicioTocado && inicioForm) ? inicioForm : null;
     opRegistrarStatus(o,novoSt,em?{em}:{});
-    // Ajuste manual da data vale sobre tudo, inclusive sobre o carimbo que a
-    // mudança de etapa acabou de gravar.
     if(inicioForm && !mudou){
+      // Ajuste manual da contagem da etapa atual, com rastro no histórico.
       opAjustarInicio(o,inicioForm,motivo);
       // Salvar com a data estimada à vista no campo é aceitá-la: deixa de ser
       // palpite, mesmo quando o usuário não mudou o número.
