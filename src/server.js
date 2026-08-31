@@ -43,6 +43,7 @@ if (!fs.existsSync(path.dirname(DB_FILE_PATH))) {
 
 const { buscarNCM, pesquisarNCMs } = require('./services/ncm.service');
 const { mesclarDB } = require('./services/db-merge.service');
+const { normalizarStatus } = require('./services/op-status.service');
 const { consultarTratamento } = require('./integrations/siscomex.service');
 const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
@@ -77,6 +78,15 @@ app.post('/api/db', async (req, res) => {
       try {
         fs.copyFileSync(DB_FILE_PATH, DB_FILE_PATH + '.bak');
       } catch (e) {}
+    }
+
+    // Carimba a data da etapa e o histórico do que chegou sem eles, e recusa
+    // data impossível. Roda antes da mesclagem, com o banco anterior à vista —
+    // é a comparação com ele que revela que a etapa mudou.
+    const st = normalizarStatus(memoryDB, newDB);
+    if (st.carimbadas || st.historico || st.corrigidas.length) {
+      console.log(`↻ etapas: ${st.carimbadas} data(s) carimbada(s), ${st.historico} linha(s) de histórico, ${st.corrigidas.length} corrigida(s)`);
+      st.corrigidas.forEach(c => console.warn(`   ⚠ ${c.op}: ${c.motivo} (${c.de} → ${c.para})`));
     }
 
     // Mescla em vez de substituir: sem isso, quem salva por último apaga os

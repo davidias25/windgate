@@ -11,7 +11,7 @@
  */
 
 // Coleções em lista, unidas por `_id`
-const COLECOES = ['ops', 'docs', 'fin', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmOps', 'parceiros'];
+const COLECOES = ['ops', 'docs', 'fin', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmOps', 'parceiros', 'opStatusHist'];
 
 // Objetos indexados por chave própria (opId, id da cotação, 'YYYY-MM'…)
 // `notifLidas` é indexado por usuário: mesclar por chave preserva o que cada um

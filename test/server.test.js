@@ -16,6 +16,7 @@ process.env.SUPABASE_DISABLED = '1';
 const app = require('../src/server');
 const { criarTarefaOperacao, operacaoDaTarefa, statusInterno } = require('../src/integrations/clickup.service');
 const { mesclarDB } = require('../src/services/db-merge.service');
+const { normalizarStatus, corrigirInicio, diasNoStatus } = require('../src/services/op-status.service');
 const aliquotas = require('../src/services/aliquotas.service');
 const siscomex = require('../src/integrations/siscomex.service');
 
@@ -80,6 +81,63 @@ async function runTests() {
     assert(jsonDbPost.success === true, 'POST /api/db atualiza o banco central com sucesso');
     assert(fs.existsSync(TEST_DB_FILE), 'POST /api/db grava no arquivo de teste, não no banco real');
     assert(bancoRealAntes === lerBancoReal(), 'POST /api/db NÃO altera data/db.json (operações preservadas)');
+
+    // 1.95. Etapa da operação: data de início e histórico garantidos no servidor
+    console.log('');
+    console.log('--- Testando Etapas da Operação (data e histórico) ---');
+    const AGORA = '2026-08-28T15:00:00.000Z';
+    const servidor = { ops: [{ id: 'OP50', status: 'producao', statusEm: '2026-08-01T10:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }] };
+
+    // Cliente antigo muda a etapa e não carimba nada: o servidor carimba.
+    const cliente = { ops: [{ id: 'OP50', status: 'embarcado', statusEm: '2026-08-01T10:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }] };
+    let r = normalizarStatus(servidor, cliente, { agora: AGORA });
+    assert(cliente.ops[0].statusEm === AGORA, 'Etapa mudada sem carimbo recebe a data no servidor');
+    assert(r.historico === 1, 'Mudança de etapa sem histórico ganha a linha no servidor');
+    assert(cliente.opStatusHist[0].de === 'producao' && cliente.opStatusHist[0].para === 'embarcado',
+      'Linha do histórico registra a etapa anterior e a nova');
+
+    // Cliente atual já fez o trabalho: o servidor não repete a linha.
+    const jaFeito = {
+      ops: [{ id: 'OP50', status: 'embarcado', statusEm: '2026-08-20T10:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }],
+      opStatusHist: [{ _id: 'h1', op: 'OP50', de: 'producao', para: 'embarcado', em: '2026-08-20T10:00:00.000Z', por: 'Davi', tipo: 'mudanca' }]
+    };
+    r = normalizarStatus(servidor, jaFeito, { agora: AGORA });
+    assert(jaFeito.ops[0].statusEm === '2026-08-20T10:00:00.000Z', 'Data carimbada pelo cliente é preservada');
+    assert(jaFeito.opStatusHist.length === 1, 'Histórico já registrado não é duplicado pelo servidor');
+
+    // Sem mudança de etapa, nada acontece — a rota é chamada a cada gravação.
+    const semMudanca = { ops: [{ id: 'OP50', status: 'producao', statusEm: '2026-08-01T10:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }] };
+    r = normalizarStatus(servidor, semMudanca, { agora: AGORA });
+    assert(r.carimbadas === 0 && r.historico === 0, 'Gravação sem mudança de etapa não mexe em nada');
+
+    // Datas impossíveis são recusadas, não gravadas.
+    const futuro = { ops: [{ id: 'OP50', status: 'producao', statusEm: '2027-01-01T00:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }] };
+    r = normalizarStatus(servidor, futuro, { agora: AGORA });
+    assert(futuro.ops[0].statusEm === AGORA, 'Início de etapa no futuro é trazido para hoje');
+    assert(r.corrigidas.length === 1 && r.corrigidas[0].motivo === 'data no futuro', 'Correção de data futura é reportada');
+
+    const antesDeNascer = { ops: [{ id: 'OP50', status: 'producao', statusEm: '2026-01-01T00:00:00.000Z', criadaEm: '2026-07-01T10:00:00.000Z' }] };
+    r = normalizarStatus(servidor, antesDeNascer, { agora: AGORA });
+    assert(antesDeNascer.ops[0].statusEm === '2026-07-01T10:00:00.000Z',
+      'Início anterior à criação da operação volta para a data de criação');
+
+    // Operação nova chega sem nada: ganha criação, carimbo e histórico.
+    const nova = { ops: [{ id: 'OP51', status: 'contrato' }] };
+    r = normalizarStatus(servidor, nova, { agora: AGORA });
+    assert(nova.ops[0].criadaEm === AGORA && nova.ops[0].statusEm === AGORA, 'Operação nova nasce com data de criação e de etapa');
+    assert(nova.opStatusHist.length === 1 && nova.opStatusHist[0].de === '', 'Primeira etapa entra no histórico sem etapa anterior');
+
+    assert(corrigirInicio('2026-08-20T00:00:00.000Z', '2026-07-01T00:00:00.000Z', AGORA) === null,
+      'Data válida passa sem correção');
+    assert(diasNoStatus({ statusEm: '2026-08-01T10:00:00.000Z' }, AGORA) === 27, 'Dias na etapa contam dias de calendário');
+    assert(diasNoStatus({ statusEm: AGORA }, AGORA) === 0, 'Etapa mudada hoje está no dia 0');
+    assert(diasNoStatus({}, AGORA) === null, 'Operação sem data de etapa não inventa contagem');
+
+    // O histórico precisa sobreviver à mesclagem entre dois usuários.
+    const histA = { opStatusHist: [{ _id: 'ha', op: 'OP50', para: 'embarcado' }] };
+    const histB = { opStatusHist: [{ _id: 'hb', op: 'OP51', para: 'contrato' }] };
+    const histMerge = mesclarDB(histA, histB);
+    assert(histMerge.opStatusHist.length === 2, 'Histórico de etapas de dois usuários é preservado na mesclagem');
 
     // 2. Criar Cotação (POST /api/cotacoes)
     console.log('\n--- Testando Cotações API ---');

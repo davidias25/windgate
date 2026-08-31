@@ -540,6 +540,15 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .stat .l{font-size:9.8px;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin-top:5px;font-weight:700}
 
 /* op cards */
+.ops-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.ops-bar select{width:auto;min-width:210px}
+.ops-bar-l{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;font-weight:700}
+.chk-inline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer}
+.chk-inline input{width:auto;margin:0}
+.op-prazo{font-size:11px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.op-prazo.late{color:var(--red)}
+.op-est{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);border-radius:20px;padding:1px 6px}
+.stat .sub{font-size:9.5px;font-weight:800;color:var(--red);margin-top:3px;letter-spacing:.04em}
 .ops-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
 .op-card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px;cursor:pointer;transition:.15s;border-left:4px solid var(--stc,#2563EB)}
 .op-card:hover{transform:translateY(-2px);border-color:var(--line2);border-left-color:var(--stc,#2563EB)}
@@ -753,12 +762,23 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="view-head">
     <div><h1>Torre de <span>Controle</span></h1><p>Visão geral das operações — produção, trânsito, documentação, entregas e travas.</p></div>
     <div class="hd-actions">
+      <button class="btn btn-ghost" onclick="openPrazosModal()">⏱ Prazos por etapa</button>
       <button class="btn btn-ghost" id="btnSyncClickUp" onclick="importarOperacoesClickUp()">🔄 Sincronizar ClickUp</button>
       <button class="btn btn-mag" onclick="openOpModal()">+ Nova operação</button>
     </div>
   </div>
   <div id="clickupAviso" style="display:none;background:#FF5A6E22;border:1px solid #FF5A6E66;color:#FFB4BE;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
   <div class="stats-row" id="opStats"></div>
+  <div class="ops-bar">
+    <label class="ops-bar-l">Ordenar por</label>
+    <select id="opOrdem" onchange="renderOps()">
+      <option value="padrao">Padrão (travadas primeiro)</option>
+      <option value="dias">Dias no status (maior primeiro)</option>
+      <option value="atraso">Dias de atraso (maior primeiro)</option>
+    </select>
+    <label class="chk-inline"><input type="checkbox" id="opSoAtraso" onchange="renderOps()"> Somente atrasadas</label>
+    <span class="note" id="opBarNota"></span>
+  </div>
   <div class="card" id="docsSemOp" style="display:none;margin-bottom:14px"></div>
   <div class="ops-grid" id="opsGrid"></div>
   <div class="empty" id="opsEmpty" style="display:none">Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.</div>
@@ -1454,6 +1474,68 @@ const STATUS_OP = [
 ];
 const stMeta = k => STATUS_OP.find(s=>s.k===k)||STATUS_OP[0];
 
+/* Prazo-alvo de cada etapa, em dias corridos. Etapa que não aparece aqui conta
+   os dias e não cobra atraso — é o caso de Entregue, Concluída e Travada, que
+   não são espera, e do Trâmite documental, que ainda não tem prazo acordado.
+   Estes são os padrões; o que vale é `prazoStatus`, que lê o ajuste da equipe. */
+const PRAZO_STATUS = {
+  cotacao:7, contrato:7, producao:30, preparacao_embarque:5,
+  container_enviado_porto:4, embarcado:75, chegada:7, logistica:5
+};
+const REPETE_ATRASO_DIAS  = 3;  // recobrança do atraso, em dias
+const JANELA_REVERSAO_DIAS = 3; // até aqui, voltar o status parece correção de engano
+
+const prazoStatus = k => {
+  const cfg=(DB&&DB.settings&&DB.settings.prazosStatus)||{};
+  const v = cfg[k]!==undefined ? cfg[k] : PRAZO_STATUS[k];
+  return (+v>0) ? +v : null;   // vazio, zero ou lixo = etapa sem prazo
+};
+const repeteAtraso = () => Math.max(1, +(DB&&DB.settings&&DB.settings.repeteAtrasoDias) || REPETE_ATRASO_DIAS);
+
+/* Distância em dias entre duas datas. Isolada de propósito: trocar dias
+   corridos por dias úteis (calendário BR) é mexer só aqui.
+   Conta dias de calendário, não períodos de 24h — quem mudou o status ontem às
+   23h amanheceu no dia 1, não no dia 0. */
+function diasCorridos(deISO, ateISO){
+  const d=String(deISO||'').slice(0,10), a=String(ateISO||agHoje()).slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  return Math.max(0, Math.round((new Date(a+'T12:00:00')-new Date(d+'T12:00:00'))/864e5));
+}
+
+/* Onde a operação está no prazo da etapa atual.
+   `estimado` marca a data herdada da migração — palpite, não confirmação. */
+function opPrazo(o){
+  if(!o || !o.statusEm) return null;
+  const inicio=String(o.statusEm).slice(0,10);
+  const dias=diasCorridos(inicio); if(dias==null) return null;
+  const prazo=prazoStatus(o.status);
+  const atraso = prazo!=null ? Math.max(0,dias-prazo) : 0;
+  const sit = prazo==null ? 'sem' : atraso>0 ? 'atrasado' : (dias > prazo*0.7 ? 'atencao' : 'ok');
+  return {inicio,dias,prazo,atraso,sit,estimado:!!o.statusEstimado};
+}
+const opAtrasada = o => { const p=opPrazo(o); return !!(p && p.sit==='atrasado'); };
+const opAtraso   = o => { const p=opPrazo(o); return p?p.atraso:0; };
+const opDiasNoStatus = o => { const p=opPrazo(o); return p?p.dias:-1; };
+const dataBR = iso => String(iso||'').slice(0,10).split('-').reverse().join('/');
+
+/* "18 / 30 dias · +4". Sem prazo acordado mostra só os dias corridos, em vez de
+   inventar uma meta. Neutro até 70% do prazo, âmbar acima disso, vermelho
+   depois de estourar. */
+function opPrazoChip(o){
+  const p=opPrazo(o); if(!p) return '';
+  const cor = p.sit==='atrasado'?'var(--red)':p.sit==='atencao'?'var(--amber)':'var(--mut)';
+  const txt = p.prazo==null ? `${p.dias} dia(s) na etapa`
+                            : `${p.dias} / ${p.prazo} dias${p.atraso?` · +${p.atraso}`:''}`;
+  const dica = `Nesta etapa desde ${dataBR(p.inicio)}${p.estimado?' — data estimada pela migração, ainda não confirmada':''}`;
+  return `<span class="op-prazo${p.sit==='atrasado'?' late':''}" style="color:${cor}" title="${esc(dica)}">⏱ ${txt}`
+       + (p.estimado?' <span class="op-est" title="Data herdada da migração">estimada</span>':'') + '</span>';
+}
+
+/* Ajustar a data de início da etapa reescreve a contagem de prazo e o histórico,
+   então fica com quem responde pela operação — os mesmos perfis que já enxergam
+   contrato. Ívina e Matheus veem o contador; só não mexem na data. */
+const podeAjustarStatus = () => !!(USER && USER.fin);
+
 /* Alíquota interna do ICMS por UF, usada para sugerir a alíquota efetiva do
    DIFAL (interna − destacado na saída). É ponto de partida, não verdade
    fiscal: muda por decreto, não inclui FCP/FECP (RJ soma 2%, entre outros) e
@@ -1630,7 +1712,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks','crm','crmOps','parceiros'];
+const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks','crm','crmOps','parceiros','opStatusHist'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -1686,6 +1768,9 @@ function ensureDBStructure(){
   if (!Array.isArray(DB.crm)) DB.crm = [];        // clientes
   if (!Array.isArray(DB.crmOps)) DB.crmOps = [];  // oportunidades
   if (!Array.isArray(DB.parceiros)) DB.parceiros = []; // fornecedores, despachantes, agentes
+  // Histórico de etapas: alimenta o contador de prazo e, depois, o tempo médio
+  // por etapa na Gestão do Mês. Só cresce — nada aqui é sobrescrito.
+  if (!Array.isArray(DB.opStatusHist)) DB.opStatusHist = [];
   if (!DB.portos || typeof DB.portos !== 'object') DB.portos = {}; // portos criados pela equipe
   if (!DB.checklists) DB.checklists = {};
   if (!DB.agentes) DB.agentes = def.agentes || {};
@@ -1933,6 +2018,33 @@ function migrateDB(){
     (DB.fin || []).forEach(l => { if (l && !l.empresa) l.empresa = 'WindGate'; });
     DB.settings.schema = 12; ch = true;
   }
+  if ((DB.settings.schema || 12) < 13) {
+    // Operação que já existia não sabe desde quando está na etapa atual. O
+    // melhor ponto de partida é o último sinal de vida da operação — o
+    // documento mais recente ou, na falta dele, o dia da migração. Fica
+    // marcada como estimada até alguém confirmar em Editar operação, para o
+    // painel não vender palpite como fato.
+    const hojeIso = new Date().toISOString();
+    (DB.ops || []).forEach(o => {
+      if (!o || o.statusEm) return;
+      // Documento antigo grava dd/mm/yyyy e o novo grava ISO — normaliza antes
+      // de ordenar, senão o "mais recente" sai do formato errado.
+      const paraIso = v => {
+        const t = String(v || '');
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)) return t.split('/').reverse().join('-');
+        return /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : '';
+      };
+      const datas = (DB.docs || []).filter(d => d && d.op === o.id)
+        .map(d => paraIso(d.data)).filter(Boolean).sort();
+      const iso = datas.length ? datas[datas.length - 1] : '';
+      o.statusEm = (o.criadaEm && (!iso || o.criadaEm.slice(0,10) > iso)) ? o.criadaEm
+                 : (iso ? iso + 'T12:00:00.000Z' : hojeIso);
+      o.statusEstimado = true;
+      if (!o.criadaEm) o.criadaEm = o.statusEm;
+    });
+    if (!Array.isArray(DB.opStatusHist)) DB.opStatusHist = [];
+    DB.settings.schema = 13; ch = true;
+  }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
     if (typeof f.usd === 'string') {
@@ -2100,23 +2212,48 @@ function showTab(k){
 function renderOps(){
   try {
     ensureDBStructure();
-    const counts={}; STATUS_OP.forEach(s=>counts[s.k]=0);
-    (DB.ops||[]).forEach(o=>{ if(o && o.status) counts[o.status]=(counts[o.status]||0)+1; });
+    const counts={}, atras={}; STATUS_OP.forEach(s=>{counts[s.k]=0; atras[s.k]=0;});
+    (DB.ops||[]).forEach(o=>{
+      if(!o || !o.status) return;
+      counts[o.status]=(counts[o.status]||0)+1;
+      if(opAtrasada(o)) atras[o.status]=(atras[o.status]||0)+1;
+    });
     const ativos=(DB.ops||[]).filter(o=>o && !['entregue','concluida'].includes(o.status)).length;
     const sr=$('opStats'); if(sr) sr.innerHTML='';
+    const totAtraso=(DB.ops||[]).filter(opAtrasada).length;
     const tiles=[
-      {n:ativos,l:'Operações ativas',c:'#E91E63'},
-      ...STATUS_OP.filter(s=>s.tile).map(s=>({n:counts[s.k]||0,l:s.tile,c:s.c}))
+      {n:ativos,l:'Operações ativas',c:'#E91E63',sub:totAtraso?`${totAtraso} fora do prazo`:''},
+      ...STATUS_OP.filter(s=>s.tile).map(s=>({n:counts[s.k]||0,l:s.tile,c:s.c,
+        sub:atras[s.k]?`${atras[s.k]} atrasada${atras[s.k]>1?'s':''}`:''}))
     ];
     if(sr){
-      tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div></div>`; });
+      tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div>${t.sub?`<div class="sub">⏱ ${t.sub}</div>`:''}</div>`; });
     }
     const g=$('opsGrid'); if(!g) return;
     g.innerHTML='';
     const emptyEl = $('opsEmpty');
-    if(emptyEl) emptyEl.style.display=(DB.ops && DB.ops.length)?'none':'block';
 
-    const order=[...(DB.ops||[])].sort((a,b)=>(a && a.status==='travada'?-1:0)-(b && b.status==='travada'?-1:0));
+    const ordem=($('opOrdem')&&$('opOrdem').value)||'padrao';
+    const soAtraso=!!($('opSoAtraso')&&$('opSoAtraso').checked);
+    let order=(DB.ops||[]).filter(o=>o && (!soAtraso || opAtrasada(o)));
+    // Operação encerrada acumula dias para sempre; deixá-la competir por tempo
+    // enterraria justamente o que ainda espera alguma coisa.
+    const encerrada=o=>['entregue','concluida'].includes(o.status);
+    const viva=(a,b)=>(encerrada(a)?1:0)-(encerrada(b)?1:0);
+    if(ordem==='dias')        order=order.sort((a,b)=>viva(a,b)||opDiasNoStatus(b)-opDiasNoStatus(a));
+    else if(ordem==='atraso') order=order.sort((a,b)=>viva(a,b)||opAtraso(b)-opAtraso(a)||opDiasNoStatus(b)-opDiasNoStatus(a));
+    else order=order.slice().sort((a,b)=>(a.status==='travada'?-1:0)-(b.status==='travada'?-1:0));
+    if(emptyEl){
+      const vazio=!(DB.ops && DB.ops.length);
+      emptyEl.style.display=(vazio||!order.length)?'block':'none';
+      emptyEl.innerHTML = vazio
+        ? 'Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.'
+        : 'Nenhuma operação atrasada — desmarque <b>Somente atrasadas</b> para ver todas.';
+    }
+    const nota=$('opBarNota');
+    if(nota) nota.textContent = soAtraso
+      ? `${order.length} de ${(DB.ops||[]).filter(Boolean).length} operação(ões) fora do prazo`
+      : (totAtraso?`${totAtraso} fora do prazo`:'Tudo dentro do prazo');
     order.forEach(o=>{
       if(!o) return;
       const m=stMeta(o.status)||STATUS_OP[0];
@@ -2124,7 +2261,10 @@ function renderOps(){
       const pct = opPct(o.id);
       const nDocs = docsDaOp(o.id).length;
       d.innerHTML=`<div class="oh"><div><div class="oid">${esc(o.id||'OP')}</div><div class="onm">${esc(o.nome||'Operação')}</div></div>
-        <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span></div>
+        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span>
+          ${opPrazoChip(o)}
+        </div></div>
         <div class="od">
           <span>👤 Cliente: <b>${esc(o.cliente||'—')}</b></span>
           <span>➡️ Próx. ação: <b>${esc(o.prox||'—')}</b></span>
@@ -2177,6 +2317,141 @@ function opPct(opId){
   const l=DB.checklists[opId]; if(!l||!l.length) return 0;
   return Math.round(l.filter(i=>i && (i.status==='aprovado'||i.status==='na')).length/l.length*100);
 }
+/* ===== Etapa da operação: quando começou e o que já passou =====
+   Toda mudança de status passa por `opRegistrarStatus`. Sem carimbar a data o
+   contador de prazo mente; sem a linha no histórico não há como medir tempo
+   médio por etapa depois, nem como devolver a contagem quando alguém erra o
+   status e volta atrás. O servidor repete a mesma regra em POST /api/db, para
+   que uma aba desatualizada ou uma carga do ClickUp não deixem buraco. */
+function opHistPush(reg){
+  if(!Array.isArray(DB.opStatusHist)) DB.opStatusHist=[];
+  DB.opStatusHist.push(Object.assign({_id:novoId()}, reg));
+}
+const opHist = id => (DB.opStatusHist||[]).filter(h=>h && h.op===id)
+                       .sort((a,b)=>String(a.em||'').localeCompare(String(b.em||'')));
+
+/* Quando esta operação entrou na etapa `st` pela última vez.
+   Duas fontes: a linha que ENTROU na etapa (`para===st` → `em`) e a linha que
+   SAIU dela (`de===st` → `deEm`, a data que a etapa tinha ao ser abandonada).
+   A segunda é o que salva operação que já estava na etapa antes de existir
+   histórico — sem ela, reverter não teria data para devolver. */
+function opInicioAnterior(id, st){
+  let melhor=null;
+  opHist(id).forEach(h=>{
+    const c = h.para===st ? h.em : (h.de===st ? h.deEm : null);
+    if(c && (!melhor || String(c)>String(melhor))) melhor=c;
+  });
+  return melhor;
+}
+
+function opRegistrarStatus(o, novo, opt){
+  opt=opt||{};
+  const de=o.status||'', por=opt.por||(USER?USER.nome.split(' ')[0]:'sistema');
+  const em=opt.em||new Date().toISOString();
+  const mudou = de!==novo;
+  const inicioAntes = o.statusEm||'';   // quando começou a etapa que fica para trás
+  o.status=novo;
+  if(mudou || !o.statusEm){ o.statusEm=em; delete o.statusEstimado; }
+  if(mudou) opHistPush({op:o.id,de,para:novo,em,deEm:inicioAntes,por,tipo:'mudanca'});
+  return mudou;
+}
+
+/* Correção manual da data de início. Nada é sobrescrito sem rastro: a data
+   anterior vai junto na linha do histórico, com quem mexeu e o porquê. */
+function opAjustarInicio(o, novoEm, motivo){
+  const antes=o.statusEm||'';
+  if(String(antes).slice(0,10)===String(novoEm).slice(0,10)) return false;
+  o.statusEm=novoEm; delete o.statusEstimado;
+  opHistPush({op:o.id,de:o.status,para:o.status,em:novoEm,deEm:antes,
+              por:USER?USER.nome.split(' ')[0]:'sistema',tipo:'ajuste',motivo:(motivo||'').trim()});
+  return true;
+}
+
+/* Mesma validação do servidor, aplicada antes de gravar para o usuário ver o
+   erro na hora: a etapa não pode ter começado no futuro nem antes da operação. */
+function opInicioInvalido(o, iso){
+  const d=String(iso||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'Data inválida';
+  if(d > agHoje()) return 'A etapa não pode ter começado no futuro';
+  const nasc=String(o&&(o.criadaEm||'')).slice(0,10);
+  if(nasc && d < nasc) return `A etapa não pode começar antes da operação (${dataBR(nasc)})`;
+  return '';
+}
+
+/* Operações que viajam no mesmo contêiner — mesmo link de rastreio ou mesmo
+   navio. É o agrupamento que o mapa já usa para plotá-las num ponto só. */
+function opGrupo(o){
+  if(!o) return [];
+  const t=(o.tracking||'').trim(), nv=(o.navio||'').trim();
+  if(!t && !nv) return [];
+  return (DB.ops||[]).filter(x=>x && x.id!==o.id &&
+    ((t && (x.tracking||'').trim()===t) || (nv && x.navio && nrm(x.navio)===nrm(nv))));
+}
+
+/* "Início do status atual": a contagem de prazo não pode ficar presa à data em
+   que o sistema carimbou. Quem não pode ajustar continua vendo desde quando a
+   etapa corre — o número é de todos, a caneta é de quem responde. */
+function opInicioCampo(o){
+  const p=opPrazo(o);
+  const desde = o.statusEm ? String(o.statusEm).slice(0,10) : agHoje();
+  const resumo = p
+    ? `${p.dias} dia(s) nesta etapa${p.prazo!=null?` · prazo ${p.prazo}`:''}${p.atraso?` · <b style="color:var(--red)">+${p.atraso} de atraso</b>`:''}`
+    : 'sem data de início registrada';
+  if(!podeAjustarStatus())
+    return `<p class="note">⏱ Nesta etapa desde <b>${dataBR(desde)}</b> — ${resumo}.${o.statusEstimado?' <b>Data estimada</b>, ainda não confirmada.':''}<br>Só Samir e Davi ajustam essa data.</p>`;
+  return `<div class="frow">
+      <div><label>Início do status atual</label><input type="date" id="m_opsince" max="${agHoje()}" value="${esc(desde)}"></div>
+      <div style="grid-column:span 2"><label>Motivo do ajuste <span style="opacity:.55;font-weight:400">· opcional, fica no histórico</span></label><input id="m_opsincewhy" placeholder="Ex.: status trocado por engano em 12/08"></div>
+    </div>
+    <p class="note">⏱ ${resumo}.${o.statusEstimado?' <b style="color:var(--amber)">Data estimada</b> pela migração — confirme salvando.':''} ${(DB.opStatusHist||[]).some(h=>h.op===o.id)?`<a href="#" onclick="event.preventDefault();openOpHistModal('${esc(o.id)}')" style="color:#7FA6FF">ver histórico de etapas</a>`:''}</p>`;
+}
+
+function openOpHistModal(id){
+  const h=opHist(id).slice().reverse();
+  openModal(`<h3>Histórico de <span>etapas</span> · ${esc(id)}</h3>
+    <div class="tw"><table><thead><tr><th>Quando</th><th>De</th><th>Para</th><th>Quem</th><th>Observação</th></tr></thead><tbody>
+    ${h.length?h.map(x=>`<tr>
+      <td>${dataBR(x.em)}</td>
+      <td>${esc(x.de?stMeta(x.de).l:'—')}</td>
+      <td>${esc(stMeta(x.para).l)}</td>
+      <td>${esc(x.por||'—')}</td>
+      <td>${x.tipo==='ajuste'?`<span class="pill" style="background:var(--amber-soft);color:var(--amber)">ajuste manual</span> de ${dataBR(x.deEm)||'—'}${x.motivo?' · '+esc(x.motivo):''}`:'<span class="note">mudança de etapa</span>'}</td>
+    </tr>`).join(''):'<tr><td colspan="5" class="note">Sem histórico ainda.</td></tr>'}
+    </tbody></table></div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="openOpModal('${esc(id)}')">Voltar</button></div>`);
+}
+
+/* Prazos ajustáveis pela equipe: o combinado muda com fornecedor e rota, e
+   ninguém deveria precisar de deploy para corrigir um número. Vazio ou zero
+   deixa a etapa sem prazo — conta os dias, não cobra atraso. */
+function openPrazosModal(){
+  const pode=podeAjustarStatus();
+  const linhas=STATUS_OP.filter(x=>x.k!=='entregue'&&x.k!=='concluida'&&x.k!=='travada').map(x=>{
+    const v=prazoStatus(x.k);
+    return `<tr><td><span class="pill" style="background:${x.c}22;color:${x.c}">${esc(x.l)}</span></td>
+      <td style="width:120px"><input type="number" min="0" step="1" id="pz_${x.k}" value="${v==null?'':v}" placeholder="sem prazo" ${pode?'':'disabled'}></td>
+      <td class="note">${PRAZO_STATUS[x.k]?`padrão ${PRAZO_STATUS[x.k]}`:'sem padrão'}</td></tr>`;
+  }).join('');
+  openModal(`<h3>Prazos por <span>etapa</span></h3>
+    <p class="note">Dias corridos que cada etapa deveria levar. O painel fica âmbar acima de 70% do prazo e vermelho depois de estourar.</p>
+    <div class="tw"><table><thead><tr><th>Etapa</th><th>Prazo (dias)</th><th>Padrão</th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <div class="frow"><div><label>Recobrança do atraso (dias)</label><input type="number" min="1" id="pz_rep" value="${repeteAtraso()}" ${pode?'':'disabled'}></div></div>
+    <p class="note">Depois de estourar, a notificação volta a cada ${repeteAtraso()} dia(s) enquanto a operação seguir atrasada.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">${pode?'Cancelar':'Fechar'}</button>
+      ${pode?'<button class="btn btn-mag" onclick="salvarPrazos()">Salvar prazos</button>':'<span class="note">Só Samir e Davi ajustam os prazos.</span>'}
+    </div>`);
+}
+function salvarPrazos(){
+  if(!podeAjustarStatus()){ toast('⚠ Sem permissão para ajustar prazos'); return; }
+  if(!DB.settings) DB.settings={};
+  const cfg={};
+  STATUS_OP.forEach(x=>{ const el=$('pz_'+x.k); if(!el) return; const v=el.value.trim(); cfg[x.k]= v===''?0:Math.max(0,Math.round(+v)||0); });
+  DB.settings.prazosStatus=cfg;
+  DB.settings.repeteAtrasoDias=Math.max(1,Math.round(N('pz_rep'))||REPETE_ATRASO_DIAS);
+  saveDB(); closeModal(); renderOps(); updateNotifs(); toast('Prazos atualizados ✓');
+}
+
 function openOpModal(id){
   const o=id?DB.ops.find(x=>x.id===id):null;
   openModal(`<h3>${o?'Editar':'Nova'} <span>operação</span></h3>
@@ -2189,6 +2464,7 @@ function openOpModal(id){
       <div><label>Status</label><select id="m_opst">${STATUS_OP.map(s=>`<option value="${s.k}" ${o&&o.status===s.k?'selected':''}>${s.l}</option>`).join('')}</select></div>
       <div><label>Responsável</label><select id="m_opresp">${['Samir','Davi','Ívina','Matheus'].map(r=>`<option ${o&&o.resp===r?'selected':''}>${r}</option>`).join('')}</select></div>
     </div>
+    ${o?opInicioCampo(o):''}
     <div class="frow">
       <div style="grid-column:span 2"><label>Próxima ação</label><input id="m_opprox" value="${o?esc(o.prox):''}" placeholder="Ex.: cobrar BL draft do agente"></div>
       <div><label>Observação</label><input id="m_opobs" value="${o?esc(o.obs):''}"></div>
@@ -2251,21 +2527,115 @@ function resolverPorto(valor){
   }
   return nome;
 }
+/* O que o formulário juntou, guardado enquanto a pergunta da reversão ou do
+   contêiner ocupa o modal — os campos já não existem para reler depois. */
+let _opPend=null;
+
 function saveOp(id){
   try {
     const nid=(id||V('m_opid').trim().toUpperCase());
     if(!nid){ toast('⚠ Informe o código da operação'); return; }
-    let o=DB.ops.find(x=>x.id===nid);
-    const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),status:V('m_opst'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
+    const o=DB.ops.find(x=>x.id===nid);
+    // status sai do pacote: quem grava etapa é opRegistrarStatus, para a data e
+    // o histórico nunca ficarem para trás de um Object.assign.
+    const data={id:nid,nome:V('m_opnome'),cliente:V('m_opcli'),resp:V('m_opresp'),prox:V('m_opprox'),obs:V('m_opobs'),
       origemPorto:resolverPorto(V('m_oporig')),destinoPorto:resolverPorto(V('m_opdest')),fabricaCidade:V('m_opfab'),embarque:V('m_opemb'),eta:V('m_opeta'),navio:V('m_opnavio'),tracking:V('m_optrack'),posAtual:V('m_oppos')};
-    if(o) Object.assign(o,data); else { DB.ops.push(data); o=data; }
-    if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
-    saveDB(); closeModal(); renderOps(); toast('Operação salva ✓');
-    sincronizarClickUp(o);
+    const novoSt=V('m_opst');
+    const inicioForm = (o && podeAjustarStatus() && $('m_opsince')) ? V('m_opsince') : '';
+    const motivo = $('m_opsincewhy') ? V('m_opsincewhy') : '';
+
+    if(o && inicioForm){
+      const erro=opInicioInvalido(o,inicioForm);
+      if(erro){ toast('⚠ '+erro); return; }
+    }
+    _opPend={nid,data,novoSt,inicioForm,motivo};
+
+    // Voltar a uma etapa por onde a operação já passou, pouco depois de ter
+    // saído dela, quase sempre é conserto de engano — e reiniciar a contagem
+    // apagaria os dias realmente vividos naquela etapa.
+    if(o && o.status!==novoSt){
+      const anterior=opInicioAnterior(nid,novoSt);
+      const naEtapaHa=opDiasNoStatus(o);
+      if(anterior && naEtapaHa>=0 && naEtapaHa<=JANELA_REVERSAO_DIAS){
+        perguntarReversao(o,novoSt,anterior);
+        return;
+      }
+    }
+    saveOpAplicar(null);
   } catch(err) {
     console.error('Erro ao salvar operação:', err);
     toast('⚠ Erro ao salvar operação');
   }
+}
+
+function perguntarReversao(o,novoSt,anterior){
+  const dias=diasCorridos(anterior);
+  openModal(`<h3>Voltar para <span>${esc(stMeta(novoSt).l)}</span></h3>
+    <p class="note">A operação <b>${esc(o.id)}</b> já esteve nesta etapa, desde <b>${dataBR(anterior)}</b> — hoje daria <b>${dias} dia(s)</b>. Está em <b>${esc(stMeta(o.status).l)}</b> há ${opDiasNoStatus(o)} dia(s), o que costuma ser troca feita por engano.</p>
+    <p class="note">Manter a contagem devolve os dias já vividos na etapa. Reiniciar zera o contador a partir de hoje.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="saveOpAplicar('reiniciar')">Reiniciar de hoje</button>
+      <button class="btn btn-mag" onclick="saveOpAplicar('restaurar')">Manter contagem desde ${dataBR(anterior)}</button>
+    </div>`);
+}
+
+/* `escolha`: 'restaurar' devolve a data original da etapa, 'reiniciar' começa
+   de hoje, null é o caminho normal (não houve reversão a decidir). */
+function saveOpAplicar(escolha){
+  try{
+    if(!_opPend) return;
+    const {nid,data,novoSt,inicioForm,motivo}=_opPend; _opPend=null;
+    let o=DB.ops.find(x=>x.id===nid);
+    const novo=!o;
+    if(o) Object.assign(o,data);
+    else { o=Object.assign({criadaEm:new Date().toISOString()},data); DB.ops.push(o); }
+
+    const mudou = o.status!==novoSt;
+    const em = escolha==='restaurar' ? opInicioAnterior(nid,novoSt) : null;
+    opRegistrarStatus(o,novoSt,em?{em}:{});
+    // Ajuste manual da data vale sobre tudo, inclusive sobre o carimbo que a
+    // mudança de etapa acabou de gravar.
+    if(inicioForm && !mudou){
+      opAjustarInicio(o,inicioForm,motivo);
+      // Salvar com a data estimada à vista no campo é aceitá-la: deixa de ser
+      // palpite, mesmo quando o usuário não mudou o número.
+      delete o.statusEstimado;
+    }
+
+    if(!DB.checklists[nid]) DB.checklists[nid]=CHK_TEMPLATE.map(([fase,t])=>({fase,titulo:t,status:'pendente',coletadoPor:'',revisadoPor:''}));
+    saveDB(); renderOps();
+    sincronizarClickUp(o);
+
+    // Carga que viaja junta muda de etapa junta — oferece, não impõe.
+    const irmaos = mudou ? opGrupo(o) : [];
+    if(irmaos.length){ perguntarGrupo(o,irmaos,novoSt); return; }
+    closeModal(); toast(novo?'Operação criada ✓':'Operação salva ✓');
+  }catch(err){
+    console.error('Erro ao salvar operação:',err);
+    toast('⚠ Erro ao salvar operação');
+  }
+}
+
+function perguntarGrupo(o,irmaos,novoSt){
+  const junto = o.tracking ? 'mesmo link de rastreio' : 'mesmo navio';
+  openModal(`<h3>Aplicar às demais do <span>contêiner</span>?</h3>
+    <p class="note"><b>${esc(o.id)}</b> foi para <b>${esc(stMeta(novoSt).l)}</b>. Estas viajam junto (${junto}) e normalmente mudam de etapa na mesma data:</p>
+    <div class="tw"><table><thead><tr><th>Operação</th><th>Cliente</th><th>Etapa atual</th></tr></thead><tbody>
+      ${irmaos.map(x=>`<tr><td><b>${esc(x.id)}</b></td><td>${esc(x.cliente||'—')}</td><td>${esc(stMeta(x.status).l)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal();toast('Operação salva ✓')">Só ${esc(o.id)}</button>
+      <button class="btn btn-mag" onclick="aplicarGrupo('${esc(o.id)}','${esc(novoSt)}')">Aplicar a todas (${irmaos.length+1})</button>
+    </div>`);
+}
+
+function aplicarGrupo(id,novoSt){
+  const o=DB.ops.find(x=>x.id===id); if(!o){ closeModal(); return; }
+  const em=o.statusEm||new Date().toISOString();   // mesma data da operação que puxou
+  let n=0;
+  opGrupo(o).forEach(x=>{ if(opRegistrarStatus(x,novoSt,{em})) n++; });
+  saveDB(); closeModal(); renderOps();
+  toast(`Etapa aplicada a <b>${n+1}</b> operação(ões) do contêiner ✓`);
 }
 
 /* Traz as operações cadastradas no ClickUp para a Torre de Controle.
@@ -2296,13 +2666,17 @@ async function importarOperacoesClickUp(silencioso){
         // nome e cliente digitados aqui prevalecem — só preenche o que estiver vazio
         if(!local.nome) local.nome=op.nome;
         if(!local.cliente) local.cliente=op.cliente;
-        local.status=op.status;
+        // Status vindo do ClickUp é mudança de etapa como qualquer outra —
+        // carimba a data e deixa a linha no histórico.
+        if(op.status) opRegistrarStatus(local,op.status,{por:'ClickUp'});
         local.statusClickUp=op.statusClickUp;
         local.clickupTaskId=op.clickupTaskId;
         local.clickupUrl=op.clickupUrl;
         atualizadas++;
       } else {
-        DB.ops.push(Object.assign({prox:'',resp:'',obs:'',posAtual:''}, op));
+        const nova=Object.assign({prox:'',resp:'',obs:'',posAtual:'',criadaEm:new Date().toISOString()}, op);
+        const st=nova.status; nova.status='';
+        DB.ops.push(nova); if(st) opRegistrarStatus(nova,st,{por:'ClickUp'});
         novas++;
       }
     });
@@ -4905,6 +5279,21 @@ function computeNotifs(){
   DB.fretes.filter(f=>f.status==='Negociando'&&f.resp===eu).forEach(f=>n.push({tab:'frete',ic:'🚢',tx:`Negociação aberta: <b>${esc(f.rota)}</b> (${esc(f.empresa)})`,tg:'Fretes'}));
   DB.ops.filter(o=>o.status==='travada').forEach(o=>n.push({tab:'painel',ic:'⚠️',tx:`Operação <b>${esc(o.id)}</b> está <b style="color:var(--red)">travada</b>`,tg:'Painel'}));
 
+  /* Etapa que estourou o prazo. Cobra quem responde pela operação e o Davi, que
+     responde pela operação como um todo. A chave só muda a cada `repeteAtraso`
+     dias de atraso: assim o aviso aparece uma vez ao estourar e volta de tempos
+     em tempos, em vez de renascer todo dia porque o contador andou. */
+  const janela=repeteAtraso();
+  DB.ops.forEach(o=>{
+    const p=opPrazo(o); if(!p || p.sit!=='atrasado') return;
+    if(o.resp!==eu && eu!=='Davi') return;
+    const ciclo=Math.floor(p.atraso/janela);
+    n.push({tab:'painel',ic:'⏱',
+      k:idDeterministico({t:'painel',g:'prazo',op:o.id,st:o.status,c:ciclo}),
+      tx:`Operação <b>${esc(o.id)}</b> passou do prazo em <b>${esc(stMeta(o.status).l)}</b> — <b style="color:var(--red)">${p.dias} de ${p.prazo} dias · +${p.atraso}</b>`,
+      tg:'Painel — Prazo da etapa'});
+  });
+
   /* Contêiner no porto é a janela curta em que booking, BL e rastreio precisam
      estar fechados. Cobra quem responde pela operação e quem cuida de frete &
      tracking — pelo papel, não pelo nome, para o aviso seguir a função. */
@@ -4959,7 +5348,10 @@ function computeNotifs(){
 
   // Identidade da notificação pelo conteúdo: se a situação mudar (outro
   // documento, outro prazo), a chave muda e ela volta a aparecer.
-  n.forEach(x=>{ x.k = idDeterministico({t:x.tab,g:x.tg,x:x.tx}); });
+  // Identidade pelo conteúdo, salvo quando a notificação já traz a sua: é
+  // assim que o atraso repete a cada N dias em vez de voltar todo dia, já
+  // que o texto muda sozinho quando o contador anda.
+  n.forEach(x=>{ if(!x.k) x.k = idDeterministico({t:x.tab,g:x.tg,x:x.tx}); });
 
   const lidas = (DB.notifLidas && DB.notifLidas[USER.key]) || {};
   return n.filter(x=>(USER.tabs.includes(x.tab)||x.tab==='fin') && !lidas[x.k]);
@@ -5969,7 +6361,8 @@ const somaDias = (iso,n) => { const d=new Date(iso+'T12:00:00'); d.setDate(d.get
 function criarOpDaCotacao(){
   const id=(V('opNum')||('OP'+Math.floor(Math.random()*90+10))).toUpperCase();
   if(!DB.ops.find(o=>o.id===id)){
-    DB.ops.push({id,nome:V('mercadoria')||V('cliente'),cliente:V('cliente'),status:'contrato',prox:'Emitir contrato e cobrar 1ª parcela',resp:'Davi',obs:'Criada a partir da cotação aprovada'});
+    const nova={id,nome:V('mercadoria')||V('cliente'),cliente:V('cliente'),status:'',prox:'Emitir contrato e cobrar 1ª parcela',resp:'Davi',obs:'Criada a partir da cotação aprovada',criadaEm:new Date().toISOString()};
+    DB.ops.push(nova); opRegistrarStatus(nova,'contrato');
     ensureChk(id);
   }
   const marca='cotacao:'+(state.id||id);

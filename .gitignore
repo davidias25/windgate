@@ -10,3 +10,4 @@ backups/
 
 # propostas geradas para clientes — não versionar
 Proposta_*.pdf
+.diag/
