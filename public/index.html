@@ -4422,7 +4422,11 @@ function renderFin(){
 
   DB.fin.forEach((l, realIdx) => {
     if (empFiltro && finEmpresa(l) !== empFiltro) return;
-    if (l.op && opsCotacao.has(l.op)) { ocultosCotacao++; return; }
+    // O estudo de importação é a exceção — e é exceção justamente pelo motivo
+    // que esconde os outros: ele é cobrado PARA fazer a cotação, então
+    // acontece mesmo quando a importação não sai. Segurá-lo junto do resto
+    // tirava do caixa um dinheiro que entra de verdade.
+    if (l.op && opsCotacao.has(l.op) && !finValeEmCotacao(l)) { ocultosCotacao++; return; }
     if (!l.vencimento) l.vencimento = l.data || hjISO;
     if (l.fixo === undefined) l.fixo = false;
 
@@ -4656,7 +4660,11 @@ function renderFin(){
     return `<tr>
       <td><b>${vDisp}</b>${liqDisp}</td>
       <td class="note">${dDisp}</td>
-      <td>${l.transf?'<span class="pill teal" style="font-size:8.5px">⇄ TRANSF.</span>':`<b>${esc(l.op||'—')}</b>`}${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}</td>
+      <td>${l.transf?'<span class="pill teal" style="font-size:8.5px">⇄ TRANSF.</span>':`<b>${esc(l.op||'—')}</b>`}${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}${
+        // A operação está em Cotação e o resto do previsto dela não aparece
+        // nesta tela. Sem esta linha, ver um lançamento dela e não os outros
+        // pareceria falha da tela em vez de regra.
+        (l.op && opsCotacao.has(l.op)) ? `<div style="font-size:9px;color:var(--amber)" title="A operação ainda está em Cotação; o estudo de importação conta no caixa mesmo assim, porque é cobrado para fazer a cotação">🔎 em cotação · estudo conta</div>` : ''}</td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
       <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? esc(finRecTag(l)) : 'Pontual'}</span></td>
       <td>${l.categoria ? `<span class="pill mag">${esc(l.categoria)}</span>` : '<span class="note">—</span>'}</td>
@@ -4689,6 +4697,13 @@ const finPorId = id => DB.fin.find(l => l && l._id === id);
 
 /* Classificação do lançamento, independente de ser receita ou despesa. */
 const FIN_CATEGORIAS = ['Empréstimo','Estudo impo','Imposto geral','Imposto importação'];
+
+/* O estudo de importação é serviço prestado durante a cotação: é cobrado para
+   que a cotação exista e é pago mesmo quando a importação não acontece. Por
+   isso ele conta no caixa desde já, enquanto o resto do previsto da operação
+   espera o negócio fechar. */
+const FIN_CAT_ESTUDO = 'Estudo impo';
+const finValeEmCotacao = l => !!l && l.categoria === FIN_CAT_ESTUDO;
 
 function finLiqToggle(){
   const b=$('m_lliqBox'); if(b) b.style.display = V('m_lst')==='Realizado' ? 'block' : 'none';

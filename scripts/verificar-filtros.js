@@ -114,6 +114,10 @@ async function lerBanco(){
 
   console.log(`\n═══ CARTÕES "no Mês" — somam registros de outros meses? ═══\n`);
   const opsCot = new Set((app.avaliar('DB.ops') || []).filter(o => o && o.status === 'cotacao').map(o => o.id));
+  // Mesma exceção da tela: operação em Cotação fica fora do caixa, menos o
+  // estudo de importação — ele é cobrado para que a cotação exista e acontece
+  // mesmo quando a importação não sai.
+  const visivel = l => !(l.op && opsCot.has(l.op)) || app.finValeEmCotacao(l);
   const cartoes = [
     ['Contas a Pagar no Mês',   l => l.tipo === 'Despesa' && l.status !== 'Realizado'],
     ['Contas Pagas no Mês',     l => l.tipo === 'Despesa' && l.status === 'Realizado'],
@@ -127,7 +131,7 @@ async function lerBanco(){
     cartoes.forEach(([rotulo, cond]) => {
       const m = new RegExp(rotulo + '<\\/div>\\s*<div class="c-val"[^>]*>([^<]+)').exec(dash);
       const naTela = m ? m[1].trim() : '(não encontrado)';
-      const esperado = fin.filter(l => !(l.op && opsCot.has(l.op)) && cond(l) && mesDe(l) === mes)
+      const esperado = fin.filter(l => visivel(l) && cond(l) && mesDe(l) === mes)
         .reduce((a, l) => a + (+l.valor || 0), 0);
       const bate = norm(naTela) === norm(f(esperado));
       ok(bate, `cartão "${rotulo}" de ${mes} não bate`);

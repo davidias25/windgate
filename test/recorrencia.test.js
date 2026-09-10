@@ -408,6 +408,54 @@ secao('Aviso de renovação aparece na reta final e não antes');
 }
 
 /* ==================================================================== */
+secao('★ Estudo de importação conta mesmo com a operação em Cotação');
+{
+  const app = novoApp();
+  app.avaliar(`DB.ops = [
+    { id:'EI360-05', nome:'Estudo de viabilidade', status:'cotacao' },
+    { id:'OP45', nome:'Importação fechada', status:'producao' }
+  ];`);
+
+  const lancar = (op, tipo, cat, val, desc) => {
+    app.openLancModal();
+    preencher(app, {
+      m_lfixo: 'false', m_lop: op, m_ltipo: tipo, m_lcat: cat,
+      m_lvenc: '2026-09-18', m_ldata: '2026-09-18', m_lval: val,
+      m_lemp: 'WindGate', m_lst: 'Previsto', m_ldesc: desc, m_lcomp: '', m_lnf: ''
+    });
+    app.saveLanc(null);
+  };
+  lancar('EI360-05', 'Receita', 'Estudo impo', '1621', 'Recebimento estudo de Importação');
+  lancar('EI360-05', 'Receita', '',            '90000', 'Receita da operação (proposta aprovada)');
+  lancar('EI360-05', 'Despesa', '',            '70000', 'Custo total previsto');
+  lancar('OP45',     'Despesa', '',            '5000',  'ICMS ST — repasse SEFAZ-CE');
+
+  const tela = telaDoMes(app, '2026-09');
+  const html = tela.linhas.join('');
+  assert(/Recebimento estudo de Importa/.test(html),
+    '★ o estudo de importação aparece na listagem mesmo com a operação em Cotação');
+  assert(!/proposta aprovada/.test(html),
+    '★ o resto do previsto da operação em Cotação continua fora');
+  assert(/ICMS ST/.test(html), 'operação fora de Cotação continua aparecendo normalmente');
+  assert(tela.linhas.length === 2, `2 linhas na tela (veio ${tela.linhas.length})`);
+  assert(/2 lançamento\(s\) de operações ainda em <b>Cotação<\/b>/.test(tela.resumo),
+    'o resumo conta 2 escondidos, não 3 — o estudo saiu da conta de ocultos');
+  assert(/em cotação · estudo conta/.test(html), 'a linha marca que a operação ainda está em Cotação');
+
+  // Entra no caixa: o cartão de recebimentos do mês tem de somar os 1.621.
+  const m = /Contas a Receber no Mês<\/div>\s*<div class="c-val"[^>]*>([^<]+)/.exec(tela.dash);
+  assert(m && /1\.621,00/.test(m[1]), `★ o estudo entra no fluxo de caixa do mês (cartão: ${m ? m[1].trim() : '—'})`);
+
+  // E no resultado por operação, para a EI360-05 parar de aparecer zerada.
+  assert(/EI360-05/.test(tela.opsBody) && /1\.621,00/.test(tela.opsBody),
+    '★ e no resultado por operação da EI360-05');
+
+  // Cai fora quando a categoria é outra: a exceção é do estudo, não da operação.
+  assert(app.finValeEmCotacao({ categoria: 'Estudo impo' }) === true, 'a exceção reconhece "Estudo impo"');
+  ['Empréstimo', 'Imposto geral', '', null, undefined].forEach(c =>
+    assert(app.finValeEmCotacao({ categoria: c }) === false, `e não vale para categoria ${JSON.stringify(c)}`));
+}
+
 secao('★ Mês e filtros são cumulativos (E, não OU)');
 {
   const app = novoApp();
