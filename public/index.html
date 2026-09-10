@@ -4328,10 +4328,54 @@ function finConferenciaResolvida(){
 function finFiltrarSerie(recId){
   const sel = $('finSerieFiltro');
   if (sel) sel.value = recId;
-  const mes = $('finMesFiltro');
-  if (mes) mes.value = '';
-  renderFin();
-  toast('Mostrando a série inteira — todos os meses');
+  // Ver a série inteira é ver todos os meses, e quem clicou aqui pediu isso.
+  // O que não vale é o filtro largar o mês por baixo dos panos: o período vai
+  // para "Todos" pela mesma porta que o botão do alto da aba usa, e o seletor
+  // de mês na tela passa a dizer a verdade sobre o que está listado.
+  setFinPeriod('todos');
+  toast('Mostrando a série inteira — o período foi para <b>todos os meses</b>');
+}
+
+/* ---------- FILTROS DA LISTAGEM — um ponto só ----------
+   Mês e filtros são cumulativos: o mês é sempre a primeira condição e as
+   outras se somam a ele. Antes cada filtro decidia sozinho o que fazer com o
+   recorte de mês, e dois deles — a busca por texto e o filtro de série — o
+   descartavam. O efeito era o filtro SUBSTITUIR o mês em vez de somar-se a
+   ele: escolher uma despesa fixa em setembro devolvia os doze meses dela.
+
+   Ver todos os meses continua existindo, mas como escolha explícita — o botão
+   "Todos", que esvazia o seletor de mês —, nunca como efeito colateral de
+   filtrar. Quem quiser tudo pede tudo; quem escolheu um mês recebe o mês. */
+function finFiltros(){
+  const v = id => $(id) ? $(id).value : '';
+  return {
+    mes:      v('finMesFiltro'),
+    empresa:  v('finEmpresa'),
+    op:       v('finFilter'),
+    natureza: v('finNatFiltro'),
+    status:   v('finStFiltro'),
+    serie:    v('finSerieFiltro'),
+    busca:    nrm(v('finBusca'))
+  };
+}
+
+/* Todas as condições da lista, na mesma função. Qualquer tela que precise do
+   mesmo recorte chama isto — consertar um filtro aqui conserta em todas. */
+function finPassaNoFiltro(l, f){
+  // O mês vem do vencimento efetivo: é ele que decide em que mês a linha
+  // aparece, inclusive quando o pagamento de uma conta vencida caiu no mês
+  // seguinte e ela entra pelo caixa.
+  if (f.mes && !String(l.vencimentoCalc || l.vencimento || '').startsWith(f.mes)) return false;
+  if (f.empresa && finEmpresa(l) !== f.empresa) return false;
+  if (f.op && l.op !== f.op) return false;
+  if (f.natureza === 'fixo' && !l.fixo) return false;
+  if (f.natureza === 'pontual' && l.fixo) return false;
+  // Lançamento antigo pode não ter status gravado; sem isto ele sumiria dos
+  // dois filtros e ninguém acharia o lançamento.
+  if (f.status && (l.status || 'Previsto') !== f.status) return false;
+  if (f.serie && l.recId !== f.serie) return false;
+  if (f.busca && !finCombina(l, f.busca)) return false;
+  return true;
 }
 
 function renderFin(){
@@ -4345,11 +4389,17 @@ function renderFin(){
   const amIso = somaDias(hjISO, 1);
   const weekBounds = getISOWeekBounds();
 
+  // O seletor nasce no mês corrente, mas SÓ na primeira vez. Repetir isso a
+  // cada render fazia o botão "Todos" não funcionar: ele esvaziava o campo e o
+  // render seguinte devolvia o mês antes de qualquer coisa aparecer — não
+  // havia como ver todos os meses. Campo vazio depois de iniciado é escolha
+  // de quem está olhando, e é ela que manda.
   const mesFiltroEl = $('finMesFiltro');
-  if(mesFiltroEl && !mesFiltroEl.value) {
+  if(mesFiltroEl && !mesFiltroEl.value && !mesFiltroEl.dataset.finIniciado) {
     mesFiltroEl.value = hjISO.slice(0, 7);
   }
-  const targetMonth = mesFiltroEl ? mesFiltroEl.value : hjISO.slice(0, 7);
+  if(mesFiltroEl) mesFiltroEl.dataset.finIniciado = '1';
+  const targetMonth = mesFiltroEl ? mesFiltroEl.value : '';
 
   // "A pagar" conta só o que ainda está em aberto: com a conta já quitada
   // somada, o número não respondia à pergunta que se faz olhando para ele —
@@ -4536,45 +4586,44 @@ function renderFin(){
       <td class="r num" style="font-weight:800;color:${res >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(res)}</td><td class="r num">${mg}</td></tr>`;
   }).join('') || '<tr><td colspan="8" class="note">Nenhum lançamento vinculado a operações ainda.</td></tr>';
 
-  const opFilter = $('finFilter') ? $('finFilter').value : '';
-  const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
-  const stFilter = $('finStFiltro') ? $('finStFiltro').value : '';
-  const serieFiltro = $('finSerieFiltro') ? $('finSerieFiltro').value : '';
-
-  const busca = nrm($('finBusca') ? $('finBusca').value : '');
-  // Procurar dentro do mês selecionado esconderia justamente o lançamento que
-  // se procura quando ele é de outro mês. Buscando, o filtro de mês sai de
-  // cena — e o resumo avisa que a lista deixou de ser só daquele mês.
-  const rows = effectiveItems.filter(l => {
-    // Escolher uma série é pedir a série INTEIRA: manter o recorte de mês
-    // mostraria uma linha só e esconderia justamente a comparação entre os
-    // doze meses, que é o motivo de filtrar por série.
-    if (!busca && !serieFiltro && targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
-    if (busca && !finCombina(l, busca)) return false;
-    if (serieFiltro && l.recId !== serieFiltro) return false;
-    if (opFilter && l.op !== opFilter) return false;
-    if (natFilter === 'fixo' && !l.fixo) return false;
-    if (natFilter === 'pontual' && l.fixo) return false;
-    // Lançamento antigo pode não ter status gravado; sem isto ele sumiria dos
-    // dois filtros e ninguém acharia o lançamento.
-    if (stFilter && (l.status || 'Previsto') !== stFilter) return false;
-    return true;
-  });
+  // Um único ponto lê os controles e um único ponto decide o que passa: as
+  // leituras soltas que existiam aqui deixavam cada filtro livre para tratar o
+  // mês do seu jeito, e foi assim que dois deles passaram a descartá-lo.
+  const filtros = finFiltros();
+  const rows = effectiveItems.filter(l => finPassaNoFiltro(l, filtros));
+  // Filtrar não pode largar o recorte de mês, mas também não pode esconder que
+  // o que se procura existe em outro mês. Em vez de descartar o mês por conta
+  // própria — que era o bug —, a lista conta quantos ficaram de fora e oferece
+  // o passo explícito de ver todos os meses. Sem filtro nenhum não há o que
+  // avisar: que existem outros meses, o seletor de mês já diz.
+  const temFiltro = !!(filtros.op || filtros.natureza || filtros.status || filtros.serie || filtros.busca);
+  const foraDoMes = (filtros.mes && temFiltro)
+    ? effectiveItems.filter(l => finPassaNoFiltro(l, Object.assign({}, filtros, { mes: '' }))).length - rows.length
+    : 0;
 
   // Filtrar sem somar obriga a conferir na mão o que ficou na tela.
   if ($('finResumo')) {
     const ent = rows.filter(l => l.tipo !== 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     const sai = rows.filter(l => l.tipo === 'Despesa').reduce((s, l) => s + (+l.valor || 0), 0);
     // Esconder sem dizer faria a conta não fechar contra a Torre de Controle.
+    const mesNome = filtros.mes
+      ? new Date(filtros.mes + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+      : '';
     const aviso = (empFiltro ? ` <span style="color:${finEmpresaCor(empFiltro)}">· só <b>${esc(empFiltro)}</b></span>` : '')
-      + (busca ? ' <span style="color:#7FA6FF">· busca em <b>todos os meses</b>, ignorando o filtro acima</span>' : '')
-      + (serieFiltro ? ' <span style="color:#7FA6FF">· uma série inteira, <b>todos os meses</b></span>' : '')
+      // O filtro passou a respeitar o mês. Dizer quantos ficaram de fora evita
+      // a conclusão errada de que não existe mais nada — e o botão faz, como
+      // escolha de quem está olhando, o passo que antes acontecia sozinho.
+      + (foraDoMes > 0
+        ? ` <span style="color:#7FA6FF">· mais <b>${foraDoMes}</b> fora de ${esc(mesNome)} atendem a este filtro`
+          + ` <button class="btn btn-ghost btn-sm" style="padding:1px 7px;margin-left:4px" onclick="setFinPeriod('todos')">ver todos os meses</button></span>`
+        : '')
+      + (!filtros.mes ? ' <span style="color:#7FA6FF">· <b>todos os meses</b></span>' : '')
       + (ocultosCotacao
       ? ` <span style="color:var(--amber)">· ${ocultosCotacao} lançamento(s) de operações ainda em <b>Cotação</b> estão fora desta tela</span>`
       : '');
     $('finResumo').innerHTML = (rows.length
-      ? `${rows.length} lançamento(s) na tela · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
-      : ((ocultosCotacao||busca)?'Nenhum lançamento encontrado.':'')) + aviso;
+      ? `${rows.length} lançamento(s) na tela${mesNome ? ' em <b>' + esc(mesNome) + '</b>' : ''} · entradas <b style="color:#34C77C">${fmt(ent)}</b> · saídas <b style="color:#FF5A6E">${fmt(sai)}</b> · saldo <b style="color:${ent-sai>=0?'#34C77C':'#FF5A6E'}">${fmt(ent-sai)}</b>`
+      : 'Nenhum lançamento neste recorte.') + aviso;
   }
 
   $('finEmpty').style.display = rows.length ? 'none' : 'block';

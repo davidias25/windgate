@@ -7,7 +7,9 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "node test/server.test.js && node test/recorrencia.test.js",
-    "test:recorrencia": "node test/recorrencia.test.js"
+    "test:recorrencia": "node test/recorrencia.test.js",
+    "verificar:filtros": "node scripts/verificar-filtros.js",
+    "verificar:recorrencia": "node scripts/verificar-recorrencia.js"
   },
   "keywords": [
     "windgate",

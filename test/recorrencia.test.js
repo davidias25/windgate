@@ -407,6 +407,153 @@ secao('Aviso de renovação aparece na reta final e não antes');
   assert(/Software mensal/.test(notifs[0].tx) && /renovar/i.test(notifs[0].tx), 'o texto diz qual despesa e propõe renovar');
 }
 
+/* ==================================================================== */
+secao('★ Mês e filtros são cumulativos (E, não OU)');
+{
+  const app = novoApp();
+  const s = criarFixaMensal(app);                       // 12 meses, set/2026 → ago/2027
+  criarFixaMensal(app, { m_ldesc: 'Contabilidade Pedro', m_lval: '900', m_lvenc: '2026-09-20' });
+  // Uma pontual em setembro e outra em novembro, para o mês ter o que separar.
+  [['2026-09-25', 'Frete internacional', '22000'], ['2026-11-25', 'Frete internacional', '15000']]
+    .forEach(([venc, desc, val]) => {
+      app.openLancModal();
+      preencher(app, {
+        m_lfixo: 'false', m_lop: 'WindGate', m_ltipo: 'Despesa', m_lcat: '',
+        m_lvenc: venc, m_ldata: venc, m_lval: val, m_lemp: 'WindGate',
+        m_lst: 'Previsto', m_ldesc: desc, m_lcomp: '', m_lnf: ''
+      });
+      app.saveLanc(null);
+    });
+
+  const mesDaLinha = l => (l.vencimento || '').slice(0, 7);
+  /* Aplica um conjunto de filtros SOBRE o mês e devolve os registros listados,
+     recuperados pelo _id que a própria linha carrega — é o que está na tela,
+     não o que o teste imagina que deveria estar. */
+  function comFiltros(mes, f){
+    ['finBusca','finSerieFiltro','finStFiltro','finNatFiltro','finEmpresa','finFilter'].forEach(id =>
+      app.document.getElementById(id).value = '');
+    app.document.getElementById('finMesFiltro').value = mes;
+    Object.entries(f || {}).forEach(([k, v]) => { app.document.getElementById(k).value = v; });
+    app.renderFin();
+    const html = app.document.getElementById('finBody').innerHTML || '';
+    const ids = [];
+    html.replace(/onchange="setFinStatus\('([^']+)'/g, (m, id) => { ids.push(id); return m; });
+    return ids.map(id => app.finPorId(id)).filter(Boolean);
+  }
+
+  const casos = [
+    ['sem filtro',            {}],
+    ['Apenas Fixas',          { finNatFiltro: 'fixo' }],
+    ['Apenas Pontuais',       { finNatFiltro: 'pontual' }],
+    ['Status Previsto',       { finStFiltro: 'Previsto' }],
+    ['Empresa WindGate',      { finEmpresa: 'WindGate' }],
+    ['Série',                 { finSerieFiltro: s._id }],
+    ['Busca "frete"',         { finBusca: 'frete' }],
+    ['Busca "aluguel"',       { finBusca: 'aluguel' }],
+    ['Fixas + Previsto',      { finNatFiltro: 'fixo', finStFiltro: 'Previsto' }],
+    ['Série + Previsto',      { finSerieFiltro: s._id, finStFiltro: 'Previsto' }],
+    ['Busca + Fixas',         { finBusca: 'aluguel', finNatFiltro: 'fixo' }]
+  ];
+  casos.forEach(([nome, f]) => {
+    const regs = comFiltros('2026-09', f);
+    const fora = regs.filter(l => mesDaLinha(l) !== '2026-09');
+    assert(fora.length === 0,
+      `★ ${nome}: nenhuma linha de outro mês (veio ${fora.length}${fora.length ? ' de ' + [...new Set(fora.map(mesDaLinha))].join(',') : ''})`);
+  });
+
+  // O caso que o Samir relatou, conferido contra o banco.
+  const fixasSet = comFiltros('2026-09', { finNatFiltro: 'fixo' });
+  const noBanco = app.avaliar('DB.fin').filter(l => l && l.fixo && (l.vencimento || '').startsWith('2026-09'));
+  assert(fixasSet.length === noBanco.length && fixasSet.length === 2,
+    `★ mês + "Apenas Fixas" = as ${noBanco.length} fixas de set/2026, e só elas`);
+
+  // Busca acha o que existe no mês e não arrasta os outros onze.
+  const busca = comFiltros('2026-09', { finBusca: 'aluguel' });
+  assert(busca.length === 1 && busca[0].mesRef === '2026-09', '★ busca fica dentro do mês selecionado');
+
+  // …mas avisa que há mais fora, com o passo explícito.
+  const resumo = app.document.getElementById('finResumo').innerHTML;
+  assert(/fora de setembro de 2026/.test(resumo) && /ver todos os meses/.test(resumo),
+    'o resumo diz quantos ficaram fora e oferece "ver todos os meses"');
+
+  // Sem filtro nenhum não há o que avisar.
+  comFiltros('2026-09', {});
+  assert(!/fora de setembro/.test(app.document.getElementById('finResumo').innerHTML),
+    'sem filtro ativo, o aviso não aparece');
+}
+
+secao('Trocar de mês com filtro ativo, e limpar o filtro');
+{
+  const app = novoApp();
+  const s = criarFixaMensal(app);
+  const linhas = () => (app.document.getElementById('finBody').innerHTML || '').split('<tr>').slice(1);
+
+  app.document.getElementById('finMesFiltro').value = '2026-09';
+  app.document.getElementById('finNatFiltro').value = 'fixo';
+  app.renderFin();
+  assert(linhas().length === 1 && /Fixa 1\/12/.test(linhas()[0]), 'set/2026 com "Apenas Fixas" mostra a 1/12');
+
+  // Trocar o mês pelo mesmo caminho da tela: o filtro continua valendo.
+  app.setFinPeriod('proxMes');
+  app.document.getElementById('finMesFiltro').value = '2026-11';
+  app.renderFin();
+  assert(app.document.getElementById('finNatFiltro').value === 'fixo', 'o filtro não foi limpo ao trocar de mês');
+  assert(linhas().length === 1 && /Fixa 3\/12/.test(linhas()[0]), '★ nov/2026 reaplica o filtro no mês novo — a 3/12');
+
+  // Limpar o filtro devolve o MÊS inteiro, não todos os meses.
+  app.document.getElementById('finNatFiltro').value = '';
+  app.renderFin();
+  const regs = linhas();
+  assert(regs.length === 1, '★ limpar o filtro volta ao mês completo (1 lançamento em nov/2026)');
+  assert(app.document.getElementById('finMesFiltro').value === '2026-11', 'e o mês selecionado continua o mesmo');
+
+  // "Todos" é a única porta para ver todos os meses, e é explícita.
+  app.setFinPeriod('todos');
+  assert(app.document.getElementById('finMesFiltro').value === '', 'o botão "Todos" esvazia o seletor de mês');
+  assert(linhas().length === 12, 'e aí sim aparecem os 12 meses');
+  assert(/todos os meses/.test(app.document.getElementById('finResumo').innerHTML), 'o resumo diz que são todos os meses');
+}
+
+secao('Totais na tela batem com as linhas listadas');
+{
+  const app = novoApp();
+  criarFixaMensal(app);
+  criarFixaMensal(app, { m_ldesc: 'Contabilidade', m_lval: '900', m_lvenc: '2026-09-20' });
+  app.openLancModal();
+  preencher(app, {
+    m_lfixo: 'false', m_lop: 'WindGate', m_ltipo: 'Receita', m_lcat: '',
+    m_lvenc: '2026-09-25', m_ldata: '2026-09-25', m_lval: '30000', m_lemp: 'WindGate',
+    m_lst: 'Previsto', m_ldesc: 'Recebimento cliente', m_lcomp: '', m_lnf: ''
+  });
+  app.saveLanc(null);
+
+  const conferir = (mes, f, rotulo) => {
+    ['finBusca','finSerieFiltro','finStFiltro','finNatFiltro','finEmpresa','finFilter'].forEach(id =>
+      app.document.getElementById(id).value = '');
+    app.document.getElementById('finMesFiltro').value = mes;
+    Object.entries(f || {}).forEach(([k, v]) => { app.document.getElementById(k).value = v; });
+    app.renderFin();
+    const html = app.document.getElementById('finBody').innerHTML || '';
+    const ids = [];
+    html.replace(/onchange="setFinStatus\('([^']+)'/g, (m, id) => { ids.push(id); return m; });
+    const regs = ids.map(id => app.finPorId(id)).filter(Boolean);
+    const ent = regs.filter(l => l.tipo !== 'Despesa').reduce((a, l) => a + (+l.valor || 0), 0);
+    const sai = regs.filter(l => l.tipo === 'Despesa').reduce((a, l) => a + (+l.valor || 0), 0);
+    // fmt() usa espaço não-quebrável entre "R$" e o número.
+    const norm = t => String(t).replace(/ /g, ' ');
+    const resumo = norm(app.document.getElementById('finResumo').innerHTML);
+    assert(resumo.indexOf(norm(app.fmt(ent))) >= 0 && resumo.indexOf(norm(app.fmt(sai))) >= 0,
+      `${rotulo}: o resumo soma exatamente as ${regs.length} linhas listadas (entradas ${app.fmt(ent)} · saídas ${app.fmt(sai)})`);
+    assert(resumo.indexOf(`${regs.length} lançamento(s)`) >= 0, `${rotulo}: a contagem do resumo bate com as linhas`);
+    return regs;
+  };
+
+  conferir('2026-09', {}, 'mês inteiro');
+  conferir('2026-09', { finNatFiltro: 'fixo' }, 'só fixas');
+  conferir('2026-09', { finStFiltro: 'Previsto' }, 'só previstos');
+  conferir('2026-10', { finNatFiltro: 'fixo' }, 'outro mês, mesmo filtro');
+}
+
 secao('Filtros: só fixas, e uma série inteira');
 {
   const app = novoApp();
@@ -426,11 +573,19 @@ secao('Filtros: só fixas, e uma série inteira');
   app.renderFin();
   assert(linhasDaTela(app).length === 1 && /Fixa 1\/12/.test(linhasDaTela(app)[0]), 'filtro "Apenas Fixas" deixa só a ocorrência');
 
+  // Escolher a série no seletor NÃO larga o mês: dentro de setembro, a série
+  // tem uma ocorrência só. Foi tratar isso como "mostre a série inteira" que
+  // fazia o filtro substituir o recorte de mês em vez de somar-se a ele.
   app.document.getElementById('finNatFiltro').value = '';
   app.document.getElementById('finSerieFiltro').value = s._id;
   app.renderFin();
+  assert(linhasDaTela(app).length === 1, 'série + mês = a ocorrência daquele mês, só ela');
+
+  // Ver a série inteira é uma escolha explícita, e ela leva o período junto.
+  app.finFiltrarSerie(s._id);
   const linhas = linhasDaTela(app);
-  assert(linhas.length === 12, `filtrar por série mostra os 12 meses de uma vez (veio ${linhas.length})`);
+  assert(app.document.getElementById('finMesFiltro').value === '', 'ver a série inteira manda o período para "Todos"');
+  assert(linhas.length === 12, `e aí mostra os 12 meses (veio ${linhas.length})`);
   assert(/Fixa 12\/12/.test(linhas.join('')), 'a última ocorrência está na lista');
 }
 
