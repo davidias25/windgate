@@ -1282,6 +1282,15 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <div style="overflow-x:auto"><table><thead><tr><th>Operação</th><th class="r">Receita prevista</th><th class="r">Receita realizada</th><th class="r">Despesa prevista</th><th class="r">Despesa realizada</th><th class="r">Resultado previsto</th><th class="r">Resultado real</th><th class="r">Margem real</th></tr></thead><tbody id="finOpsBody"></tbody></table></div>
   </div>
 
+  <!-- Séries fixas: o MODELO de cada recorrente. As linhas mensais dela ficam
+       na lista de lançamentos abaixo — uma por mês, cada uma com o seu status,
+       o seu comprovante e o seu valor. -->
+  <div id="finSeriesAviso" style="display:none"></div>
+  <div class="card" id="finSeriesCard" style="display:none">
+    <h2>📌 Séries fixas <span class="spacer"></span><span class="note">Cada série gera uma ocorrência por mês. Realizar um mês não mexe nos outros.</span></h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>Descrição</th><th>Tipo</th><th>Categoria</th><th class="r">Valor padrão</th><th>Vencimento</th><th>Período</th><th>Progresso</th><th>Situação</th><th></th></tr></thead><tbody id="finSeriesBody"></tbody></table></div>
+  </div>
+
   <div class="card">
     <h2>Lançamentos do Período <span class="spacer"></span>
       <select id="finFilter" style="width:170px" onchange="renderFin()"></select> &nbsp;
@@ -1290,6 +1299,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="fixo">Apenas Fixas</option>
         <option value="pontual">Apenas Pontuais</option>
       </select> &nbsp;
+      <select id="finSerieFiltro" style="width:250px;display:none" onchange="renderFin()" title="Ver todos os meses de uma série fixa"></select> &nbsp;
       <input id="finBusca" placeholder="Buscar por descrição, operação, categoria, valor…" style="width:290px" oninput="renderFin()"> &nbsp;
       <select id="finStFiltro" style="width:170px" onchange="renderFin()">
         <option value="">— Status (Todos) —</option>
@@ -1303,7 +1313,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
 
   <div class="rulebox green"><b>Regra de ouro nº 1:</b> nenhum comprovante sem lançamento no mesmo dia; nenhum lançamento sem comprovante. O lançamento nasce do comprovante no grupo do WhatsApp.</div>
-  <div class="rulebox"><b>Regra de ouro nº 2:</b> contas e despesas fixas recorrentes (aluguel, contabilidade, softwares) devem ser lançadas como <b>Fixas Mensais</b> para serem projetadas no mesmo dia em cada mês automaticamente.</div>
+  <div class="rulebox"><b>Regra de ouro nº 2:</b> contas e despesas fixas recorrentes (aluguel, contabilidade, softwares) devem ser lançadas como <b>Fixas Mensais</b>. Cada mês vira um lançamento próprio (<b>Fixa 3/12</b>), com status, comprovante e valor pago independentes — marcar setembro como Realizado <b>não</b> marca outubro.</div>
   <div class="card">
     <h2 class="blue">Mutirão de correção da planilha antiga (Samir + Davi · ~2h)</h2>
     <div class="note" style="line-height:1.85" id="mutiraoList"></div>
@@ -1716,7 +1726,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','fretes','fornecedores','qindex','agendaTasks','crm','crmOps','parceiros','opStatusHist'];
+const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmOps','parceiros','opStatusHist'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -1764,6 +1774,9 @@ function ensureDBStructure(){
   }
   if (!Array.isArray(DB.ops)) DB.ops = [];
   if (!Array.isArray(DB.fin)) DB.fin = [];
+  // Séries de lançamento fixo. A série é o modelo; quem vive no fluxo de
+  // caixa são as ocorrências mensais, que ficam em DB.fin com `recId`.
+  if (!Array.isArray(DB.finRec)) DB.finRec = [];
   if (!Array.isArray(DB.docs)) DB.docs = [];
   if (!Array.isArray(DB.fretes)) DB.fretes = [];
   if (!Array.isArray(DB.fornecedores)) DB.fornecedores = [];
@@ -2048,6 +2061,46 @@ function migrateDB(){
     });
     if (!Array.isArray(DB.opStatusHist)) DB.opStatusHist = [];
     DB.settings.schema = 13; ch = true;
+  }
+  if ((DB.settings.schema || 13) < 14) {
+    // Recorrência virtual vira recorrência materializada. Cada despesa fixa
+    // existente era UM registro que a tela repetia em todos os meses — por
+    // isso marcar setembro como Realizado marcava os doze. Aqui ela vira uma
+    // série (o modelo) mais uma ocorrência por mês, cada uma com o seu
+    // status, comprovante e valor.
+    const rel = finMigrarFixos(DB);
+    if (rel.length) {
+      // Fixa que estava Realizada sem data de pagamento não diz de qual mês
+      // era: volta inteira para Previsto e fica registrada aqui, para o
+      // Samir e o Davi marcarem o mês certo na mão.
+      DB.settings.finRecMigracao = {
+        em: new Date().toISOString(),
+        series: rel.length,
+        ocorrencias: rel.reduce((a, r) => a + r.depois.length, 0),
+        conferir: rel.filter(r => r.conferir).map(r => ({ serieId: r.serieId, desc: r.desc, motivo: r.conferir }))
+      };
+    }
+    DB.settings.schema = 14; ch = true;
+  }
+  if ((DB.settings.schema || 14) < 15) {
+    // Anexar comprovante marcava o lançamento como Realizado sem gravar a data
+    // do pagamento. O schema 11 já tinha corrigido o histórico, mas o bug
+    // continuou produzindo registros novos no mesmo estado — "pago sem data
+    // de pagamento" —, e num vencimento futuro isso faz o fluxo de caixa
+    // previsto mostrar como quitado um mês em que nada saiu. A origem está
+    // corrigida em finRealizarPorComprovante; aqui fica o que já foi gravado.
+    const hojeLocal = (() => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); })();
+    let n = 0;
+    (DB.fin || []).forEach(l => {
+      if (!l || l.status !== 'Realizado' || l.liquidadoEm) return;
+      // Vencido: o melhor palpite é o próprio vencimento. Ainda a vencer: não
+      // dá para ter sido pago no futuro, então no máximo hoje.
+      const v = l.vencimento || l.data || hojeLocal;
+      l.liquidadoEm = v > hojeLocal ? hojeLocal : v;
+      n++;
+    });
+    if (n) console.info(`[financeiro] ${n} lançamento(s) Realizados sem data de pagamento receberam a data.`);
+    DB.settings.schema = 15; ch = true;
   }
   if (DB.ptax === undefined) { DB.ptax = null; ch = true; }
   (DB.fretes || []).forEach(f => {
@@ -3666,6 +3719,8 @@ function finCombina(l, termo){
   const v = +l.valor || 0;
   const br = d => (d||'').split('-').reverse().join('/');
   const campos = [l.desc, l.op, l.categoria, l.por, l.tipo, l.status, l.nf, finEmpresa(l),
+    // A linha mostra "Fixa 3/12"; procurar por isso precisa achar.
+    l.recIdx ? `fixa ${l.recIdx}/${l.recTot}` : '', l.mesRef,
     br(l.vencimento), br(l.vencimentoCalc), br(l.liquidadoEm),
     v.toFixed(2), v.toFixed(2).replace('.', ','), fmt(v), String(Math.round(v))];
   return nrm(campos.filter(Boolean).join(' ')).includes(termo);
@@ -3688,10 +3743,603 @@ function getISOWeekBounds(){
   return { mondayStr: iso(monday), sundayStr: iso(sunday) };
 }
 
+/* ============================================================
+   DESPESA FIXA — SÉRIE (modelo) E OCORRÊNCIAS MENSAIS
+   ============================================================
+   Antes, "Fixa Mensal" era UM registro que a tela repetia em cada mês. O
+   status, o comprovante e o valor moravam nesse registro único: marcar
+   setembro como Realizado marcava os doze meses, porque só havia um registro
+   para marcar. Era recorrência virtual — a repetição existia na tela, não no
+   banco.
+
+   Agora são dois níveis:
+     · SÉRIE  (DB.finRec) — o modelo: tipo, natureza, categoria, descrição,
+       valor padrão, dia de vencimento, operação, empresa, mês de início e
+       quantidade de ocorrências (12 por padrão; menos ou mais para
+       empréstimos com parcelas definidas).
+     · OCORRÊNCIA (DB.fin, com `recId`) — o lançamento de UM mês: vencimento,
+       valor daquele mês, status, data de pagamento e comprovante próprios.
+
+   Realizar setembro não encosta em outubro porque setembro e outubro são
+   registros diferentes. Nenhum caminho deste arquivo copia status, valor pago
+   ou comprovante de uma ocorrência para outra. */
+
+/* ==== INÍCIO recorrencia-core ====
+   Funções puras: nada de DOM, nada de `DB` global, nada de `USER`.
+   scripts/migrar-despesas-fixas.js recorta exatamente este trecho do HTML e
+   executa o MESMO código, para que o relatório antes/depois não possa
+   divergir do que o sistema faz de verdade. */
+
+/* Padrão de uma fixa mensal: um ano. O campo é editável justamente para o que
+   tem fim conhecido — empréstimo em 9 parcelas, contrato de 6 meses. */
+const FIN_REC_TOTAL_PADRAO = 12;
+
+/* A migração não inventa passado: o que é anterior a agosto/2026 já foi
+   fechado na planilha antiga, e recriá-lo encheria o caixa de contas que
+   ninguém vai pagar e de "realizados" que ninguém conferiu. */
+const FIN_REC_MES_MIN = '2026-08';
+
+function finUltimoDiaMes(ano, mes){ return new Date(ano, mes, 0).getDate(); }
+
+/* 'YYYY-MM' de uma data ISO — vazio se não houver data. */
+function finMesDe(iso){
+  const t = String(iso || '');
+  return /^\d{4}-\d{2}/.test(t) ? t.slice(0, 7) : '';
+}
+
+/* Aritmética de mês feita em número, não em Date: somar um mês a 31/01 num
+   Date devolve 03/03, e era assim que a projeção pulava fevereiro. */
+function finMesSoma(mesRef, n){
+  const p = String(mesRef).split('-');
+  const t = (parseInt(p[0], 10) * 12) + (parseInt(p[1], 10) - 1) + (n | 0);
+  return String(Math.floor(t / 12)).padStart(4, '0') + '-' + String((t % 12) + 1).padStart(2, '0');
+}
+
+/* Distância em meses de `de` até `ate` (negativa se `ate` for anterior). */
+function finMesDiff(de, ate){
+  const a = String(de).split('-'), b = String(ate).split('-');
+  return (parseInt(b[0], 10) * 12 + parseInt(b[1], 10)) - (parseInt(a[0], 10) * 12 + parseInt(a[1], 10));
+}
+
+/* Dia 31 não existe em fevereiro: o vencimento cai no último dia do mês, que é
+   como boleto e débito automático se comportam. Sem isto, 31/01 viraria 03/03
+   e a conta apareceria no mês errado. */
+function finVencDoMes(mesRef, dia){
+  const p = String(mesRef).split('-');
+  const max = finUltimoDiaMes(parseInt(p[0], 10), parseInt(p[1], 10));
+  const d = Math.min(Math.max(parseInt(dia, 10) || 1, 1), max);
+  return mesRef + '-' + String(d).padStart(2, '0');
+}
+
+/* Mês da última ocorrência — é ele que dispara o aviso de renovação. */
+function finSerieFim(s){
+  return finMesSoma(s.inicio, (parseInt(s.total, 10) || FIN_REC_TOTAL_PADRAO) - 1);
+}
+
+/* A ocorrência herda da série só o que é do MODELO. Status, data de pagamento,
+   valor pago, comprovante e nota nascem vazios e nunca voltam a ser copiados
+   da série depois: é exatamente essa cópia de volta que fazia o status de um
+   mês vazar para os outros onze. */
+function finOcorrenciaNova(serie, idx, gerarId, extra){
+  const total = parseInt(serie.total, 10) || FIN_REC_TOTAL_PADRAO;
+  const mesRef = finMesSoma(serie.inicio, idx - 1);
+  const venc = finVencDoMes(mesRef, serie.dia);
+  return Object.assign({
+    _id: gerarId(idx),
+    recId: serie._id,          // recurrence_id    — a série a que pertence
+    recIdx: idx,               // recurrence_index — 1/12, 2/12…
+    recTot: total,             // recurrence_total
+    mesRef: mesRef,
+    // A data de lançamento da ocorrência é o mês dela, não o dia em que a
+    // série foi criada: a Gestão do Mês soma o realizado por `data`, e todas
+    // as doze cairiam no mês da criação.
+    data: venc,
+    vencimento: venc,
+    op: serie.op || 'WindGate',
+    tipo: serie.tipo || 'Despesa',
+    categoria: serie.categoria || '',
+    fixo: true,
+    desc: serie.desc || '',
+    valor: +serie.valor || 0,
+    empresa: serie.empresa || 'WindGate',
+    status: 'Previsto',
+    liquidadoEm: null,
+    valorPago: null,           // o que saiu de fato neste mês
+    valorPrevisto: null,       // o valor do mês antes de realizar, quando diferiu
+    comp: '',
+    nf: '',
+    por: serie.por || ''
+  }, extra || {});
+}
+
+/* Materializa as ocorrências da série. `de`/`ate` são índices 1-based. */
+function finMaterializar(serie, gerarId, de, ate){
+  const total = parseInt(serie.total, 10) || FIN_REC_TOTAL_PADRAO;
+  const ini = Math.max(1, parseInt(de, 10) || 1);
+  const fim = Math.min(total, parseInt(ate, 10) || total);
+  const out = [];
+  for (let i = ini; i <= fim; i++) out.push(finOcorrenciaNova(serie, i, gerarId));
+  return out;
+}
+
+/* Ids da migração são DERIVADOS do id do registro antigo, não sorteados. Dois
+   navegadores podem rodar a migração antes de sincronizar entre si; com ids
+   sorteados a mesclagem juntaria as duas versões e as doze ocorrências
+   virariam vinte e quatro. Derivados, os dois chegam ao mesmo resultado e a
+   mesclagem por `_id` reconhece que é o mesmo registro. */
+function finRecIdMigracao(idOrig){ return 'rec-' + idOrig; }
+function finOcIdMigracao(idOrig, idx){ return 'rec-' + idOrig + '-' + idx; }
+
+/* Migra as despesas fixas do modelo antigo (um registro repetido na tela) para
+   série + ocorrências mensais.
+
+   Idempotente: registro que já tem `recId` é ocorrência e é ignorado, então
+   rodar de novo não duplica nada. Devolve o relatório antes/depois — é ele
+   que scripts/migrar-despesas-fixas.js imprime para conferência. */
+function finMigrarFixos(db){
+  if (!Array.isArray(db.fin)) db.fin = [];
+  if (!Array.isArray(db.finRec)) db.finRec = [];
+
+  const relatorio = [];
+  const legados = db.fin.filter(l => l && l.fixo && !l.recId);
+
+  legados.forEach(orig => {
+    const antes = Object.assign({}, orig);
+    const idOrig = orig._id;
+    const baseData = orig.vencimento || orig.data || '';
+    const dia = parseInt(String(baseData).slice(8, 10), 10) || 1;
+    const mesOrig = finMesDe(baseData);
+    // Nada de ocorrência retroativa: quem já vinha de antes passa a contar de
+    // agosto/2026, o mês em que o controle novo começa.
+    const inicio = (mesOrig && mesOrig > FIN_REC_MES_MIN) ? mesOrig : FIN_REC_MES_MIN;
+    const total = FIN_REC_TOTAL_PADRAO;
+
+    const serie = {
+      _id: finRecIdMigracao(idOrig),
+      tipo: orig.tipo || 'Despesa',
+      empresa: orig.empresa || 'WindGate',
+      op: orig.op || 'WindGate',
+      categoria: orig.categoria || '',
+      desc: orig.desc || '',
+      valor: +orig.valor || 0,
+      dia: dia,
+      inicio: inicio,
+      total: total,
+      por: orig.por || '',
+      criadaEm: orig.data || (inicio + '-01'),
+      encerradaEm: null,
+      renovadaEm: null,
+      migradaDe: idOrig
+    };
+
+    // O mês realmente pago é o da data de liquidação. O comprovante é um link:
+    // não carrega data nenhuma, então comprovante sem data de pagamento não
+    // identifica mês e a despesa inteira volta para Previsto — com a linha na
+    // lista de conferência, para o Samir e o Davi marcarem o mês certo.
+    const mesLiq = finMesDe(orig.liquidadoEm);
+    const idxLiq = mesLiq ? finMesDiff(inicio, mesLiq) + 1 : 0;
+    const realizavel = orig.status === 'Realizado' && idxLiq >= 1 && idxLiq <= total;
+    const idxAlvo = realizavel ? idxLiq : 1;
+
+    const ocorrencias = finMaterializar(serie, idx => finOcIdMigracao(idOrig, idx), 1, total);
+
+    // O registro antigo VIRA uma das ocorrências, conservando o `_id`: é a
+    // identidade que a sincronização usa. Trocá-la faria o registro antigo
+    // voltar da cópia de outro usuário e a despesa apareceria duas vezes.
+    const molde = ocorrencias[idxAlvo - 1];
+    Object.keys(orig).forEach(k => { delete orig[k]; });
+    Object.assign(orig, molde, {
+      _id: idOrig,
+      status: realizavel ? 'Realizado' : 'Previsto',
+      liquidadoEm: realizavel ? orig.liquidadoEm || antes.liquidadoEm : null,
+      // Comprovante e nota não se perdem nem quando o mês é indefinido: ficam
+      // nesta ocorrência e a despesa entra na lista de conferência.
+      comp: antes.comp || '',
+      nf: antes.nf || '',
+      por: antes.por || ''
+    });
+    ocorrencias[idxAlvo - 1] = orig;
+
+    ocorrencias.forEach(o => { if (o !== orig) db.fin.push(o); });
+    db.finRec.push(serie);
+
+    const conferir = (antes.status === 'Realizado' && !realizavel)
+      ? (mesLiq
+          ? `Estava Realizada com pagamento em ${mesLiq}, fora da janela ${inicio}…${finSerieFim(serie)} — todas voltaram para Previsto.`
+          : 'Estava Realizada sem data de pagamento — não dá para saber de qual mês era; todas voltaram para Previsto.')
+      : '';
+
+    relatorio.push({
+      serieId: serie._id,
+      desc: serie.desc || '(sem descrição)',
+      empresa: serie.empresa,
+      tipo: serie.tipo,
+      antes: {
+        _id: idOrig,
+        vencimento: antes.vencimento || antes.data || '',
+        valor: +antes.valor || 0,
+        status: antes.status || 'Previsto',
+        liquidadoEm: antes.liquidadoEm || '',
+        comp: antes.comp ? 'sim' : ''
+      },
+      depois: ocorrencias.map(o => ({
+        idx: o.recIdx, mes: o.mesRef, vencimento: o.vencimento,
+        valor: o.valor, status: o.status, comp: o.comp ? 'sim' : '', _id: o._id
+      })),
+      conferir: conferir
+    });
+  });
+
+  return relatorio;
+}
+/* ==== FIM recorrencia-core ==== */
+
+/* ---------- SÉRIES: acesso e apresentação (já com DOM e DB) ---------- */
+
+const finSeries = () => (Array.isArray(DB.finRec) ? DB.finRec : (DB.finRec = []));
+const finSerie = id => finSeries().find(s => s && s._id === id);
+/* Ocorrências de uma série, em ordem de mês. */
+const finOcorrencias = id => (DB.fin || []).filter(l => l && l.recId === id)
+  .sort((a, b) => (a.recIdx || 0) - (b.recIdx || 0));
+const finMesExt = m => m ? new Date(m + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }).replace('.', '') : '—';
+/* "Fixa 3/12" — a tag diz de qual mês da série é esta linha. Sem o índice, as
+   doze linhas ficavam idênticas e ninguém sabia qual estava olhando. */
+const finRecTag = l => (l && l.recIdx) ? `📌 Fixa ${l.recIdx}/${l.recTot || FIN_REC_TOTAL_PADRAO}` : '📌 Fixa';
+
+/* Cria a série a partir dos campos do modal e materializa as ocorrências. */
+function finNovaSerie(campos, total, primeiraRealizada){
+  const venc = campos.vencimento;
+  const serie = {
+    _id: novoId(),
+    tipo: campos.tipo,
+    empresa: campos.empresa,
+    op: campos.op || 'WindGate',
+    categoria: campos.categoria || '',
+    desc: campos.desc || '',
+    valor: +campos.valor || 0,
+    dia: parseInt(String(venc).slice(8, 10), 10) || 1,
+    inicio: finMesDe(venc),
+    total: Math.max(1, Math.min(120, parseInt(total, 10) || FIN_REC_TOTAL_PADRAO)),
+    por: campos.por || '',
+    criadaEm: agHoje(),
+    encerradaEm: null,
+    renovadaEm: null
+  };
+  finSeries().push(serie);
+
+  const ocs = finMaterializar(serie, () => novoId(), 1, serie.total);
+  // Só a primeira pode nascer Realizada, e apenas se o lançamento foi
+  // preenchido assim. As outras são projeção: nascer Realizada seria dar por
+  // paga uma conta que ninguém pagou — o bug que estamos consertando.
+  if (primeiraRealizada && ocs.length) {
+    Object.assign(ocs[0], {
+      status: 'Realizado',
+      liquidadoEm: campos.liquidadoEm || ocs[0].vencimento,
+      comp: campos.comp || '',
+      nf: campos.nf || ''
+    });
+  }
+  DB.fin.unshift(...ocs);
+  return serie;
+}
+
+/* Renovação: só por confirmação, nunca sozinha. Acrescenta ocorrências ao fim
+   da série sem tocar em nenhuma das que já existem. */
+function finRenovarSerie(id, meses){
+  const s = finSerie(id);
+  if (!s) { toast('⚠ Série não encontrada'); return; }
+  const antes = parseInt(s.total, 10) || FIN_REC_TOTAL_PADRAO;
+  const extra = Math.max(1, Math.min(120, parseInt(meses, 10) || FIN_REC_TOTAL_PADRAO));
+  s.total = antes + extra;
+  s.encerradaEm = null;
+  s.renovadaEm = agHoje();
+  const novas = finMaterializar(s, () => novoId(), antes + 1, s.total);
+  // O denominador mudou: sem atualizar as antigas, a mesma série mostraria
+  // "12/12" numa linha e "13/24" na outra.
+  finOcorrencias(id).forEach(o => { o.recTot = s.total; });
+  DB.fin.push(...novas);
+  saveDB(); closeModal(); renderFin(); updateNotifs();
+  toast(`<b>${esc(s.desc || 'Série')}</b> renovada por mais ${extra} meses — até ${esc(finMesExt(finSerieFim(s)))} ✓`);
+}
+
+/* Fim de contrato, demissão, software cancelado: a série para no mês escolhido.
+   Só as ocorrências ainda Previstas somem. O que já foi pago é histórico e não
+   se apaga por edição de série — nem aqui, nem em lugar nenhum. */
+function finEncerrarSerie(id, aPartirDe, incluirEste){
+  const s = finSerie(id);
+  if (!s) return 0;
+  const alvo = finOcorrencias(id).filter(o =>
+    (incluirEste ? o.mesRef >= aPartirDe : o.mesRef > aPartirDe) && o.status !== 'Realizado');
+  const ids = new Set(alvo.map(o => o._id));
+  DB.fin = DB.fin.filter(l => !(l && ids.has(l._id)));
+  const restantes = finOcorrencias(id);
+  s.total = restantes.length ? Math.max.apply(null, restantes.map(o => o.recIdx || 1)) : 0;
+  restantes.forEach(o => { o.recTot = s.total; });
+  s.encerradaEm = aPartirDe;
+  return alvo.length;
+}
+
+/* ---------- Realizar UM mês ---------- */
+
+/* Realizar é um ato do mês: pede a data em que o dinheiro saiu e o valor que
+   saiu de fato. O valor padrão da série não muda, e as outras ocorrências não
+   são tocadas — por isso o modal diz isso em voz alta. */
+function finRealizarModal(id){
+  const l = finPorId(id);
+  if (!l) { toast('⚠ Lançamento não encontrado'); return; }
+  const prev = (l.valorPrevisto != null ? +l.valorPrevisto : (+l.valor || 0));
+  const outras = l.recId ? finOcorrencias(l.recId).filter(o => o._id !== l._id).length : 0;
+  const verbo = l.tipo === 'Receita' ? 'Recebimento' : 'Pagamento';
+
+  openModal(`<h3>${l.tipo === 'Receita' ? 'Receber' : 'Pagar'} <span>${esc(l.desc || l.op)}</span></h3>
+    <div style="background:#131B2E;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:12.5px">
+      <div><b>${esc(finRecTag(l))}</b> &nbsp;·&nbsp; ${esc(finMesExt(l.mesRef))} &nbsp;·&nbsp; vence ${esc((l.vencimento||'').split('-').reverse().join('/'))}</div>
+      <div style="margin-top:4px">Previsto para este mês: <b>${fmt(prev)}</b></div>
+    </div>
+    <div class="frow">
+      <div><label>${verbo} em</label><input type="date" id="m_rliq" value="${esc(agHoje())}"></div>
+      <div><label>Valor efetivamente ${l.tipo === 'Receita' ? 'recebido' : 'pago'} (R$)</label><input type="number" id="m_rval" step="0.01" value="${prev.toFixed(2)}"></div>
+    </div>
+    <p class="note" style="margin-top:10px;color:#7FA6FF">Muda <b>só ${esc(finMesExt(l.mesRef))}</b>. ${outras} ocorrência(s) desta série continuam exatamente como estão, e o valor padrão da série segue <b>${fmt(finSerie(l.recId) ? (+finSerie(l.recId).valor || 0) : prev)}</b>.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="finRealizar('${esc(l._id)}')">Confirmar ${verbo.toLowerCase()}</button>
+    </div>`);
+}
+
+function finRealizar(id){
+  const l = finPorId(id);
+  if (!l) { toast('⚠ Lançamento não encontrado'); return; }
+  const prev = (l.valorPrevisto != null ? +l.valorPrevisto : (+l.valor || 0));
+  const pago = N('m_rval');
+  l.status = 'Realizado';
+  l.liquidadoEm = V('m_rliq') || agHoje();
+  l.valorPago = pago > 0 ? +pago.toFixed(2) : prev;
+  // Guarda o previsto do mês só quando o pago diferiu: é o que permite
+  // desfazer a realização sem perder a projeção.
+  l.valorPrevisto = (l.valorPago !== prev) ? prev : null;
+  l.valor = l.valorPago;
+  saveDB(); closeModal(); renderFin(); updateNotifs();
+  toast(`${esc(finMesExt(l.mesRef))} realizado em <b>${fmt(l.valorPago)}</b>${l.valorPrevisto != null ? ` (previsto ${fmt(prev)})` : ''} — só este mês ✓`);
+}
+
+/* ---------- Editar / excluir uma ocorrência de série ---------- */
+
+/* "Este e os próximos" nunca alcança uma ocorrência Realizada: mês pago é fato
+   consumado, e reescrever o valor de uma conta já paga desmancharia o caixa. */
+function finAplicarNosProximos(serie, oc){
+  const alvo = finOcorrencias(serie._id).filter(o =>
+    (o.recIdx || 0) > (oc.recIdx || 0) && o.status !== 'Realizado');
+  alvo.forEach(o => {
+    const venc = finVencDoMes(o.mesRef, serie.dia);
+    Object.assign(o, {
+      tipo: serie.tipo, empresa: serie.empresa, op: serie.op,
+      categoria: serie.categoria, desc: serie.desc,
+      valor: +serie.valor || 0, valorPago: null, valorPrevisto: null,
+      data: venc, vencimento: venc
+    });
+  });
+  return alvo.length;
+}
+
+function finExcluirModal(id){
+  const l = finPorId(id);
+  if (!l) { toast('⚠ Lançamento não encontrado'); return; }
+  const s = finSerie(l.recId);
+  const futuras = finOcorrencias(l.recId).filter(o => (o.recIdx || 0) > (l.recIdx || 0));
+  const futPrev = futuras.filter(o => o.status !== 'Realizado').length;
+  const futReal = futuras.length - futPrev;
+
+  openModal(`<h3>Excluir <span>${esc(l.desc || l.op)}</span></h3>
+    <p class="note" style="margin-bottom:12px">${esc(finRecTag(l))} · ${esc(finMesExt(l.mesRef))}${s ? ` · série de ${esc(finMesExt(s.inicio))} a ${esc(finMesExt(finSerieFim(s)))}` : ''}</p>
+    <div><label>O que excluir</label>
+      <select id="m_xescopo">
+        <option value="este">Somente este mês (${esc(finMesExt(l.mesRef))})</option>
+        <option value="proximos">Este e os próximos — ${futPrev} ocorrência(s) previstas</option>
+      </select>
+    </div>
+    <p class="note" style="margin-top:10px">
+      "Este e os próximos" encerra a recorrência a partir de ${esc(finMesExt(l.mesRef))}${futReal ? ` e <b>não toca</b> nas ${futReal} ocorrência(s) já Realizadas` : ''} — nada que já foi pago é apagado.
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" onclick="finExcluirConfirma('${esc(l._id)}')">Excluir</button>
+    </div>`);
+}
+
+function finExcluirConfirma(id){
+  const l = finPorId(id);
+  if (!l) { toast('⚠ Lançamento não encontrado'); return; }
+  const escopo = V('m_xescopo');
+  const mes = l.mesRef, recId = l.recId, desc = l.desc || l.op;
+
+  if (escopo === 'proximos'){
+    // Este mês só sai junto se ainda estiver Previsto; Realizado é histórico.
+    const n = finEncerrarSerie(recId, mes, l.status !== 'Realizado');
+    saveDB(); closeModal(); renderFin(); updateNotifs();
+    toast(`Recorrência de <b>${esc(desc)}</b> encerrada a partir de ${esc(finMesExt(mes))} — ${n} ocorrência(s) prevista(s) removida(s) ✓`);
+    return;
+  }
+
+  // "Somente este mês" é ato explícito sobre uma linha: vale mesmo para a
+  // Realizada. O que a série não pode fazer é apagá-la sem que peçam.
+  DB.fin = DB.fin.filter(x => !(x && x._id === id));
+  const restantes = finOcorrencias(recId);
+  if (!restantes.length){
+    const s = finSerie(recId);
+    if (s) DB.finRec = finSeries().filter(x => x !== s);
+  }
+  saveDB(); closeModal(); renderFin(); updateNotifs();
+  toast(`${esc(finMesExt(mes))} de <b>${esc(desc)}</b> removido — as outras ocorrências continuam ✓`);
+}
+
+/* Encerrar a recorrência a partir de um mês escolhido, sem excluir o mês
+   corrente: fim de contrato, demissão, software cancelado. */
+function finEncerrarModal(id){
+  const l = finPorId(id);
+  const s = l ? finSerie(l.recId) : null;
+  if (!s) { toast('⚠ Série não encontrada'); return; }
+  const ocs = finOcorrencias(s._id);
+  openModal(`<h3>Encerrar recorrência — <span>${esc(s.desc || 'série fixa')}</span></h3>
+    <p class="note" style="margin-bottom:12px">Série de ${esc(finMesExt(s.inicio))} a ${esc(finMesExt(finSerieFim(s)))} · ${ocs.length} ocorrência(s).</p>
+    <div><label>Encerrar a partir de qual mês (inclusive)</label>
+      <select id="m_encmes">${ocs.map(o => `<option value="${esc(o.mesRef)}"${o._id === l._id ? ' selected' : ''}>${esc(finMesExt(o.mesRef))} — ${esc(o.status || 'Previsto')}</option>`).join('')}</select>
+    </div>
+    <p class="note" style="margin-top:10px">Apaga só as ocorrências <b>Previstas</b> desse mês em diante. As já Realizadas ficam onde estão, com comprovante e valor pago.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" onclick="finEncerrarConfirma('${esc(s._id)}')">Encerrar recorrência</button>
+    </div>`);
+}
+
+function finEncerrarConfirma(recId){
+  const s = finSerie(recId);
+  if (!s) { toast('⚠ Série não encontrada'); return; }
+  const mes = V('m_encmes');
+  const n = finEncerrarSerie(recId, mes, true);
+  saveDB(); closeModal(); renderFin(); updateNotifs();
+  toast(`<b>${esc(s.desc || 'Série')}</b> encerrada a partir de ${esc(finMesExt(mes))} — ${n} ocorrência(s) prevista(s) removida(s) ✓`);
+}
+
+/* Renovação sempre passa por aqui: o aviso do painel e o botão da lista só
+   abrem a pergunta, nunca renovam sozinhos. */
+function finRenovarModal(recId){
+  const s = finSerie(recId);
+  if (!s) { toast('⚠ Série não encontrada'); return; }
+  openModal(`<h3>Renovar <span>${esc(s.desc || 'série fixa')}</span></h3>
+    <p class="note" style="margin-bottom:12px">A série termina em <b>${esc(finMesExt(finSerieFim(s)))}</b>. Renovar acrescenta novas ocorrências <b>Previstas</b> a partir do mês seguinte, sem mexer em nenhuma das atuais.</p>
+    <div class="frow">
+      <div><label>Renovar por quantos meses</label><input type="number" id="m_renmeses" min="1" max="120" value="${FIN_REC_TOTAL_PADRAO}"></div>
+      <div><label>Valor padrão (R$)</label><input type="number" id="m_renval" step="0.01" value="${(+s.valor || 0).toFixed(2)}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="finRenovarConfirma('${esc(s._id)}')">Renovar</button>
+    </div>`);
+}
+
+function finRenovarConfirma(recId){
+  const s = finSerie(recId);
+  if (!s) { toast('⚠ Série não encontrada'); return; }
+  const v = N('m_renval');
+  if (v > 0) s.valor = +v.toFixed(2);
+  finRenovarSerie(recId, V('m_renmeses'));
+}
+
+/* Séries que chegam ao fim: o aviso aparece quando a última ocorrência é deste
+   mês ou do mês que vem — cedo o bastante para renovar antes de a conta sumir
+   do caixa, tarde o bastante para não virar ruído o ano inteiro. */
+function finSeriesParaRenovar(){
+  const mesAtual = agHoje().slice(0, 7);
+  const limite = finMesSoma(mesAtual, 1);
+  return finSeries().filter(s => {
+    if (!s || s.encerradaEm) return false;
+    if (!finOcorrencias(s._id).length) return false;
+    const fim = finSerieFim(s);
+    return fim <= limite;
+  });
+}
+
+/* Painel das séries: é onde se vê de uma vez quantos meses cada fixa já teve
+   pagos, quando ela acaba e o que ainda falta — informação que na lista mensal
+   fica espalhada por doze linhas. */
+function renderFinSeries(){
+  const box = $('finSeriesBody');
+  if (!box) return;
+  const empFiltro = $('finEmpresa') ? $('finEmpresa').value : '';
+  const series = finSeries().filter(s => s && (!empFiltro || (s.empresa || 'WindGate') === empFiltro));
+
+  const card = $('finSeriesCard');
+  if (card) card.style.display = series.length ? '' : 'none';
+
+  const aviso = $('finSeriesAviso');
+  const renovar = finSeriesParaRenovar().filter(s => !empFiltro || (s.empresa || 'WindGate') === empFiltro);
+  // Fixa que veio da planilha antiga marcada como Realizada mas sem data de
+  // pagamento não diz de qual mês era. A migração devolveu todas para Previsto
+  // — deixar isso só no banco seria esconder o que precisa de decisão humana.
+  const conferir = ((DB.settings && DB.settings.finRecMigracao && DB.settings.finRecMigracao.conferir) || [])
+    .filter(c => c && finSerie(c.serieId));
+  if (aviso){
+    aviso.innerHTML = renovar.map(s =>
+      `<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F">
+         🔔 <b>${esc(s.desc || 'Série fixa')}</b> termina em <b>${esc(finMesExt(finSerieFim(s)))}</b>. Renovar por mais ${FIN_REC_TOTAL_PADRAO} meses?
+         <button class="btn btn-ghost btn-sm" style="margin-left:8px;color:#F0B429;border-color:#F0B42966" onclick="finRenovarModal('${esc(s._id)}')">Renovar…</button>
+       </div>`).join('')
+      + (conferir.length
+        ? `<div class="rulebox" style="border-color:#7FA6FF66;background:#7FA6FF0F">
+             ⚠️ <b>Conferir a migração das fixas antigas</b> — ${conferir.length} despesa(s) vieram marcadas como Realizadas sem data de pagamento, então todas as ocorrências voltaram para <b>Previsto</b>. Marcar o mês certo à mão:
+             ${conferir.map(c => `<div style="margin-top:4px">· <b>${esc(c.desc)}</b> — ${esc(c.motivo)} <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="finFiltrarSerie('${esc(c.serieId)}')">ver os meses</button></div>`).join('')}
+             <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="finConferenciaResolvida()">Já conferi — esconder este aviso</button></div>
+           </div>`
+        : '');
+    aviso.style.display = (renovar.length || conferir.length) ? '' : 'none';
+  }
+
+  box.innerHTML = series.map(s => {
+    const ocs = finOcorrencias(s._id);
+    const feitas = ocs.filter(o => o.status === 'Realizado').length;
+    const pago = ocs.filter(o => o.status === 'Realizado').reduce((a, o) => a + (+o.valor || 0), 0);
+    const fim = finSerieFim(s);
+    const encerrada = !!s.encerradaEm;
+    return `<tr>
+      <td><b>${esc(s.desc || '—')}</b><div style="font-size:9px;color:${finEmpresaCor(s.empresa || 'WindGate')}">${esc(s.empresa || 'WindGate')}</div></td>
+      <td><span class="pill ${s.tipo === 'Receita' ? 'ok' : 'red'}">${esc(s.tipo || 'Despesa')}</span></td>
+      <td>${s.categoria ? `<span class="pill mag">${esc(s.categoria)}</span>` : '<span class="note">—</span>'}</td>
+      <td class="r num">${fmt(+s.valor || 0)}</td>
+      <td>dia ${esc(String(s.dia || 1))}</td>
+      <td>${esc(finMesExt(s.inicio))} → ${esc(finMesExt(fim))}</td>
+      <td><b style="color:${feitas ? '#34C77C' : '#8FA0BC'}">${feitas}</b> / ${ocs.length} realizadas<div style="font-size:9px;color:#34C77C">${fmt(pago)} pagos</div></td>
+      <td>${encerrada ? `<span class="pill draft">encerrada em ${esc(finMesExt(s.encerradaEm))}</span>` : '<span class="pill blue">ativa</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" style="padding:2px 7px" onclick="finFiltrarSerie('${esc(s._id)}')" title="Ver as ocorrências desta série">🔎</button>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#F0B429;border-color:#F0B42966" onclick="finRenovarModal('${esc(s._id)}')" title="Renovar a série">↻</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+/* O select de séries é reconstruído a cada render: a lista muda quando alguém
+   cria, renova ou encerra uma série. A escolha atual é preservada, e o select
+   some quando ainda não existe série nenhuma para não poluir a barra. */
+function fillFinSerieSelect(){
+  const sel = $('finSerieFiltro');
+  if(!sel) return;
+  const atual = sel.value;
+  const series = finSeries();
+  sel.innerHTML = ['<option value="">— Série (todas) —</option>'].concat(
+    series.map(s => `<option value="${esc(s._id)}">📌 ${esc(s.desc || 'série')} · ${esc(finMesExt(s.inicio))} → ${esc(finMesExt(finSerieFim(s)))}</option>`)
+  ).join('');
+  sel.value = finSerie(atual) ? atual : '';
+  sel.style.display = series.length ? '' : 'none';
+}
+
+/* O aviso da migração some quando alguém diz que conferiu. Some por escolha,
+   não sozinho: ele aponta despesas cujo mês de pagamento ninguém sabe, e
+   escondê-las com o tempo faria a dúvida virar silêncio. */
+function finConferenciaResolvida(){
+  if(!confirm('Esconder o aviso da migração?\n\nUse isto depois de marcar à mão o mês em que cada uma dessas despesas foi realmente paga.')) return;
+  if(DB.settings && DB.settings.finRecMigracao) DB.settings.finRecMigracao.conferir = [];
+  saveDB(); renderFin();
+  toast('Aviso da migração encerrado ✓');
+}
+
+/* Ver uma série inteira: filtra por ela e tira o recorte de mês, senão só
+   apareceria a ocorrência do mês que já estava na tela. */
+function finFiltrarSerie(recId){
+  const sel = $('finSerieFiltro');
+  if (sel) sel.value = recId;
+  const mes = $('finMesFiltro');
+  if (mes) mes.value = '';
+  renderFin();
+  toast('Mostrando a série inteira — todos os meses');
+}
+
 function renderFin(){
   if(!USER.fin){ return; }
   renderPlanilhaGeral();
   fillOpSelect('finFilter', true);
+  fillFinSerieSelect();
+  renderFinSeries();
 
   const hjISO = agHoje();                  // data local, não UTC
   const amIso = somaDias(hjISO, 1);
@@ -3730,20 +4378,16 @@ function renderFin(){
 
     const val = +l.valor || 0;
     const isFixo = !!l.fixo;
+    // Cada ocorrência já tem o vencimento do SEU mês, gravado no banco. Aqui a
+    // tela repetia o mesmo registro em todos os meses trocando só a data — a
+    // recorrência existia na visualização, não no dado, e por isso o status
+    // era um só para os doze meses.
     let vencCalc = l.vencimento;
 
-    if (isFixo && targetMonth) {
-      const origDay = l.vencimento.slice(8, 10) || '01';
-      const dayNum = parseInt(origDay, 10);
-      const [yStr, mStr] = targetMonth.split('-');
-      const maxDays = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
-      const actualDay = Math.min(dayNum, maxDays);
-      vencCalc = `${targetMonth}-${String(actualDay).padStart(2, '0')}`;
-    }
-
-    // o _id acompanha a cópia: as linhas mensais de uma conta fixa apontam
-    // todas para o mesmo lançamento de origem
-    // Realizado com data de liquidação entra pelo caixa; o resto, pelo vencimento.
+    // Realizado com data de liquidação entra pelo caixa; o resto, pelo
+    // vencimento. A ocorrência fixa é a exceção: ela pertence ao mês dela e
+    // não pode migrar para o mês do pagamento, senão "Fixa 3/12" apareceria
+    // no mês da 2/12 e a série ficaria com dois meses na mesma tela.
     if (l.status==='Realizado' && l.liquidadoEm && !isFixo) vencCalc = l.liquidadoEm;
     const itemObj = { ...l, vencimentoCalc: vencCalc };
     effectiveItems.push(itemObj);
@@ -3895,14 +4539,19 @@ function renderFin(){
   const opFilter = $('finFilter') ? $('finFilter').value : '';
   const natFilter = $('finNatFiltro') ? $('finNatFiltro').value : '';
   const stFilter = $('finStFiltro') ? $('finStFiltro').value : '';
+  const serieFiltro = $('finSerieFiltro') ? $('finSerieFiltro').value : '';
 
   const busca = nrm($('finBusca') ? $('finBusca').value : '');
   // Procurar dentro do mês selecionado esconderia justamente o lançamento que
   // se procura quando ele é de outro mês. Buscando, o filtro de mês sai de
   // cena — e o resumo avisa que a lista deixou de ser só daquele mês.
   const rows = effectiveItems.filter(l => {
-    if (!busca && targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
+    // Escolher uma série é pedir a série INTEIRA: manter o recorte de mês
+    // mostraria uma linha só e esconderia justamente a comparação entre os
+    // doze meses, que é o motivo de filtrar por série.
+    if (!busca && !serieFiltro && targetMonth && !l.vencimentoCalc.startsWith(targetMonth)) return false;
     if (busca && !finCombina(l, busca)) return false;
+    if (serieFiltro && l.recId !== serieFiltro) return false;
     if (opFilter && l.op !== opFilter) return false;
     if (natFilter === 'fixo' && !l.fixo) return false;
     if (natFilter === 'pontual' && l.fixo) return false;
@@ -3919,6 +4568,7 @@ function renderFin(){
     // Esconder sem dizer faria a conta não fechar contra a Torre de Controle.
     const aviso = (empFiltro ? ` <span style="color:${finEmpresaCor(empFiltro)}">· só <b>${esc(empFiltro)}</b></span>` : '')
       + (busca ? ' <span style="color:#7FA6FF">· busca em <b>todos os meses</b>, ignorando o filtro acima</span>' : '')
+      + (serieFiltro ? ' <span style="color:#7FA6FF">· uma série inteira, <b>todos os meses</b></span>' : '')
       + (ocultosCotacao
       ? ` <span style="color:var(--amber)">· ${ocultosCotacao} lançamento(s) de operações ainda em <b>Cotação</b> estão fora desta tela</span>`
       : '');
@@ -3959,7 +4609,7 @@ function renderFin(){
       <td class="note">${dDisp}</td>
       <td>${l.transf?'<span class="pill teal" style="font-size:8.5px">⇄ TRANSF.</span>':`<b>${esc(l.op||'—')}</b>`}${l.op===finEmpresa(l)?'':`<div style="font-size:9px;color:${finEmpresaCor(finEmpresa(l))}">${esc(finEmpresa(l))}</div>`}</td>
       <td><span class="pill ${l.tipo === 'Receita' ? 'ok' : 'red'}">${esc(l.tipo)}</span></td>
-      <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? '📌 Fixa' : 'Pontual'}</span></td>
+      <td><span class="pill ${isFixo ? 'blue' : 'draft'}">${isFixo ? esc(finRecTag(l)) : 'Pontual'}</span></td>
       <td>${l.categoria ? `<span class="pill mag">${esc(l.categoria)}</span>` : '<span class="note">—</span>'}</td>
       <td>${esc(l.desc)}</td>
       <td class="r num" style="font-weight:700">${fmt(+l.valor || 0)}</td>
@@ -3997,10 +4647,21 @@ function finLiqToggle(){
 function setFinStatus(id, status){
   const l = finPorId(id);
   if(!l){ toast('⚠ Lançamento não encontrado'); renderFin(); return; }
+  // Realizar uma ocorrência de série é um ato do mês: pede a data em que o
+  // dinheiro saiu e o valor que saiu de fato, e altera SÓ esta linha. O
+  // renderFin antes do modal devolve o select ao que está gravado, senão
+  // quem cancelar fica com a tela dizendo "Realizado" e o banco, "Previsto".
+  if(l.recId && status==='Realizado'){ renderFin(); finRealizarModal(id); return; }
   l.status = status;
   // A data de liquidação é o que coloca o lançamento na semana certa.
   if(status==='Realizado'){ if(!l.liquidadoEm) l.liquidadoEm=agHoje(); }
-  else l.liquidadoEm=null;
+  else {
+    l.liquidadoEm=null;
+    // Desfazer a realização devolve o valor previsto do mês: o valor pago
+    // pertencia àquele pagamento, que deixou de existir.
+    if(l.valorPrevisto != null) l.valor = +l.valorPrevisto;
+    l.valorPago = null; l.valorPrevisto = null;
+  }
   saveDB(); renderFin(); updateNotifs();
   if(status==='Realizado' && l.liquidadoEm!==(l.vencimento||''))
     toast(`Lançado como realizado em <b>${l.liquidadoEm.split('-').reverse().join('/')}</b> — dá para ajustar a data no lápis`);
@@ -4010,6 +4671,9 @@ function deleteFin(id){
   const idx = DB.fin.findIndex(l => l && l._id === id);
   if(idx < 0){ toast('⚠ Lançamento não encontrado'); return; }
   const item = DB.fin[idx];
+  // Ocorrência de série tem escopo: só este mês, ou este e os próximos ainda
+  // Previstos. Apagar direto levaria um mês junto sem perguntar qual.
+  if(item.recId){ finExcluirModal(id); return; }
   const desc = item.desc || item.op || 'este lançamento';
   // Meia transferência deixaria um caixa com dinheiro que o outro não perdeu.
   const par = item.transfId ? DB.fin.filter(l => l && l.transfId === item.transfId) : [item];
@@ -4032,6 +4696,11 @@ function toggleNatLanc(isFixoStr){
   const isFixo = isFixoStr === 'true';
   const hint = $('m_fixo_hint');
   if(hint) hint.style.display = isFixo ? 'block' : 'none';
+  // Quantas ocorrências materializar. Só faz sentido quando a série ainda vai
+  // nascer — numa ocorrência que já existe, quem muda o tamanho da série é
+  // "Renovar" ou "Encerrar recorrência".
+  const recBox = $('m_rec_box');
+  if(recBox) recBox.style.display = isFixo ? '' : 'none';
   const opSel = $('m_lop');
   if(opSel){
     if(isFixo){
@@ -4088,10 +4757,17 @@ function openLancModal(id){
     (DB.ops || []).map(o=>`<option value="${esc(o.id)}"${opAtual===o.id?' selected':''}>${esc(o.id)} · ${esc(o.nome)}</option>`).join('');
   const sel = (a,b) => a===b ? ' selected' : '';
   const fixo = l ? !!l.fixo : false;
+  // Editar uma ocorrência é editar UM mês de uma série. A natureza fica
+  // travada: virar "Pontual" desmancharia a série pelo meio, e o caminho para
+  // isso é excluir a ocorrência.
+  const serie = l ? finSerie(l.recId) : null;
 
   openModal(`<h3>${l?'Editar':'Novo'} <span>lançamento financeiro</span></h3>
+    ${serie ? `<div class="note" style="background:#131B2E;padding:10px 12px;border-radius:8px;margin-bottom:12px;color:#7FA6FF;line-height:1.7">
+      📌 <b>${esc(finRecTag(l))}</b> — ocorrência de <b>${esc(finMesExt(l.mesRef))}</b> da série "<b>${esc(serie.desc || '—')}</b>" (${esc(finMesExt(serie.inicio))} → ${esc(finMesExt(finSerieFim(serie)))}, valor padrão ${fmt(+serie.valor||0)}).
+    </div>` : ''}
     <div class="frow">
-      <div><label>Natureza da Conta</label><select id="m_lfixo" onchange="toggleNatLanc(this.value)"><option value="false"${fixo?'':' selected'}>Pontual / Operacional</option><option value="true"${fixo?' selected':''}>Fixa Mensal (WindGate)</option></select></div>
+      <div><label>Natureza da Conta</label><select id="m_lfixo"${serie?' disabled':''} onchange="toggleNatLanc(this.value)"><option value="false"${fixo?'':' selected'}>Pontual / Operacional</option><option value="true"${fixo?' selected':''}>Fixa Mensal (WindGate)</option></select></div>
       <div><label>Vínculo / Operação</label><select id="m_lop">${opOptions}</select></div>
       <div><label>Tipo</label><select id="m_ltipo"><option value="Despesa"${sel(l&&l.tipo,'Despesa')}>Despesa (Contas a Pagar)</option><option value="Receita"${sel(l&&l.tipo,'Receita')}>Receita (Contas a Receber)</option></select></div>
       <div><label>Categoria</label><select id="m_lcat">
@@ -4116,7 +4792,19 @@ function openLancModal(id){
     <div class="frow">
       <div style="grid-column:span 3"><label>🧾 Link da Nota Fiscal (opcional)</label><input id="m_lnf" value="${l?esc(l.nf||''):''}" placeholder="https://… (NF-e / NFS-e / XML / Drive)"></div>
     </div>
-    <div id="m_fixo_hint" class="note" style="display:${fixo?'block':'none'};color:#7FA6FF;margin-top:6px">🏢 <b>Despesa Fixa WindGate:</b> Não é vinculada a nenhuma operação. Atribuída diretamente à estrutura da WindGate e fixada no dia selecionado para todos os meses!</div>
+    ${serie ? `<div class="frow" style="margin-top:4px">
+      <div style="grid-column:span 2"><label>Aplicar a alteração a</label><select id="m_lescopo">
+        <option value="este">Somente este mês (${esc(finMesExt(l.mesRef))})</option>
+        <option value="proximos">Este e os próximos — só as ocorrências ainda Previstas</option>
+      </select></div>
+      <div style="display:flex;align-items:flex-end"><button class="btn btn-ghost" style="color:#FF5A6E;border-color:#FF5A6E66;width:100%" onclick="finEncerrarModal('${esc(l._id)}')">⛔ Encerrar recorrência…</button></div>
+    </div>
+    <p class="note" style="margin-top:6px">"Este e os próximos" nunca altera uma ocorrência já <b>Realizada</b>: mês pago é histórico.</p>` : `
+    <div class="frow" id="m_rec_box" style="display:${fixo?'':'none'};margin-top:4px">
+      <div><label>Nº de ocorrências</label><input type="number" id="m_lrec_total" min="1" max="120" value="${FIN_REC_TOTAL_PADRAO}" title="12 para uma fixa mensal comum; menos para o que tem fim conhecido, como um empréstimo em 9 parcelas"></div>
+      <div style="grid-column:span 2;display:flex;align-items:flex-end"><p class="note" style="margin:0">Serão criados <b>um lançamento por mês</b> a partir do vencimento acima, cada um com status, comprovante e valor próprios. Dia que não existe no mês (31 em fevereiro) cai no último dia dele.</p></div>
+    </div>`}
+    <div id="m_fixo_hint" class="note" style="display:${fixo?'block':'none'};color:#7FA6FF;margin-top:6px">🏢 <b>Fixa Mensal WindGate:</b> não é vinculada a nenhuma operação — vai direto para a estrutura da WindGate. Cada mês vira um lançamento independente: realizar setembro <b>não</b> realiza outubro.</div>
     ${l?`<p class="note" style="margin-top:8px">Lançado por <b>${esc(l.por||'—')}</b>. Editar não altera esse registro.</p>`:''}
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -4165,6 +4853,53 @@ function saveLanc(id){
     const existente = id ? finPorId(id) : null;
     if(id && !existente){ toast('⚠ Lançamento não encontrado'); return; }
 
+    // ---- Fixa nova: nasce como série (o modelo) + uma ocorrência por mês ----
+    // É aqui que a recorrência deixa de ser virtual. Sem materializar, o
+    // registro único voltaria a ser repetido na tela e o status voltaria a
+    // valer para os doze meses de uma vez.
+    if(isFixo && (!existente || !existente.recId)){
+      // Pontual que virou fixa: o registro solto dá lugar à série inteira,
+      // senão sobraria uma linha órfã fora da contagem 1/12.
+      if(existente) DB.fin = DB.fin.filter(x => x !== existente);
+      const s = finNovaSerie(
+        Object.assign({}, campos, { por: (existente && existente.por) || uName }),
+        V('m_lrec_total'),
+        status === 'Realizado');
+      saveDB(); closeModal(); renderFin(); updateNotifs();
+      toast(`Fixa criada — <b>${s.total} ocorrências</b> de ${esc(finMesExt(s.inicio))} a ${esc(finMesExt(finSerieFim(s)))}${status==='Realizado' ? ', só a primeira já Realizada' : ', todas Previstas'} ✓`);
+      return;
+    }
+
+    // ---- Ocorrência de série: a alteração tem escopo ----
+    if(existente && existente.recId){
+      const s = finSerie(existente.recId);
+      const escopo = V('m_lescopo') || 'este';
+      // A ocorrência pertence ao mês dela. Mudar a data de vencimento move o
+      // DIA dentro do mês, nunca o mês: arrastá-la para outro mês faria duas
+      // ocorrências da mesma série cair na mesma tela.
+      const diaNovo = parseInt(String(vencLanc).slice(8,10), 10) || 1;
+      const vencOc = finVencDoMes(existente.mesRef, diaNovo);
+      Object.assign(existente, campos, { fixo: true, data: vencOc, vencimento: vencOc });
+      // Enquanto está Previsto não existe valor pago para preservar.
+      if(existente.status !== 'Realizado'){ existente.valorPago = null; existente.valorPrevisto = null; }
+
+      if(escopo === 'proximos' && s){
+        Object.assign(s, {
+          tipo: campos.tipo, empresa: campos.empresa, op: campos.op,
+          categoria: campos.categoria, desc: campos.desc,
+          valor: campos.valor, dia: diaNovo
+        });
+        const qtd = finAplicarNosProximos(s, existente);
+        saveDB(); closeModal(); renderFin(); updateNotifs();
+        toast(`${esc(finMesExt(existente.mesRef))} e mais <b>${qtd}</b> ocorrência(s) prevista(s) atualizadas — as Realizadas ficaram intactas ✓`);
+        return;
+      }
+
+      saveDB(); closeModal(); renderFin(); updateNotifs();
+      toast(`Somente <b>${esc(finMesExt(existente.mesRef))}</b> foi alterado — as outras ocorrências continuam como estavam ✓`);
+      return;
+    }
+
     if(existente){
       // mantém _id e quem lançou: é o mesmo registro, corrigido
       Object.assign(existente, campos);
@@ -4193,6 +4928,7 @@ function anexarComprovanteModal(id){
     <div style="background:#131B2E;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:12.5px">
       <div><b>Operação:</b> ${esc(l.op)} &nbsp;·&nbsp; <b>Valor:</b> ${fmt(+l.valor||0)}</div>
       <div><b>Vencimento:</b> ${vDisp} &nbsp;·&nbsp; <b>Descrição:</b> ${esc(l.desc||'—')}</div>
+      ${l.recId ? `<div style="margin-top:6px;color:#7FA6FF">📌 <b>${esc(finRecTag(l))}</b> — o comprovante fica <b>só em ${esc(finMesExt(l.mesRef))}</b>. As outras ocorrências da série continuam sem comprovante.</div>` : ''}
     </div>
     <div class="frow">
       <div style="grid-column:span 3">
@@ -4213,6 +4949,26 @@ function anexarComprovanteModal(id){
     </div>`);
 }
 
+/* Comprovante anexado é prova de pagamento, então ele marca o lançamento como
+   Realizado. Só que marcava SEM gravar a data em que o dinheiro saiu — e uma
+   conta "paga, sem data de pagamento" e com vencimento lá na frente é
+   exatamente o que faz o fluxo de caixa previsto mentir: o mês aparece
+   quitado sem que nada tenha saído.
+
+   Marca uma ocorrência só, sempre com a data. Quando o vencimento ainda não
+   chegou, devolve um aviso para o toast: ou foi pagamento adiantado, ou o
+   comprovante foi anexado no mês errado, e quem anexou precisa ver isso. */
+function finRealizarPorComprovante(l){
+  if(!l || l.status !== 'Previsto') return '';
+  l.status = 'Realizado';
+  l.liquidadoEm = agHoje();
+  if(l.vencimento && l.vencimento > l.liquidadoEm){
+    return ` — <b style="color:#F0B429">atenção:</b> vence em ${esc(l.vencimento.split('-').reverse().join('/'))}, ficou como <b>pago adiantado hoje</b>`
+         + (l.recId ? '. Se o comprovante era de outro mês, anexe na ocorrência certa.' : '');
+  }
+  return '';
+}
+
 async function uploadFinComprovante(file, id){
   if(!file) return;
   const st = $('m_fin_upload_status');
@@ -4228,10 +4984,11 @@ async function uploadFinComprovante(file, id){
     const l = finPorId(id);
     if(!l){ toast('⚠ Lançamento não encontrado'); return; }
     l.comp = res.url;
-    if (l.status === 'Previsto') l.status = 'Realizado';
+    const aviso = finRealizarPorComprovante(l);
     saveDB();
     renderFin();
-    toast('Comprovante vinculado e status atualizado para Realizado ✓');
+    updateNotifs();
+    toast('Comprovante vinculado e status atualizado para Realizado ✓' + aviso);
   } else {
     st.style.color = '#FF5A6E';
     st.textContent = '⚠ ' + (res.message || 'Erro ao enviar comprovante');
@@ -4243,11 +5000,12 @@ function salvarFinComprovanteLink(id){
   const l = finPorId(id);
   if(!l){ toast('⚠ Lançamento não encontrado'); return; }
   l.comp = link;
-  if(link && l.status === 'Previsto') l.status = 'Realizado';
+  const aviso = link ? finRealizarPorComprovante(l) : '';
   saveDB();
   closeModal();
   renderFin();
-  toast('Comprovante salvo ✓');
+  updateNotifs();
+  toast('Comprovante salvo ✓' + aviso);
 }
 
 function anexarNFModal(id){
@@ -5393,6 +6151,18 @@ function computeNotifs(){
         n.push({tab:'fin',ic:'🗓️',tx:`<b>${desc}</b> (${esc(l.op)}) — conta a pagar no dia <b>${dateDisp}</b> · ${val}`,tg:'Financeiro — Esta Semana'});
       }
     });
+
+    /* Série chegando na última ocorrência. Sem renovar, a despesa some do
+       fluxo de caixa do mês seguinte sem avisar, e o furo só aparece quando
+       falta dinheiro. A renovação nunca é automática: o aviso abre a
+       pergunta, e quem decide é o Samir ou o Davi. */
+    finSeriesParaRenovar().forEach(s => {
+      const fim = finSerieFim(s);
+      n.push({tab:'fin',ic:'🔔',rec:s._id,
+        k:idDeterministico({t:'fin',g:'renovar',s:s._id,fim:fim}),
+        tx:`<b>${esc(s.desc||'Série fixa')}</b> termina em <b>${esc(finMesExt(fim))}</b> — renovar por mais ${FIN_REC_TOTAL_PADRAO} meses?`,
+        tg:'Financeiro — Renovação de série'});
+    });
   }
 
   // Identidade da notificação pelo conteúdo: se a situação mudar (outro
@@ -5414,11 +6184,14 @@ function marcarNotifLida(k){
   DB.notifLidas[USER.key][k]=Date.now();
   saveDB();
 }
-function abrirNotif(k,tab){
+function abrirNotif(k,tab,rec){
   marcarNotifLida(k);
   $('bellPanel').classList.remove('show');
   showTab(tab);
   updateNotifs();
+  // Aviso de renovação leva direto à pergunta, em vez de obrigar a caçar a
+  // série na lista para depois clicar em "renovar".
+  if(rec) finRenovarModal(rec);
 }
 function limparNotifs(ev){
   if(ev) ev.stopPropagation();
@@ -5445,7 +6218,7 @@ function updateNotifs(){
          <span class="spacer"></span>
          <button class="btn btn-ghost btn-sm" onclick="limparNotifs(event)">limpar todas</button>
        </div>`+
-      n.map(x=>`<div class="notif" onclick="abrirNotif('${x.k}','${x.tab}')" style="${x.tab==='fin'?'border-left:3px solid #F0B429;margin-left:4px;border-radius:8px;':''}">`+
+      n.map(x=>`<div class="notif" onclick="abrirNotif('${x.k}','${x.tab}'${x.rec?`,'${x.rec}'`:''})" style="${x.tab==='fin'?'border-left:3px solid #F0B429;margin-left:4px;border-radius:8px;':''}">`+
         `<div class="ic">${x.ic}</div><div><div class="tx">${x.tx}</div><div class="tg">${x.tg} →</div></div></div>`).join('')
     : '<div class="notif"><div class="ic">🎉</div><div class="tx">Nenhuma pendência para você agora.</div></div>';
 }
@@ -5458,7 +6231,17 @@ function gmData(){ const k=gmKey(); if(!DB.gestao[k]) DB.gestao[k]={gestor:'Sami
 function gmSave(campo,valor){ gmData()[campo]=valor; saveDB(); }
 function gmMetrics(k){
   const [y,m]=k.split('-');
-  const inMonth=d=>{ if(!d) return false; const p=d.split('/'); return p.length===3&&p[2]===y&&p[1]===m; };
+  /* Data de lançamento vem em dois formatos: o registro antigo grava
+     dd/mm/aaaa e o novo grava aaaa-mm-dd. Lendo só o primeiro, o resultado
+     realizado do mês vinha zerado desde que o financeiro passou a gravar em
+     ISO — a conta existia e simplesmente não era contada. */
+  const inMonth=d=>{
+    if(!d) return false;
+    const t=String(d);
+    if(/^\d{4}-\d{2}/.test(t)) return t.slice(0,4)===y && t.slice(5,7)===m;
+    const p=t.split('/');
+    return p.length===3 && p[2]===y && p[1]===m;
+  };
   const qs=DB.qindex.filter(q=>{ const s=DB.quotes[q.id]; return q.ts? new Date(q.ts).toISOString().slice(0,7)===k : true; });
   const aprov=qs.filter(q=>q.status==='ok');
   const finM=DB.fin.filter(l=>inMonth(l.data)&&l.status==='Realizado');
