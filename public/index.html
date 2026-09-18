@@ -4561,15 +4561,18 @@ function renderFin(){
   // fábrica em outro, os impostos na chegada e a receita depois da entrega.
   // Recortar por mês mostrava pedaço de operação como se fosse o resultado
   // dela — despesa sem a receita, ou o contrário. Aqui entra tudo.
-  // Operação excluída sai daqui junto: esta tabela é o resultado POR operação,
-  // e não há operação para reportar. Os lançamentos seguem na lista abaixo.
-  // 'WindGate' (estrutura fixa) e o vazio não são operações e continuam.
-  const opsVivas = new Set((DB.ops||[]).map(o=>o&&o.id).filter(Boolean));
+  // Operação encerrada continua aqui, e operação que saiu da Torre de Controle
+  // também. O dinheiro dela entrou e saiu de verdade: tirá-la da tabela some
+  // com receita e custo já realizados, e o resultado do período passa a somar
+  // menos do que o caixa. O que a linha ganha é a marca do estado — entregue,
+  // concluída ou sem operação cadastrada —, para ninguém achar que está em
+  // andamento. 'WindGate' (estrutura fixa) e o vazio não são operações.
+  const opPorId = {};
+  (DB.ops||[]).forEach(o => { if (o && o.id) opPorId[o.id] = o; });
   const ops = {};
   effectiveItems.forEach(l => {
     // Passar dinheiro de um bolso para o outro não é resultado de operação.
     if (l.transf) return;
-    if (l.op && l.op !== 'WindGate' && !opsVivas.has(l.op)) return;
     ops[l.op] = ops[l.op] || { rp: 0, rr: 0, dp: 0, dr: 0 };
     const v = +l.valor || 0, o = ops[l.op];
     if (l.tipo === 'Receita') { l.status === 'Realizado' ? o.rr += v : o.rp += v; }
@@ -4585,7 +4588,16 @@ function renderFin(){
     // nasce negativo — as despesas saem antes da receita entrar. O previsto é
     // o número que diz se a operação fecha no azul.
     const prev = (o.rp + o.rr) - (o.dp + o.dr);
-    return `<tr><td><b>${esc(op||'— sem operação —')}</b></td><td class="r num">${fmt(o.rp + o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
+    /* O estado da operação fica na própria linha: "entregue" e "concluída" são
+       resultado fechado, e operação que não está mais cadastrada precisa ser
+       vista para alguém decidir se recadastra ou corrige o lançamento. */
+    const oper = op && op !== 'WindGate' ? opPorId[op] : null;
+    const meta = oper ? stMeta(oper.status) : null;
+    const marca = (op && op !== 'WindGate' && !oper)
+      ? '<div style="font-size:9px;color:var(--amber)">⚠ operação não cadastrada</div>'
+      : (meta && ['entregue','concluida'].includes(oper.status)
+          ? `<div style="font-size:9px;color:${meta.c}">✓ ${esc(meta.l)}</div>` : '');
+    return `<tr><td><b>${esc(op||'— sem operação —')}</b>${marca}</td><td class="r num">${fmt(o.rp + o.rr)}</td><td class="r num" style="color:#34C77C">${fmt(o.rr)}</td>
       <td class="r num">${fmt(o.dp + o.dr)}</td><td class="r num" style="color:#FF5A6E">${fmt(o.dr)}</td>
       <td class="r num" style="font-weight:800;color:${prev >= 0 ? '#7FA6FF' : '#F0B429'}">${fmt(prev)}</td>
       <td class="r num" style="font-weight:800;color:${res >= 0 ? '#34C77C' : '#FF5A6E'}">${fmt(res)}</td><td class="r num">${mg}</td></tr>`;

@@ -408,6 +408,56 @@ secao('Aviso de renovação aparece na reta final e não antes');
 }
 
 /* ==================================================================== */
+secao('★ Operação encerrada continua no Resultado por operação');
+{
+  const app = novoApp();
+  app.avaliar(`DB.ops = [
+    { id:'OP20', nome:'Em andamento',  status:'producao' },
+    { id:'OP03', nome:'Cabrinha',      status:'entregue' },
+    { id:'OP11', nome:'Fechada',       status:'concluida' }
+  ];`);
+  const lancar = (op, tipo, val, desc, st) => {
+    app.openLancModal();
+    preencher(app, {
+      m_lfixo: 'false', m_lop: op, m_ltipo: tipo, m_lcat: '',
+      m_lvenc: '2026-09-15', m_ldata: '2026-09-15', m_lval: val,
+      m_lemp: 'WindGate', m_lst: st || 'Previsto', m_ldesc: desc, m_lcomp: '', m_lnf: ''
+    });
+    if (st === 'Realizado') preencher(app, { m_lliq: '2026-09-15' });
+    app.saveLanc(null);
+  };
+  lancar('OP20', 'Receita', '100000', 'Receita OP20');
+  lancar('OP03', 'Receita', '8182.33', 'Receita da entregue', 'Realizado');
+  lancar('OP03', 'Despesa', '5000',    'Custo da entregue',   'Realizado');
+  lancar('OP11', 'Receita', '35280',   'Receita da concluída', 'Realizado');
+  // Operação que saiu da Torre de Controle e deixou os lançamentos para trás.
+  lancar('OP26 FIO', 'Receita', '411282.61', 'Receita da operação (proposta aprovada)');
+
+  const t = telaDoMes(app, '2026-09');
+  const corpo = t.opsBody;
+
+  assert(/>OP20</.test(corpo), 'operação em andamento aparece');
+  assert(/>OP03</.test(corpo), '★ operação ENTREGUE continua na tabela');
+  assert(/>OP11</.test(corpo), '★ operação CONCLUÍDA continua na tabela');
+  assert(/>OP26 FIO</.test(corpo), '★ operação que saiu do cadastro também continua — o dinheiro dela existiu');
+
+  // O estado fica na linha, para ninguém achar que está em andamento.
+  assert(/OP03<\/b><div[^>]*>✓ Entregue/.test(corpo), 'a linha da entregue traz a marca "✓ Entregue"');
+  assert(/OP11<\/b><div[^>]*>✓ Concluída/.test(corpo), 'a linha da concluída traz "✓ Concluída"');
+  assert(/OP26 FIO<\/b><div[^>]*>⚠ operação não cadastrada/.test(corpo),
+    'e a que não está cadastrada é marcada como tal, para alguém decidir o que fazer');
+  assert(!/OP20<\/b><div/.test(corpo), 'operação em andamento não ganha marca nenhuma');
+
+  // O realizado da encerrada tem de estar somado, não zerado.
+  assert(/8\.182,33/.test(corpo), '★ a receita realizada da operação entregue aparece no resultado');
+  assert(/35\.280,00/.test(corpo), '★ e a da concluída também');
+
+  // A tabela é por operação; os cartões e o resumo já contavam tudo antes.
+  const ent = t.linhas.length;
+  assert(ent === 5, `os 5 lançamentos seguem na listagem (veio ${ent})`);
+}
+
+/* ==================================================================== */
 secao('★ Estudo de importação conta mesmo com a operação em Cotação');
 {
   const app = novoApp();
