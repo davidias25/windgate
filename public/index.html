@@ -7180,12 +7180,21 @@ function triCalcular(e){
   reg('1. importação', 'COFINS-Importação', COFimp, 'base × COFINS% da NCM', TRI_FONTES.pisCofinsImp);
 
   const icmsEntPct = triPct(e.icmsEntradaEfetivo != null ? e.icmsEntradaEfetivo : op.icmsEntradaEfetivo);
-  const numeradorICMS = fobDeclarado + freteIntBrl + II + IPI + PISimp + COFimp + siscomex + afrmm + honorarios;
+  /* A base do ICMS de importação leva as "demais despesas aduaneiras", não só
+     as três que costumam aparecer destacadas. Armazenagem, scanner, THC e
+     taxas do terminal entram aqui — por isso o campo é explícito: deixá-las
+     de fora reduz a base e recolhe ICMS a menos, e somá-las sem dizer de onde
+     vieram faz o número não bater com a planilha e ninguém saber por quê. */
+  const outrasAduaneiras = triNum(e.outrasDespesasAduaneiras);
+  const numeradorICMS = fobDeclarado + freteIntBrl + II + IPI + PISimp + COFimp
+                      + siscomex + afrmm + honorarios + outrasAduaneiras;
   // ICMS "por dentro": integra a própria base, por isso divide.
   const baseICMSimp = numeradorICMS / (1 - icmsEntPct);
   const ICMSimp = baseICMSimp * icmsEntPct;
   reg('1. importação', 'Base ICMS importação', baseICMSimp,
-      `(FOB decl. + frete + II + IPI + PIS + COFINS + Siscomex + AFRMM + honorários) ÷ (1 − ${triCent(icmsEntPct*100)}%)`,
+      `(FOB decl. + frete + II + IPI + PIS + COFINS + Siscomex + AFRMM + honorários`
+      + (outrasAduaneiras ? ` + outras despesas aduaneiras ${triCent(outrasAduaneiras)}` : '')
+      + `) ÷ (1 − ${triCent(icmsEntPct*100)}%)`,
       TRI_FONTES.icmsEntrada);
   reg('1. importação', 'ICMS importação', ICMSimp, `base × ${triCent(icmsEntPct*100)}%`, TRI_FONTES.icmsEntrada);
 

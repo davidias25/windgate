@@ -54,6 +54,10 @@ const DIAGONAL = {
   freteIntUsd: 16000,
   seguroBrl: 1500, capataziaBrl: 1240,
   siscomex: 154.23, afrmm: 1024.00, honorarios: 1620.00,
+  // Demais despesas aduaneiras que a base do ICMS de importação leva e que não
+  // vinham destacadas em campo nenhum — é o que faltava para o motor fechar
+  // com a planilha (armazenagem, scanner, THC do terminal).
+  outrasDespesasAduaneiras: 2048.00,
   icmsEntradaEfetivo: 1.2,
   despesasNacionalizacao: 13933.00,
   markupComercialBrl: 2000.00,

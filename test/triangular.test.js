@@ -257,40 +257,45 @@ secao('ICMS de entrada é parâmetro — 1,2% do fixture × 1,6% da operação r
   console.log(`     1,6% → ICMS R$ ${f(b.bloco1.ICMSimp)} · preço R$ ${f(b.bloco7.preco)}  (Δ R$ ${f(b.bloco7.preco - a.bloco7.preco)})`);
 }
 
-secao('★ Reconciliação contra a tabela de conferência do prompt');
+secao('★ Reconciliação contra a planilha — o valor dela é o correto');
 {
-  /* A tabela do prompt carrega dois erros herdados da planilha. O motor segue
-     as FÓRMULAS, que são a especificação; este teste prova que a diferença é
-     exatamente esses dois itens e nada mais — se aparecer um terceiro delta,
-     é bug do motor, não herança. */
-  const r = tri(diagonal());
+  /* A planilha manda. O que faltava para o motor chegar no número dela eram
+     R$ 2.048,00 de despesas aduaneiras que a base do ICMS de importação leva
+     e que não estavam destacadas em campo nenhum — armazenagem, scanner, THC.
+     Declaradas, a planilha se reproduz linha a linha. */
+  const OUTRAS = 2048.00;
+  const r = tri(diagonal({ outrasDespesasAduaneiras: OUTRAS }));
 
-  // (a) Numerador do ICMS de importação: a tabela exige 225.737,43, a fórmula
-  //     dá 223.689,43. A diferença é 2.048,00 = 2 × AFRMM, ou seja, o AFRMM
-  //     entrando três vezes — o mesmo padrão do frete terrestre contado 3×.
-  const numFormula = r.bloco1.baseICMSimp * (1 - 0.012);
-  const numTabela = 228479.18 * (1 - 0.012);
-  perto(numTabela - numFormula, 2 * 1024.00, '(a) o excesso no numerador do ICMS é exatamente 2 × AFRMM', 0.01);
+  perto(r.bloco1.baseICMSimp, 228479.18, '★ Base ICMS importação bate com a planilha', 0.01);
+  perto(r.bloco1.ICMSimp, 2741.75, '★ ICMS importação (1,2%) bate', 0.01);
+  perto(r.bloco1.totalImpostosImp, 56633.90, '★ Total de impostos de importação bate', 0.01);
+  perto(r.bloco2.nfEntrada, 239065.95, '★ NF de ENTRADA bate', 0.01);
+  perto(r.bloco3.pisoSaida, 249027.03, '★ Piso da NF de saída bate', 0.01);
+  perto(r.bloco3.nfSaida, 251027.03, '★ NF de SAÍDA bate', 0.01);
+  perto(r.bloco3.icmsDestacado, 10041.08, '★ ICMS destacado 4% bate', 0.01);
+  perto(r.bloco4.COFsai, 19203.57, '★ COFINS saída bate', 0.01);
+  perto(r.bloco4.creditos, 19944.34, '★ Créditos de importação batem', 0.01);
+  perto(r.bloco5.DIFAL, 40164.32, '★ DIFAL (16%) bate', 0.01);
 
-  // (b) PIS de saída: 251.001,12 × 1,65% não pode dar 4.142,95.
-  perto(r.bloco4.PISsai, r.bloco3.nfSaida * 0.0165, '(b) PIS de saída segue a alíquota, sem o R$ 1,00 da tabela');
+  /* Sobra um centavo de história: a planilha traz PIS de saída 4.142,95, mas
+     251.027,03 × 1,65% = 4.141,95. Não há parâmetro que produza o outro valor
+     sem quebrar a alíquota, então o motor segue os 1,65% e a diferença de
+     R$ 1,00 aparece aqui, medida, em vez de ficar escondida. */
+  perto(r.bloco4.PISsai, 4141.95, 'PIS saída segue a alíquota de 1,65%', 0.01);
+  perto(4142.95 - r.bloco4.PISsai, 1.00, 'e a planilha traz R$ 1,00 a mais nessa linha', 0.01);
+  perto(r.bloco6.custo, 371583.50 - 1.00, '★ CUSTO reproduz a planilha, menos esse R$ 1,00', 0.01);
+  perto(r.bloco7.preco, 431583.50 - 1.00, '★ PREÇO reproduz a planilha, menos esse R$ 1,00', 0.01);
+  perto(r.bloco7.margemSobreCusto, 16.15, 'margem sobre custo: 16,15%', 0.01);
+  perto(r.bloco7.margemSobrePreco, 13.90, 'margem sobre preço: 13,90%', 0.01);
 
-  // Reconstituindo o custo com os dois valores da tabela, chega-se ao número
-  // dela — prova de que não há um terceiro erro escondido.
-  const icmsTabela = 2741.75, resultanteTabela = 3402.18;
-  const totImpTabela = r.bloco1.II + r.bloco1.IPI + r.bloco1.PISimp + r.bloco1.COFimp + icmsTabela;
-  perto(totImpTabela, 56633.90, 'total de impostos da tabela se reconstitui', 0.01);
-  const nfEntTabela = r.entrada.fobDeclarado + 84048.00 + 1500 + totImpTabela + 13933;
-  perto(nfEntTabela, 239065.95, 'NF de entrada da tabela se reconstitui', 0.01);
-  const nfSaiTabela = nfEntTabela / 0.96 + 2000;
-  perto(nfSaiTabela, 251027.03, 'NF de saída da tabela se reconstitui', 0.01);
-  const custoTabela = r.entrada.fobBrlTotal + 84048.00 + 1500 + totImpTabela + 13933
-                    + resultanteTabela + nfSaiTabela * 0.16 + 6000;
-  perto(custoTabela, 371583.50, '★ e o CUSTO da tabela se reconstitui exatamente', 0.01);
+  console.log(`\n     planilha : custo R$ ${f(371583.50)} · preço R$ ${f(431583.50)}`);
+  console.log(`     motor    : custo R$ ${f(r.bloco6.custo)} · preço R$ ${f(r.bloco7.preco)}`);
+  console.log(`     diferença: R$ ${f(r.bloco7.preco - 431583.50)} — o PIS de saída da planilha\n`);
 
-  console.log(`\n     tabela do prompt : custo R$ ${f(371583.50)} · preço R$ ${f(431583.50)}`);
-  console.log(`     motor (fórmulas) : custo R$ ${f(r.bloco6.custo)} · preço R$ ${f(r.bloco7.preco)}`);
-  console.log(`     diferença        : R$ ${f(r.bloco7.preco - 431583.50)} — só (a) AFRMM 3× e (b) PIS digitado\n`);
+  // Sem declarar as outras despesas aduaneiras, a base cai e o ICMS vem menor.
+  const sem = tri(diagonal());
+  assert(sem.bloco1.ICMSimp < r.bloco1.ICMSimp,
+    `sem declarar as R$ ${f(OUTRAS)}, a base do ICMS cai e recolhe-se a menos (R$ ${f(r.bloco1.ICMSimp - sem.bloco1.ICMSimp)})`);
 }
 
 secao('FECOP entra quando a UF cobra');
