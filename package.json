@@ -6,10 +6,12 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test/server.test.js && node test/recorrencia.test.js",
+    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js",
     "test:recorrencia": "node test/recorrencia.test.js",
     "verificar:filtros": "node scripts/verificar-filtros.js",
-    "verificar:recorrencia": "node scripts/verificar-recorrencia.js"
+    "verificar:recorrencia": "node scripts/verificar-recorrencia.js",
+    "test:triangular": "node test/triangular.test.js",
+    "apurar:triangular": "node scripts/apurar-triangular.js"
   },
   "keywords": [
     "windgate",

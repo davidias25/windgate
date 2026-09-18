@@ -7025,6 +7025,364 @@ function marginFromBRL(){
   document.querySelectorAll('.margin-presets button').forEach(b=>b.classList.remove('active'));
   updatePrice(m);
 }
+/* ============================================================
+   OPERAÇÃO TRIANGULAR — SF Trading (AL) → JeT Import (ES) → cliente
+   ============================================================
+   O benefício fiscal de ICMS de Alagoas exige venda a contribuinte. Quando o
+   cliente final não é contribuinte, a JeT (contribuinte, no ES) entra como elo
+   do meio. São três documentos fiscais e dois ICMS diferentes, e é daí que vem
+   quase todo erro de apuração.
+
+   Dois pontos concentram o risco, e os dois são "por dentro":
+     · o ICMS de importação integra a própria base → divide-se por (1 − alíquota);
+     · o ICMS destacado na saída corrói o líquido → a NF de saída tem um PISO,
+       nf_entrada / (1 − alíquota interestadual). Sair pelo valor da entrada
+       significa vender abaixo do custo, sem que nada na tela avise.
+
+   O divisor NUNCA é a constante 0,96: é sempre 1 − a alíquota destacada na
+   saída daquela operação. Chumbar 0,96 quebra no dia em que a saída for
+   interna em AL. Mesma coisa para o DIFAL, que é a diferença entre a interna
+   da UF do cliente e a interestadual — nunca 16% fixo.
+
+   Estrutura em Lucro Real: PIS/COFINS não cumulativos, então os créditos da
+   importação abatem os débitos da saída, e o desembolso é a resultante.        */
+
+/* ==== INÍCIO triangular-core ====
+   Funções puras: sem DOM, sem DB, sem USER. test/triangular.test.js e
+   scripts/apurar-triangular.js recortam este trecho do HTML e rodam o MESMO
+   código, para que proposta, tela e conferência não possam divergir. */
+
+/* Fonte de cada alíquota, exigida no detalhamento interno: número de imposto
+   sem origem não dá para conferir nem para defender numa fiscalização. */
+const TRI_FONTES = {
+  ii:          'Siscomex/TEC — NCM do item',
+  ipi:         'TIPI — NCM do item',
+  pisCofinsImp:'Lei 10.865/2004 — PIS/COFINS-Importação',
+  icmsEntrada: 'Benefício fiscal ICMS/AL — parâmetro da operação',
+  icmsInter:   'Resolução SF 13/2012 — importado: 4%',
+  icmsInterno: 'RICMS da UF de destino',
+  conv5291:    'Convênio ICMS 52/91 — Anexo I (máquinas e equipamentos)',
+  difal:       'EC 87/2015 · Convênio ICMS 236/2021',
+  pisCofinsSai:'Leis 10.637/2002 e 10.833/2003 — não cumulativo',
+  fecop:       'Fundo de combate à pobreza da UF de destino'
+};
+
+/* Padrões da estrutura. Todos editáveis: nenhum destes é constante de código.
+   `icmsEntradaEfetivo` é 1,6% porque é o que a operação recolhe de fato em AL
+   — o mesmo 1,6% que o checklist de desembaraço já cobra. */
+const TRI_PADRAO = {
+  fatorFrete: 1.02,            // regra WindGate: frete converte com +2%
+  fatorInvoice: 100,           // declarar 100% do FOB é o default; ver TRAVA 5
+  icmsEntradaEfetivo: 1.6,
+  icmsInterestadual: 4,        // importado, Resolução SF 13/2012
+  cargaConv5291: 8.8,
+  pisSaida: 1.65,
+  cofinsSaida: 7.65,
+  // Pendência 2 — o comentário da planilha diz que despesas acessórias não
+  // compõem a NF de entrada, mas a fórmula somava. Enquanto Pedro/Wellington
+  // não fecham, o default segue a fórmula e a alternativa fica a um flag.
+  despesasNaNfEntrada: true,
+  // Pendência 3 — para não contribuinte o Convênio 236/2021 prevê base dupla.
+  // Default na base simples (o que a planilha fazia); o flag mostra o outro
+  // número, que é ~R$ 10 mil maior no caso Diagonal.
+  difalBaseDupla: false,
+  // Decisão comercial, não correção: se ligado, o markup também sai líquido
+  // de ICMS — nf_saida = (nf_entrada + markup) / (1 − alíquota).
+  markupLiquidoDeIcms: false
+};
+
+const triPct = v => (+v || 0) / 100;
+const triNum = v => (typeof v === 'number' && isFinite(v)) ? v : (parseFloat(v) || 0);
+/* Arredonda só na APRESENTAÇÃO. Arredondar etapa intermediária desloca o piso
+   da NF de saída e a operação passa a fechar alguns centavos abaixo do custo. */
+const triCent = v => Math.round((+v || 0) * 100) / 100;
+
+/* Alíquota interna do destino. Com Convênio 52/91 a carga cai para 8,8%; sem
+   UF cadastrada não há palpite possível — quem decide é a TRAVA 2. */
+function triInternaDestino(uf, tabela, conv5291, cargaConv){
+  if (conv5291) return triNum(cargaConv != null ? cargaConv : TRI_PADRAO.cargaConv5291);
+  const v = tabela ? tabela[uf] : undefined;
+  return (typeof v === 'number') ? v : null;
+}
+
+/* ---------- MOTOR ---------- */
+/* Devolve os sete blocos, a memória de cálculo linha a linha, as travas que
+   bloqueiam e os alertas que só avisam. Nada aqui decide sozinho emitir nada:
+   quem chama é que lê `travas` e resolve. */
+function triCalcular(e){
+  const op = Object.assign({}, TRI_PADRAO, e.opcoes || {});
+  const travas = [], alertas = [], memoria = [];
+  const reg = (bloco, rotulo, valor, formula, fonte) =>
+    memoria.push({ bloco, rotulo, valor, formula, fonte: fonte || '' });
+
+  /* ---- Câmbio ---- */
+  const txDesp = triNum(e.taxaUsdDespesas);
+  const txFrete = triNum(e.taxaUsdFrete) || txDesp * triNum(op.fatorFrete || TRI_PADRAO.fatorFrete);
+  reg('câmbio', 'Taxa USD despesas/mercadoria', txDesp, 'parâmetro');
+  reg('câmbio', 'Taxa USD frete', txFrete, `${txDesp} × ${op.fatorFrete} (regra WindGate +2%)`);
+
+  /* ---- Itens ---- */
+  const fatorInvoice = triPct(e.fatorInvoice != null ? e.fatorInvoice : op.fatorInvoice);
+  const itens = (e.itens || []).map(it => {
+    const bruto = triNum(it.valorUnitarioUsd) * triNum(it.qtd);
+    const fobUsd = bruto * (1 - triPct(it.descontoPct));
+    return Object.assign({}, it, { fobUsd, fobBrl: fobUsd * txDesp });
+  });
+  const fobBrlTotal = itens.reduce((a, it) => a + it.fobBrl, 0);
+  const pesoTotal = itens.reduce((a, it) => a + triNum(it.pesoKg), 0);
+  // Rateio pelo peso do item no FOB: é o critério que a DI usa para distribuir
+  // frete, seguro e despesas entre as adições.
+  itens.forEach(it => { it.share = fobBrlTotal > 0 ? it.fobBrl / fobBrlTotal : 0; });
+
+  const fobDeclarado = fobBrlTotal * fatorInvoice;
+  reg('itens', 'FOB integral (pago ao fornecedor)', fobBrlTotal, `USD ${triCent(itens.reduce((a,i)=>a+i.fobUsd,0))} × ${txDesp}`);
+  reg('itens', 'FOB declarado na DI', fobDeclarado, `FOB integral × ${triCent(fatorInvoice * 100)}%`);
+
+  /* TRAVA 5 — subfaturamento. O valor declarado tem de ser o de transação
+     (Acordo de Valoração Aduaneira). Declarar menos expõe a multa e a pena de
+     perdimento, e alcança a DI já registrada. O campo existe, mas nunca calado. */
+  if (fatorInvoice < 1) {
+    alertas.push({
+      codigo: 'INVOICE_REDUZIDA',
+      gravidade: 'alta',
+      msg: `Invoice declarada a ${triCent(fatorInvoice * 100)}% do FOB — R$ ${triCent(fobBrlTotal - fobDeclarado)} fora da base. `
+         + 'O valor declarado deve ser o valor de transação (Acordo de Valoração Aduaneira). '
+         + 'Exposição: multa e pena de perdimento, e vulnerabilidade do benefício fiscal de AL a glosa.',
+      log: { fatorInvoice: triCent(fatorInvoice * 100), fobIntegral: triCent(fobBrlTotal), fobDeclarado: triCent(fobDeclarado),
+             usuario: e.usuario || '(não informado)', em: e.agora || new Date().toISOString() }
+    });
+  }
+
+  /* ---- BLOCO 1 — importação / nacionalização (SF, AL) ---- */
+  const freteIntBrl = triNum(e.freteIntUsd) * txFrete;
+  const seguro = triNum(e.seguroBrl), capatazia = triNum(e.capataziaBrl);
+  const siscomex = triNum(e.siscomex), afrmm = triNum(e.afrmm), honorarios = triNum(e.honorarios);
+
+  const baseImportacao = fobDeclarado + freteIntBrl + seguro + capatazia;
+  reg('1. importação', 'Base impostos importação (CIF declarado)', baseImportacao,
+      'FOB declarado + frete int. + seguro + capatazia');
+
+  // Por item, porque II/IPI/PIS/COFINS são da NCM e não da operação.
+  let II = 0, IPI = 0, PISimp = 0, COFimp = 0;
+  itens.forEach(it => {
+    const base_i = baseImportacao * it.share;
+    const ii_i  = base_i * triPct(it.ii);
+    const ipi_i = (base_i + ii_i) * triPct(it.ipi);
+    II += ii_i; IPI += ipi_i;
+    PISimp += base_i * triPct(it.pisImp);
+    COFimp += base_i * triPct(it.cofinsImp);
+    it.impostos = { base: base_i, ii: ii_i, ipi: ipi_i,
+                    pis: base_i * triPct(it.pisImp), cofins: base_i * triPct(it.cofinsImp) };
+  });
+  reg('1. importação', 'II', II, 'base × II% da NCM', TRI_FONTES.ii);
+  reg('1. importação', 'IPI', IPI, '(base + II) × IPI% da NCM', TRI_FONTES.ipi);
+  reg('1. importação', 'PIS-Importação', PISimp, 'base × PIS% da NCM', TRI_FONTES.pisCofinsImp);
+  reg('1. importação', 'COFINS-Importação', COFimp, 'base × COFINS% da NCM', TRI_FONTES.pisCofinsImp);
+
+  const icmsEntPct = triPct(e.icmsEntradaEfetivo != null ? e.icmsEntradaEfetivo : op.icmsEntradaEfetivo);
+  const numeradorICMS = fobDeclarado + freteIntBrl + II + IPI + PISimp + COFimp + siscomex + afrmm + honorarios;
+  // ICMS "por dentro": integra a própria base, por isso divide.
+  const baseICMSimp = numeradorICMS / (1 - icmsEntPct);
+  const ICMSimp = baseICMSimp * icmsEntPct;
+  reg('1. importação', 'Base ICMS importação', baseICMSimp,
+      `(FOB decl. + frete + II + IPI + PIS + COFINS + Siscomex + AFRMM + honorários) ÷ (1 − ${triCent(icmsEntPct*100)}%)`,
+      TRI_FONTES.icmsEntrada);
+  reg('1. importação', 'ICMS importação', ICMSimp, `base × ${triCent(icmsEntPct*100)}%`, TRI_FONTES.icmsEntrada);
+
+  const totalImpostosImp = II + IPI + PISimp + COFimp + ICMSimp;
+  reg('1. importação', 'Total impostos importação', totalImpostosImp, 'II + IPI + PIS + COFINS + ICMS');
+
+  /* ---- BLOCO 2 — NF de ENTRADA (SF) ---- */
+  const despNac = triNum(e.despesasNacionalizacao);
+  const nfEntrada = fobDeclarado + freteIntBrl + seguro + totalImpostosImp
+                  + (op.despesasNaNfEntrada ? despNac : 0);
+  reg('2. NF entrada', 'NF de ENTRADA', nfEntrada,
+      'FOB decl. + frete int. + seguro + impostos importação'
+      + (op.despesasNaNfEntrada ? ' + despesas de nacionalização' : ' (despesas acessórias FORA — pendência 2)'));
+
+  /* ---- BLOCO 3 — piso da NF de SAÍDA (SF/AL → JeT/ES) ---- */
+  const icmsInterPct = triPct(e.icmsInterestadual != null ? e.icmsInterestadual : op.icmsInterestadual);
+  const markup = triNum(e.markupComercialBrl);
+  const pisoSaida = nfEntrada / (1 - icmsInterPct);
+  const nfSaida = op.markupLiquidoDeIcms
+    ? (nfEntrada + markup) / (1 - icmsInterPct)
+    : pisoSaida + markup;
+  const icmsDestacado = nfSaida * icmsInterPct;
+  reg('3. NF saída', 'Piso da NF de saída', pisoSaida,
+      `NF entrada ÷ (1 − ${triCent(icmsInterPct*100)}%)`, TRI_FONTES.icmsInter);
+  reg('3. NF saída', 'NF de SAÍDA', nfSaida,
+      op.markupLiquidoDeIcms ? `(NF entrada + markup) ÷ (1 − ${triCent(icmsInterPct*100)}%)` : 'piso + markup comercial');
+  reg('3. NF saída', 'ICMS destacado na saída', icmsDestacado,
+      `NF de saída cheia × ${triCent(icmsInterPct*100)}%`, TRI_FONTES.icmsInter);
+
+  /* TRAVA 1 — piso de saída. */
+  if (triCent(nfSaida) < triCent(pisoSaida) - 0.005) {
+    travas.push({ codigo: 'PISO_SAIDA', msg: `NF de saída abaixo do piso. Mínimo: R$ ${triCent(pisoSaida)}.` });
+  }
+
+  /* ---- BLOCO 4 — PIS/COFINS da saída (não cumulativo) ---- */
+  // A base é a MESMA nf_saida do bloco 3. Duas bases de saída convivendo foi
+  // um dos erros da planilha antiga.
+  const baseSaida = nfSaida;
+  const PISsai = baseSaida * triPct(e.pisSaida != null ? e.pisSaida : op.pisSaida);
+  const COFsai = baseSaida * triPct(e.cofinsSaida != null ? e.cofinsSaida : op.cofinsSaida);
+  const ipiSaidaPct = itens.reduce((a, it) => a + it.share * triPct(it.ipi), 0);
+  const IPIsai = baseSaida * ipiSaidaPct;
+  const creditos = IPI + PISimp + COFimp;
+  const resultanteBruta = (PISsai + COFsai + IPIsai) - creditos;
+  // Resultante negativa não é custo negativo: é crédito a compensar depois.
+  const resultante = Math.max(resultanteBruta, 0);
+  const creditoAcumulado = resultanteBruta < 0 ? -resultanteBruta : 0;
+
+  reg('4. saída', 'Base PIS/COFINS saída', baseSaida, 'a MESMA NF de saída do bloco 3');
+  reg('4. saída', 'PIS saída', PISsai, `base × ${triCent((e.pisSaida != null ? e.pisSaida : op.pisSaida))}%`, TRI_FONTES.pisCofinsSai);
+  reg('4. saída', 'COFINS saída', COFsai, `base × ${triCent((e.cofinsSaida != null ? e.cofinsSaida : op.cofinsSaida))}%`, TRI_FONTES.pisCofinsSai);
+  reg('4. saída', 'IPI saída', IPIsai, 'base × IPI% ponderado das NCMs', TRI_FONTES.ipi);
+  reg('4. saída', 'Créditos da importação', creditos, 'IPI + PIS-imp + COFINS-imp', TRI_FONTES.pisCofinsSai);
+  reg('4. saída', 'Resultante de impostos (desembolso)', resultante, '(PIS + COFINS + IPI saída) − créditos');
+  if (creditoAcumulado > 0) {
+    reg('4. saída', 'Crédito acumulado a compensar', creditoAcumulado, 'resultante negativa não vira custo negativo');
+    alertas.push({ codigo: 'CREDITO_ACUMULADO', gravidade: 'baixa',
+      msg: `Créditos superam os débitos em R$ ${triCent(creditoAcumulado)} — registrado como crédito a compensar, não como custo negativo.` });
+  }
+  // O ICMS destacado de 4% aparece na NF mas é neutralizado pelo crédito
+  // presumido do benefício de AL: não é desembolso e por isso não entra no custo.
+  reg('4. saída', 'ICMS destacado — NÃO entra no custo', icmsDestacado,
+      'neutralizado pelo crédito presumido do benefício AL (confirmar — pendência 1)');
+
+  /* ---- BLOCO 5 — DIFAL (JeT/ES → cliente final) ---- */
+  const tabelaUF = e.tabelaIcmsInterno || {};
+  const conv = !!e.conv5291;
+  const internaDestino = triInternaDestino(e.ufDestino, tabelaUF, conv, e.cargaConv5291 != null ? e.cargaConv5291 : op.cargaConv5291);
+
+  /* TRAVA 2 — UF sem alíquota cadastrada. Nunca assumir default. */
+  if (internaDestino === null) {
+    travas.push({ codigo: 'UF_SEM_ALIQUOTA',
+      msg: `Alíquota interna de ICMS não cadastrada para a UF "${e.ufDestino || '(vazia)'}". Cadastre antes de apurar — não há default.` });
+  }
+  const internaPct = triPct(internaDestino || 0);
+  const difalPct = Math.max(internaPct - icmsInterPct, 0);
+  const contribuinte = !!e.clienteContribuinte;
+
+  let DIFAL = 0, baseDifal = 0;
+  if (internaDestino !== null) {
+    if (op.difalBaseDupla) {
+      // Convênio 236/2021: para não contribuinte o ICMS interno integra a
+      // própria base — tira-se o destacado e recompõe-se por dentro.
+      baseDifal = (nfSaida - icmsDestacado) / (1 - internaPct);
+      DIFAL = baseDifal * internaPct - icmsDestacado;
+    } else {
+      baseDifal = nfSaida;
+      DIFAL = baseDifal * difalPct;
+    }
+  }
+  const fecopPct = triPct(e.fecopPct);
+  const FECOP = fecopPct > 0 ? baseDifal * fecopPct : 0;
+
+  reg('5. DIFAL', `Alíquota interna ${e.ufDestino || '?'}`, internaDestino,
+      conv ? 'carga reduzida do Convênio 52/91' : 'tabela por UF',
+      conv ? TRI_FONTES.conv5291 : TRI_FONTES.icmsInterno);
+  reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100),
+      `${triCent(internaPct*100)}% interna − ${triCent(icmsInterPct*100)}% interestadual`, TRI_FONTES.difal);
+  reg('5. DIFAL', 'Base do DIFAL', baseDifal,
+      op.difalBaseDupla ? '(NF saída − ICMS destacado) ÷ (1 − interna) — base dupla, Conv. 236/2021' : 'NF de saída — base simples',
+      TRI_FONTES.difal);
+  reg('5. DIFAL', 'DIFAL', DIFAL,
+      (contribuinte ? 'recolhido pelo CLIENTE — informativo, fora do custo' : 'recolhido pelo REMETENTE (JeT) — entra no custo'),
+      TRI_FONTES.difal);
+  if (FECOP > 0) reg('5. DIFAL', 'FECOP', FECOP, `base do DIFAL × ${triCent(fecopPct*100)}%`, TRI_FONTES.fecop);
+
+  if (conv) {
+    alertas.push({ codigo: 'CONV_5291', gravidade: 'media',
+      msg: 'Convênio 52/91 aplicado: validar cada NCM contra o Anexo I antes de emitir.' });
+  }
+  const difalNoCusto = contribuinte ? 0 : (DIFAL + FECOP);
+
+  /* ---- BLOCO 6 — custo total da operação (WindGate) ---- */
+  const freteTerrestre = triNum(e.freteTerrestreBrl);
+  // O custo usa o FOB INTEGRAL: o que sai do caixa é o que se paga ao
+  // fornecedor, não o que se declarou na DI. São campos diferentes, e confundir
+  // os dois é o que faz a operação parecer mais barata do que é.
+  // Capatazia, Siscomex, AFRMM e honorários NÃO entram aqui: eles já estão
+  // dentro de `despesas_nacionalizacao`. Aparecem soltos na entrada só porque
+  // a base do ICMS de importação precisa de cada um separado. Somá-los de novo
+  // seria a mesma duplicidade que fez o frete terrestre ser contado três vezes.
+  const acessoriasNaBase = capatazia + siscomex + afrmm + honorarios;
+  const parcelasCusto = [
+    ['FOB integral',                    fobBrlTotal],
+    ['Frete internacional',             freteIntBrl],
+    ['Seguro',                          seguro],
+    ['Impostos de importação',          totalImpostosImp],
+    ['Despesas de nacionalização',      despNac],
+    ['Resultante de impostos (saída)',  resultante],
+    ['DIFAL' + (contribuinte ? ' (cliente contribuinte — fora)' : ''), difalNoCusto],
+    ['Frete terrestre',                 freteTerrestre]
+  ];
+  const custo = parcelasCusto.reduce((a, [, v]) => a + v, 0);
+  parcelasCusto.forEach(([nome, v]) => reg('6. custo', nome, v, ''));
+  reg('6. custo', 'CUSTO WINDGATE', custo, 'soma das parcelas acima, cada uma UMA vez');
+
+  /* TRAVA 3 — duplicidade. Frete terrestre contado três vezes custou R$ 12 mil
+     na planilha antiga; a trava confere que nenhum valor entra duas vezes. */
+  const vistos = new Map();
+  parcelasCusto.forEach(([nome, v]) => {
+    if (v <= 0) return;
+    const k = triCent(v).toFixed(2);
+    if (vistos.has(k)) {
+      travas.push({ codigo: 'DUPLICIDADE',
+        msg: `Valor R$ ${k} aparece em duas linhas do custo ("${vistos.get(k)}" e "${nome}"). Confira se não é a mesma despesa somada duas vezes.` });
+    } else vistos.set(k, nome);
+  });
+  // As acessórias têm de caber dentro do balaio que as contém. Se não cabem,
+  // ou está faltando despesa no total ou alguém as somou em dois lugares.
+  if (acessoriasNaBase > despNac + 0.005) {
+    travas.push({ codigo: 'ACESSORIAS_FORA',
+      msg: `Capatazia + Siscomex + AFRMM + honorários somam R$ ${triCent(acessoriasNaBase)}, mais que as despesas de nacionalização `
+         + `(R$ ${triCent(despNac)}). Elas deveriam estar dentro desse total — confira se não ficaram de fora do custo ou se foram somadas duas vezes.` });
+  }
+
+  /* ---- BLOCO 7 — preço ao cliente ---- */
+  const servico = e.servicoWindgateBrl != null && e.servicoWindgateBrl !== ''
+    ? triNum(e.servicoWindgateBrl)
+    : custo * triPct(e.servicoWindgatePct);
+  const preco = custo + servico;
+  reg('7. preço', 'Serviço WindGate', servico,
+      e.servicoWindgateBrl != null && e.servicoWindgateBrl !== '' ? 'valor fixo' : `custo × ${triCent(triNum(e.servicoWindgatePct))}%`);
+  reg('7. preço', 'PREÇO FINAL AO CLIENTE', preco, 'custo + serviço');
+
+  // Rateio por produto, pelo custo nacionalizado de cada um.
+  const custoNacItem = itens.map(it => it.share * (custo - servico * 0));
+  const totalNac = custoNacItem.reduce((a, v) => a + v, 0);
+  const porProduto = itens.map((it, i) => ({
+    descricao: it.descricao, ncm: it.ncm, qtd: it.qtd,
+    custoNacionalizado: custoNacItem[i],
+    preco: totalNac > 0 ? (custoNacItem[i] / totalNac) * preco : 0
+  }));
+
+  /* TRAVA 6 — conferência cruzada do rateio. */
+  const somaRateio = porProduto.reduce((a, p) => a + p.preco, 0);
+  if (Math.abs(somaRateio - preco) > 0.01) {
+    travas.push({ codigo: 'RATEIO',
+      msg: `Soma do rateio por produto (R$ ${triCent(somaRateio)}) não bate com o preço final (R$ ${triCent(preco)}).` });
+  }
+
+  return {
+    entrada: { txDesp, txFrete, fatorInvoice, fobBrlTotal, fobDeclarado, itens },
+    bloco1: { baseImportacao, II, IPI, PISimp, COFimp, baseICMSimp, ICMSimp, totalImpostosImp },
+    bloco2: { nfEntrada },
+    bloco3: { pisoSaida, nfSaida, icmsDestacado, markup },
+    bloco4: { baseSaida, PISsai, COFsai, IPIsai, creditos, resultante, creditoAcumulado },
+    bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, baseDifal, DIFAL, FECOP,
+              clienteContribuinte: contribuinte, difalNoCusto, baseDupla: !!op.difalBaseDupla },
+    bloco6: { parcelas: parcelasCusto, custo, freteTerrestre },
+    bloco7: { servico, preco, porProduto,
+              margemSobreCusto: custo > 0 ? servico / custo * 100 : 0,
+              margemSobrePreco: preco > 0 ? servico / preco * 100 : 0 },
+    opcoes: op, travas, alertas, memoria
+  };
+}
+/* ==== FIM triangular-core ==== */
+
 function updatePrice(m){
   const tri=($('tipoOp')&&V('tipoOp')==='triangular');
   if(!tri){
