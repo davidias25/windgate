@@ -343,5 +343,81 @@ secao('FECOP entra quando a UF cobra');
   assert(r.bloco5.difalNoCusto > r.bloco5.DIFAL, 'e soma ao custo junto com o DIFAL');
 }
 
+secao('★ A aba Cotações usa o motor — mesma entrada, mesmo número');
+{
+  /* Dirige o formulário de verdade e compara o que apareceu na tela com o que
+     o motor devolve para a mesma entrada. Se a tela divergir do motor, o
+     cálculo voltou a viver solto na tela — que era o problema. */
+  const set = (id, v) => { app.document.getElementById(id).value = String(v); };
+  const num = id => parseFloat(String(app.document.getElementById(id).textContent).replace(/[^\d,-]/g, '').replace(',', '.'));
+
+  app.avaliar(`
+    state.items = [{ d:'Containers', ncm:'9406.90.0090', q:1, u:32214, p:0,
+                     ii:20, ipi:0, pis:2.1, cofins:9.65, c5291:false, mono:false }];
+    state.exps  = [{ n:'Despesas de nacionalização', v:9894.77 }];
+  `);
+  Object.entries({
+    tipoOp: 'triangular', ufDestino: 'CE',
+    txDesp: 5.15, txFrete: 5.253, pctInv: 50, icmsEnt: 1.2, icmsDest: 4,
+    freteUSD: 16000, seguro: 1500, capatazia: 1240,
+    siscomex: 154.23, afrmm: 1024, honorarios: 1620, outrasAdu: 2048,
+    transporte: 6000, mkSF: 2000, mkJT: 0,
+    pisS: 1.65, cofS: 7.65, ipiS: 0, mkp: 0, aliqST: 20,
+    margemPct: 20
+  }).forEach(([k, v]) => set(k, v));
+
+  app.calc();
+
+  // O mesmo cálculo, chamado direto no motor.
+  const esperado = tri({
+    taxaUsdDespesas: 5.15, taxaUsdFrete: 5.253,
+    itens: [{ descricao: 'Containers', ncm: '9406.90.0090', qtd: 1, valorUnitarioUsd: 32214,
+              ii: 20, ipi: 0, pisImp: 2.1, cofinsImp: 9.65 }],
+    fatorInvoice: 50, freteIntUsd: 16000, seguroBrl: 1500, capataziaBrl: 1240,
+    siscomex: 154.23, afrmm: 1024, honorarios: 1620, outrasDespesasAduaneiras: 2048,
+    icmsEntradaEfetivo: 1.2, icmsInterestadual: 4,
+    despesasNacionalizacao: 9894.77 + 154.23 + 1024 + 1620 + 1240,
+    markupComercialBrl: 2000, markupJetBrl: 0,
+    ufDestino: 'CE', tabelaIcmsInterno: app.ICMS_INTERNO,
+    clienteContribuinte: false, freteTerrestreBrl: 6000,
+    servicoWindgatePct: 20
+  });
+
+  perto(esperado.bloco2.nfEntrada, 239065.95, 'o motor reproduz a NF de entrada da planilha', 0.01);
+  perto(num('sNFEntrada'),  esperado.bloco2.nfEntrada,   '★ tela: NF de ENTRADA', 0.01);
+  perto(num('sPisoSaida'),  esperado.bloco3.pisoSaida,   '★ tela: piso da NF de saída', 0.01);
+  perto(num('sNFJT'),       esperado.bloco3.nfSaida,     '★ tela: NF SF → JeT', 0.01);
+  perto(num('sNFCli'),      esperado.bloco5.nfJetCliente,'★ tela: NF da JeT ao cliente', 0.01);
+  perto(num('sDifal'),      esperado.bloco5.DIFAL,       '★ tela: DIFAL', 0.01);
+  perto(num('sICMSes'),     esperado.bloco5.icmsJetLiquido, '★ tela: ICMS da perna ES', 0.01);
+  perto(num('sResultTri'),  esperado.bloco4.resultante,  '★ tela: resultante de impostos', 0.01);
+  perto(num('sCustoGrupo'), esperado.bloco6.custo,       '★ tela: custo do grupo', 0.01);
+  perto(num('sPreco'),      esperado.bloco7.preco,       '★ tela: PREÇO ao cliente', 0.01);
+
+  const lbl = app.document.getElementById('lblDifalTri').textContent;
+  assert(/16,00%/.test(lbl), `o rótulo do DIFAL mostra a alíquota e a UF que a originou: "${lbl}"`);
+
+  // A margem em % continua mandando, como na aba de sempre.
+  perto(esperado.bloco7.servico, esperado.bloco6.custo * 0.20, 'serviço = 20% do custo do grupo', 0.01);
+  set('margemPct', 30); app.calc();
+  assert(num('sPreco') > esperado.bloco7.preco, '★ trocar o preset de margem move o preço');
+
+  // Invoice a 50% tem de estar dito na tela, não só no log.
+  const avisos = app.document.getElementById('triAvisos').innerHTML;
+  assert(/Invoice declarada a 50%/.test(avisos), '★ o alerta de invoice reduzida aparece na tela');
+  assert(app.document.getElementById('triAvisos').style.display === 'block', 'e a caixa fica visível');
+}
+
+secao('★ Trava do piso aparece na tela quando o mark-up derruba a saída');
+{
+  const set = (id, v) => { app.document.getElementById(id).value = String(v); };
+  set('mkSF', -50000);
+  app.calc();
+  const avisos = app.document.getElementById('triAvisos').innerHTML;
+  assert(/NF de saída abaixo do piso/.test(avisos), '★ a trava do piso aparece para quem está cotando');
+  set('mkSF', 2000); app.calc();
+  assert(!/abaixo do piso/.test(app.document.getElementById('triAvisos').innerHTML), 'e some quando volta ao normal');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhas} falharam.`);
 process.exit(falhas ? 1 : 0);

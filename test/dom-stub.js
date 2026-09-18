@@ -24,6 +24,9 @@ function criarElemento(id){
     disabled: false,
     style: { setProperty(){}, removeProperty(){} },
     dataset: {},
+    // <select> real expõe `options`; sem isso, código que pergunta se a lista
+    // já foi montada quebra antes de chegar no que o teste quer medir.
+    options: [],
     classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
     appendChild(){}, insertAdjacentHTML(){}, remove(){}, focus(){}, click(){},
     setAttribute(){}, getAttribute(){ return null; }, removeAttribute(){},

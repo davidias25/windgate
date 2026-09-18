@@ -863,7 +863,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>Mark-up NF (%)</label><input type="number" id="mkp" value="1" step="0.1" oninput="calc()"></div>
           <div class="triOnly" style="display:none"><label>Mark-up SF → JeT (R$)</label><input type="number" id="mkSF" value="2000" step="0.01" oninput="calc()" title="valor fixo somado ao custo nacionalizado para formar a NF de venda da SF para a JeT"></div>
           <div class="triOnly" style="display:none"><label>Mark-up JeT → cliente (R$)</label><input type="number" id="mkJT" value="1000" step="0.01" oninput="calc()" title="valor fixo somado à NF de compra da JeT para formar a NF que vai ao cliente — é sobre ela que incide o DIFAL"></div>
-          <div class="triOnly" style="display:none"><label>ISS da nota de serviço (%)</label><input type="number" id="issServ" value="5" step="0.1" oninput="calc()"></div>
+          <div><label title="Armazenagem, scanner, THC e demais despesas aduaneiras. Entram na base do ICMS de importação; deixá-las de fora recolhe imposto a menos.">Outras desp. aduaneiras (R$)</label><input type="number" id="outrasAdu" value="0" step="0.01" oninput="calc()"></div>
           <div><label>Alíq. efetiva DIFAL (%)</label><input type="number" id="aliqST" value="16" step="0.1" oninput="calc()"></div>
         </div>
         <p class="note">PIS/COFINS de <b>saída</b> (venda). Os de <b>importação</b> vêm da NCM de cada item, na tabela abaixo. <span id="notaDifal"></span> Ajuste apenas com validação da contadora.</p>
@@ -939,15 +939,16 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="sumline cost"><span id="lblCusto">Custo real WindGate</span><span class="num" id="sCustoReal">R$ 0,00</span></div>
         <div class="sumline" id="rowST"><span class="lbl" id="lblDifal">ICMS DIFAL</span><span class="num" id="sST">R$ 0,00</span></div>
         <div id="triLines" style="display:none">
-          <div class="sumline"><span class="lbl">NF de compra da JeT (SF → JeT)</span><span class="num" id="sNFJT">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl">NF de ENTRADA (SF nacionaliza)</span><span class="num" id="sNFEntrada">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl" title="NF de entrada ÷ (1 − ICMS destacado). Sair abaixo disto é vender abaixo do custo: o ICMS por dentro corrói o líquido.">Piso da NF de saída</span><span class="num" id="sPisoSaida">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl">NF de saída SF → JeT (piso + mark-up)</span><span class="num" id="sNFJT">R$ 0,00</span></div>
           <div class="sumline"><span class="lbl">NF da JeT ao cliente (base do DIFAL)</span><span class="num" id="sNFCli">R$ 0,00</span></div>
           <div class="sumline"><span class="lbl" id="lblDifalTri">DIFAL (JeT → cliente)</span><span class="num" id="sDifal">R$ 0,00</span></div>
-          <div class="sumline"><span class="lbl">ICMS 4% líquido da perna ES</span><span class="num" id="sICMSes">R$ 0,00</span></div>
-          <div class="sumline"><span class="lbl">Nota de serviço WindGate</span><span class="num" id="sNotaServ">R$ 0,00</span></div>
-          <div class="sumline"><span class="lbl" id="lblISS">ISS s/ nota de serviço</span><span class="num" id="sISS">R$ 0,00</span></div>
-          <div class="sumline"><span class="lbl">PIS/COFINS s/ nota de serviço (9,25%)</span><span class="num" id="sPCJT">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl">ICMS líquido da perna ES (s/ mark-up da JeT)</span><span class="num" id="sICMSes">R$ 0,00</span></div>
+          <div class="sumline"><span class="lbl" title="PIS/COFINS/IPI da saída menos os créditos da importação — é o que a estrutura desembolsa de fato.">Resultante de impostos (saída − créditos)</span><span class="num" id="sResultTri">R$ 0,00</span></div>
           <div class="sumline cost"><span>Custo total do grupo (SF + JeT)</span><span class="num" id="sCustoGrupo">R$ 0,00</span></div>
         </div>
+        <div id="triAvisos" style="display:none;margin-top:8px;line-height:1.7"></div>
 
         <div class="apprbox">
           <h2 style="margin-bottom:8px">Margem WindGate</h2>
@@ -7008,11 +7009,18 @@ function calc(){
   marginFromPct(true);
 }
 function setMarginPct(p,btn){
+  _servicoEmBRL = false;
   document.querySelectorAll('.margin-presets button').forEach(b=>b.classList.remove('active'));
   if(btn) btn.classList.add('active');
   $('margemPct').value=p; marginFromPct();
 }
+/* O serviço da WindGate é o que se decide na hora: ora em percentual do
+   custo, ora fechado em reais. Sem saber qual dos dois campos foi mexido por
+   último, digitar o valor em reais era sobrescrito pelo percentual no render
+   seguinte, e não dava para fechar um número redondo. */
+let _servicoEmBRL = false;
 function marginFromPct(silent){
+  _servicoEmBRL = false;
   const pct=N('margemPct')/100, base=R.custoReal||0;
   const m=base*pct;
   if(!silent) $('margemBRL').value=m.toFixed(2);
@@ -7020,7 +7028,8 @@ function marginFromPct(silent){
   updatePrice(m);
 }
 function marginFromBRL(){
-  const m=N('margemBRL'), base=R.custoReal||0;
+  _servicoEmBRL = true;
+  const m=N('margemBRL'), base=(R.tri?R.tri.custoGrupo:0)||R.custoReal||0;
   $('margemPct').value=base>0?((m/base)*100).toFixed(1):0;
   document.querySelectorAll('.margin-presets button').forEach(b=>b.classList.remove('active'));
   updatePrice(m);
@@ -7261,16 +7270,35 @@ function triCalcular(e){
 
   /* ---- BLOCO 5 — DIFAL (JeT/ES → cliente final) ---- */
   const tabelaUF = e.tabelaIcmsInterno || {};
-  const conv = !!e.conv5291;
-  const internaDestino = triInternaDestino(e.ufDestino, tabelaUF, conv, e.cargaConv5291 != null ? e.cargaConv5291 : op.cargaConv5291);
+  const cargaConv = triNum(e.cargaConv5291 != null ? e.cargaConv5291 : op.cargaConv5291);
+  /* O Convênio 52/91 é POR PRODUTO: numa mesma DI cabe máquina industrial com
+     carga reduzida ao lado de item comum. A alíquota do DIFAL sai ponderada
+     pelo peso de cada um no FOB — aplicar a do primeiro item a todos erra a
+     guia inteira. O flag global continua valendo quando a operação é toda de
+     um tipo só. */
+  const itensConv = itens.some(it => it.conv5291);
+  const convGlobal = !!e.conv5291;
+  const conv = convGlobal || itensConv;
+  const internaTabela = triInternaDestino(e.ufDestino, tabelaUF, false, null);
 
   /* TRAVA 2 — UF sem alíquota cadastrada. Nunca assumir default. */
-  if (internaDestino === null) {
+  if (internaTabela === null) {
     travas.push({ codigo: 'UF_SEM_ALIQUOTA',
       msg: `Alíquota interna de ICMS não cadastrada para a UF "${e.ufDestino || '(vazia)'}". Cadastre antes de apurar — não há default.` });
   }
-  const internaPct = triPct(internaDestino || 0);
-  const difalPct = Math.max(internaPct - icmsInterPct, 0);
+  const internaDestino = internaTabela === null ? null
+    : ((convGlobal && !itensConv) ? cargaConv : internaTabela);
+
+  let difalPct = 0;
+  if (internaTabela !== null) {
+    const cheia = Math.max(triPct(internaTabela) - icmsInterPct, 0);
+    const reduzida = Math.max(triPct(cargaConv) - icmsInterPct, 0);
+    difalPct = itensConv
+      ? itens.reduce((a, it) => a + it.share * (it.conv5291 ? reduzida : cheia), 0)
+      : (convGlobal ? reduzida : cheia);
+  }
+  // Interna efetiva reconstituída da ponderação — é ela que a base dupla usa.
+  const internaPct = difalPct + icmsInterPct;
   const contribuinte = !!e.clienteContribuinte;
 
   /* A JeT revende ao cliente com markup próprio, e é ESSA nota que gera o
@@ -7289,7 +7317,7 @@ function triCalcular(e){
       TRI_FONTES.icmsInter);
 
   let DIFAL = 0, baseDifal = 0;
-  if (internaDestino !== null) {
+  if (internaTabela !== null) {
     if (op.difalBaseDupla) {
       // Convênio 236/2021: para não contribuinte o ICMS interno integra a
       // própria base — tira-se o destacado e recompõe-se por dentro.
@@ -7433,43 +7461,82 @@ function updatePrice(m){
        ICMS ES    = 4% sobre o markup da perna ES (débito de saída − crédito)
        Serviço    = resolvido para atingir a margem, com ISS + PIS/COFINS
        Preço      = NF JeT→cli + nota de serviço                                */
-  const mg=N('margemPct')/100;
-  const C0=R.custoReal||0;
-  const mkSF=N('mkSF'), mkJT=N('mkJT');
-  const nfSF=(R.chTot||0)+mkSF;              // NF de venda da SF para a JeT
-  const nfJT=nfSF+mkJT;                      // NF da JeT para o cliente
-  // Mesma tabela por UF do modo direto. O 52/91 continua com a carga reduzida.
-  const internaUF=ICMS_INTERNO[V('ufDestino')];
-  const aliqUF = internaUF!=null ? Math.max(internaUF-N('icmsDest'),0)/100 : 0;
-  let dEff=0;
-  (R.fobShares||[]).forEach(s=>{ dEff+=s.share*(s.c5291?0.048:aliqUF); });
-  if(!(R.fobShares||[]).length) dEff=aliqUF;
-  const difal=nfJT*dEff;
-  const icmsES=(N('icmsDest')/100)*mkJT;
-  const pc=0.0925, iss=N('issServ')/100, tServ=iss+pc;
-  const K=C0+difal+icmsES;                   // custo do grupo antes da nota de serviço
-  const den=1-tServ*(1+mg);
-  const notaServ=den>0?Math.max((K*(1+mg)-nfJT)/den,0):0;
-  const issV=notaServ*iss, pcjt=notaServ*pc;
-  const custoGrupo=K+issV+pcjt;
-  const P=nfJT+notaServ;
-  const margemR=P-custoGrupo;
-  $('sNFJT').textContent=fmt(nfSF);
-  $('sNFCli').textContent=fmt(nfJT);
-  $('lblDifalTri').textContent='DIFAL (JeT → cliente)'+(internaUF!=null?` · ${(dEff*100).toFixed(2).replace('.',',')}%`:' · sem DIFAL');
-  $('sDifal').textContent=fmt(difal);
-  $('sICMSes').textContent=fmt(icmsES);
-  $('sNotaServ').textContent=fmt(notaServ);
-  $('lblISS').textContent=`ISS s/ nota de serviço (${N('issServ').toLocaleString('pt-BR')}%)`;
-  $('sISS').textContent=fmt(issV);
-  $('sPCJT').textContent=fmt(pcjt);
-  $('sCustoGrupo').textContent=fmt(custoGrupo);
-  $('sPreco').textContent=fmt(P);
-  $('sMargemRec').textContent=P>0?((margemR/P)*100).toFixed(1)+'% ':'—';
-  $('margemBRL').value=margemR.toFixed(2);
-  $('warnMargem').style.display=(N('margemPct')<10&&C0>0)?'block':'none';
-  R.margem=margemR; R.preco=P;
-  R.tri={P,nfSF,nfJT,difal,icmsES,notaServ,issV,pcjt,custoGrupo,dEff,aliqUF};
+  /* A apuração é do motor triangular — o mesmo que o teste e o script de
+     conferência rodam, recortado deste arquivo. Antes o cálculo vivia solto
+     aqui e divergia da planilha em pontos que só apareciam depois: o piso da
+     NF de saída, a base do DIFAL e as despesas aduaneiras que entram na base
+     do ICMS de importação. */
+  const t = triCalcular({
+    taxaUsdDespesas: N('txDesp'),
+    taxaUsdFrete: N('txFrete'),
+    itens: state.items.map(it => ({
+      descricao: it.d, ncm: it.ncm, qtd: it.q, valorUnitarioUsd: it.u,
+      pesoKg: it.p, ii: it.ii, ipi: it.ipi,
+      pisImp: it.pis != null ? it.pis : 2.1,
+      cofinsImp: it.cofins != null ? it.cofins : 9.65,
+      conv5291: !!it.c5291
+    })),
+    fatorInvoice: N('pctInv'),
+    freteIntUsd: N('freteUSD'),
+    seguroBrl: N('seguro'),
+    capataziaBrl: N('capatazia'),
+    siscomex: N('siscomex'), afrmm: N('afrmm'), honorarios: N('honorarios'),
+    outrasDespesasAduaneiras: N('outrasAdu'),
+    icmsEntradaEfetivo: N('icmsEnt'),
+    icmsInterestadual: N('icmsDest'),
+    // Capatazia, Siscomex, AFRMM e honorários entram UMA vez, aqui dentro: o
+    // motor não os soma de novo no custo, e é isso que impede a duplicidade.
+    despesasNacionalizacao: state.exps.reduce((a, x) => a + x.v, 0)
+      + N('siscomex') + N('afrmm') + N('honorarios') + N('capatazia'),
+    markupComercialBrl: N('mkSF'),
+    markupJetBrl: N('mkJT'),
+    ufDestino: V('ufDestino'),
+    tabelaIcmsInterno: ICMS_INTERNO,
+    clienteContribuinte: false,          // triangular existe para o não contribuinte
+    freteTerrestreBrl: N('transporte'),
+    // O serviço é o que se decide na hora: em reais quando digitado no campo,
+    // senão o percentual do custo dos botões de margem.
+    servicoWindgateBrl: _servicoEmBRL ? m : '',
+    servicoWindgatePct: N('margemPct'),
+    usuario: (window.USER && USER.nome) ? USER.nome : ''
+  });
+
+  const P = t.bloco7.preco, margemR = t.bloco7.servico;
+  $('sNFJT').textContent = fmt(t.bloco3.nfSaida);
+  $('sNFCli').textContent = fmt(t.bloco5.nfJetCliente);
+  $('sPisoSaida').textContent = fmt(t.bloco3.pisoSaida);
+  $('sNFEntrada').textContent = fmt(t.bloco2.nfEntrada);
+  $('lblDifalTri').textContent = 'DIFAL (JeT → cliente)'
+    + (t.bloco5.internaDestino != null ? ` · ${t.bloco5.difalPct.toFixed(2).replace('.', ',')}%` : ' · sem DIFAL');
+  $('sDifal').textContent = fmt(t.bloco5.DIFAL);
+  $('sICMSes').textContent = fmt(t.bloco5.icmsJetLiquido);
+  $('sResultTri').textContent = fmt(t.bloco4.resultante);
+  $('sCustoGrupo').textContent = fmt(t.bloco6.custo);
+  $('sPreco').textContent = fmt(P);
+  $('sMargemRec').textContent = P > 0 ? t.bloco7.margemSobrePreco.toFixed(1) + '% ' : '—';
+  if (!_servicoEmBRL) $('margemBRL').value = margemR.toFixed(2);
+  $('warnMargem').style.display = (N('margemPct') < 10 && t.bloco6.custo > 0) ? 'block' : 'none';
+
+  /* Travas e alertas ficam à vista: o piso da NF de saída e a UF sem alíquota
+     cadastrada não podem virar proposta, e invoice abaixo de 100% precisa ser
+     lida por quem assina. */
+  const cx = $('triAvisos');
+  if (cx) {
+    cx.innerHTML = t.travas.map(x =>
+        `<div class="note" style="color:var(--red);font-weight:700">⛔ ${esc(x.msg)}</div>`).join('')
+      + t.alertas.map(x =>
+        `<div class="note" style="color:${x.gravidade === 'alta' ? 'var(--red)' : 'var(--amber)'}">⚠️ ${esc(x.msg)}</div>`).join('');
+    cx.style.display = (t.travas.length || t.alertas.length) ? 'block' : 'none';
+  }
+
+  R.margem = margemR; R.preco = P;
+  // custoGrupo e difal continuam com esses nomes: o cronograma de desembolso
+  // e o texto das parcelas leem daqui.
+  R.tri = { P, nfSF: t.bloco3.nfSaida, nfJT: t.bloco5.nfJetCliente,
+            difal: t.bloco5.DIFAL, icmsES: t.bloco5.icmsJetLiquido,
+            custoGrupo: t.bloco6.custo, dEff: t.bloco5.difalPct / 100,
+            piso: t.bloco3.pisoSaida, nfEntrada: t.bloco2.nfEntrada,
+            resultante: t.bloco4.resultante, apuracao: t };
   desemCheck();
 }
 
@@ -7688,7 +7755,7 @@ function criarOpDaCotacao(){
 /* ===== persistência de cotações (no DB central) ===== */
 function snapshot(){
   const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','modalCntr','qtdCntr','prazo','validade',
-    'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','ipiS','mkp','mkSF','mkJT','issServ','aliqST',
+    'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','ipiS','mkp','mkSF','mkJT','outrasAdu','aliqST',
     'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
   // As fotos guardam só a URL no Storage — o arquivo em si não entra no banco,
@@ -7742,7 +7809,9 @@ function loadQuote(id){
   // Cotação salva antes dos markups fixos abre com os valores da operação real.
   if(s.fields.mkSF===undefined && $('mkSF')) $('mkSF').value=2000;
   if(s.fields.mkJT===undefined && $('mkJT')) $('mkJT').value=1000;
-  if(s.fields.issServ===undefined && $('issServ')) $('issServ').value=5;
+  // Cotação salva antes deste campo existir abre com ele zerado — o ISS da
+  // nota de serviço deixou de existir no modelo e não é restaurado.
+  if(s.fields.outrasAdu===undefined && $('outrasAdu')) $('outrasAdu').value=0;
   state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.blocos=s.blocos||propostaBlocosPadrao(); state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
@@ -7772,7 +7841,7 @@ function newQuote(){
   $('destino').value='Fortaleza/CE'; $('ufDestino').value='CE'; $('incoterm').value='FOB'; if($('tipoOp')){$('tipoOp').value='direta'; $('servFora').value=0; $('fabSinal').value=30; $('desR1').value='';$('desR2').value='';$('desR3').value=''; tipoOpChanged();}
   $('modalCntr').value='FCL'; $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
   $('txFrete').value=5.30; $('txDesp').value=5.10; $('pctInv').value=70; $('icmsEnt').value=1.6;
-  $('icmsDest').value=4; $('pisS').value=1.65; $('cofS').value=7.6; $('ipiS').value=0; $('mkp').value=1; $('mkSF').value=2000; $('mkJT').value=1000; $('issServ').value=5; $('aliqST').value=16;
+  $('icmsDest').value=4; $('pisS').value=1.65; $('cofS').value=7.6; $('ipiS').value=0; $('mkp').value=1; $('mkSF').value=2000; $('mkJT').value=1000; $('outrasAdu').value=0; $('aliqST').value=16;
   $('freteUSD').value=0; $('seguro').value=0; $('capatazia').value=0; $('transporte').value=0;
   $('siscomex').value=416.46; $('afrmm').value=0; $('honorarios').value=1630;
   $('margemPct').value=25; $('margemBRL').value=0;
