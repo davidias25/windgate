@@ -60,7 +60,8 @@ const DIAGONAL = {
   outrasDespesasAduaneiras: 2048.00,
   icmsEntradaEfetivo: 1.2,
   despesasNacionalizacao: 13933.00,
-  markupComercialBrl: 2000.00,
+  markupComercialBrl: 2000.00,   // SF → JeT
+  markupJetBrl: 0,               // JeT → cliente (o fixture do prompt não tem)
   ufDestino: 'CE', clienteContribuinte: false, conv5291: false,
   freteTerrestreBrl: 6000.00,
   servicoWindgateBrl: 60000.00

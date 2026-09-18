@@ -7273,15 +7273,31 @@ function triCalcular(e){
   const difalPct = Math.max(internaPct - icmsInterPct, 0);
   const contribuinte = !!e.clienteContribuinte;
 
+  /* A JeT revende ao cliente com markup próprio, e é ESSA nota que gera o
+     DIFAL — a obrigação nasce na saída dela, não na nota que a SF lhe vendeu.
+     Calcular o DIFAL sobre a nota SF→JeT subestima a base em todo o markup da
+     JeT, e a conta só aparece depois, na guia. */
+  const markupJet = triNum(e.markupJetBrl);
+  const nfJetCliente = nfSaida + markupJet;
+  /* Na perna do ES a JeT debita 4% na venda e credita os 4% que a SF destacou
+     na compra. Sobra imposto só sobre o markup dela — esse sim é desembolso. */
+  const icmsJetLiquido = markupJet * icmsInterPct;
+  reg('5. DIFAL', 'NF da JeT ao cliente', nfJetCliente,
+      'NF SF→JeT + markup da JeT — é a base do DIFAL');
+  reg('5. DIFAL', 'ICMS líquido da perna ES', icmsJetLiquido,
+      `markup da JeT × ${triCent(icmsInterPct*100)}% (débito da saída − crédito da compra)`,
+      TRI_FONTES.icmsInter);
+
   let DIFAL = 0, baseDifal = 0;
   if (internaDestino !== null) {
     if (op.difalBaseDupla) {
       // Convênio 236/2021: para não contribuinte o ICMS interno integra a
       // própria base — tira-se o destacado e recompõe-se por dentro.
-      baseDifal = (nfSaida - icmsDestacado) / (1 - internaPct);
-      DIFAL = baseDifal * internaPct - icmsDestacado;
+      const destacadoJet = nfJetCliente * icmsInterPct;
+      baseDifal = (nfJetCliente - destacadoJet) / (1 - internaPct);
+      DIFAL = baseDifal * internaPct - destacadoJet;
     } else {
-      baseDifal = nfSaida;
+      baseDifal = nfJetCliente;
       DIFAL = baseDifal * difalPct;
     }
   }
@@ -7294,7 +7310,7 @@ function triCalcular(e){
   reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100),
       `${triCent(internaPct*100)}% interna − ${triCent(icmsInterPct*100)}% interestadual`, TRI_FONTES.difal);
   reg('5. DIFAL', 'Base do DIFAL', baseDifal,
-      op.difalBaseDupla ? '(NF saída − ICMS destacado) ÷ (1 − interna) — base dupla, Conv. 236/2021' : 'NF de saída — base simples',
+      op.difalBaseDupla ? '(NF JeT→cliente − ICMS destacado) ÷ (1 − interna) — base dupla, Conv. 236/2021' : 'NF da JeT ao cliente — base simples',
       TRI_FONTES.difal);
   reg('5. DIFAL', 'DIFAL', DIFAL,
       (contribuinte ? 'recolhido pelo CLIENTE — informativo, fora do custo' : 'recolhido pelo REMETENTE (JeT) — entra no custo'),
@@ -7324,6 +7340,7 @@ function triCalcular(e){
     ['Impostos de importação',          totalImpostosImp],
     ['Despesas de nacionalização',      despNac],
     ['Resultante de impostos (saída)',  resultante],
+    ['ICMS líquido da perna ES',        icmsJetLiquido],
     ['DIFAL' + (contribuinte ? ' (cliente contribuinte — fora)' : ''), difalNoCusto],
     ['Frete terrestre',                 freteTerrestre]
   ];
@@ -7382,6 +7399,7 @@ function triCalcular(e){
     bloco3: { pisoSaida, nfSaida, icmsDestacado, markup },
     bloco4: { baseSaida, PISsai, COFsai, IPIsai, creditos, resultante, creditoAcumulado },
     bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, baseDifal, DIFAL, FECOP,
+            markupJet, nfJetCliente, icmsJetLiquido,
               clienteContribuinte: contribuinte, difalNoCusto, baseDupla: !!op.difalBaseDupla },
     bloco6: { parcelas: parcelasCusto, custo, freteTerrestre },
     bloco7: { servico, preco, porProduto,

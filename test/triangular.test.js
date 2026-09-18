@@ -137,6 +137,44 @@ secao('DIFAL não é alíquota fixa');
   assert(conv.alertas.some(a => a.codigo === 'CONV_5291'), 'e avisa para validar a NCM contra o Anexo I');
 }
 
+secao('★ O DIFAL é custo da JeT na venda ao cliente');
+{
+  /* A obrigação nasce na saída da JeT, não na nota que a SF lhe vendeu.
+     Calcular sobre a nota SF→JeT subestima a base em todo o markup da JeT. */
+  const semMk = tri(diagonal({ outrasDespesasAduaneiras: 2048 }));
+  const comMk = tri(diagonal({ outrasDespesasAduaneiras: 2048, markupJetBrl: 1000 }));
+
+  perto(comMk.bloco5.nfJetCliente, comMk.bloco3.nfSaida + 1000, 'NF da JeT = NF SF→JeT + markup da JeT');
+  perto(comMk.bloco5.baseDifal, comMk.bloco5.nfJetCliente, '★ a base do DIFAL é a nota da JeT ao cliente');
+  assert(comMk.bloco5.baseDifal > comMk.bloco3.nfSaida, '★ e é maior que a nota SF→JeT');
+  perto(comMk.bloco5.DIFAL - semMk.bloco5.DIFAL, 1000 * 0.16,
+    'o markup da JeT gera R$ 160,00 de DIFAL que a base antiga não via');
+
+  // Na perna do ES sobra imposto só sobre o markup: débito 4% na venda menos
+  // crédito 4% da compra.
+  perto(comMk.bloco5.icmsJetLiquido, 1000 * 0.04, '★ ICMS líquido da perna ES = 4% do markup da JeT');
+  perto(semMk.bloco5.icmsJetLiquido, 0, 'sem markup da JeT não sobra ICMS na perna ES');
+
+  const parc = Object.fromEntries(comMk.bloco6.parcelas);
+  perto(parc['ICMS líquido da perna ES'], 40, 'e ele entra no custo, porque é desembolso');
+  perto(comMk.bloco6.custo - semMk.bloco6.custo, 160 + 40, 'custo sobe o DIFAL do markup mais o ICMS da perna ES');
+}
+
+secao('Serviço WindGate é o que o Samir decidir — % ou R$, como já era');
+{
+  const base = { outrasDespesasAduaneiras: 2048, servicoWindgateBrl: '' };
+  // Os presets da aba Cotações são percentuais sobre o custo.
+  [20, 25, 30].forEach(pct => {
+    const r = tri(diagonal(Object.assign({}, base, { servicoWindgatePct: pct })));
+    perto(r.bloco7.servico, r.bloco6.custo * pct / 100, `preset ${pct}% → serviço = custo × ${pct}%`);
+    perto(r.bloco7.margemSobreCusto, pct, `e a margem sobre custo volta ${pct}%`, 0.01);
+  });
+  // E o valor em reais continua valendo, quando ele prefere fechar o número.
+  const fixo = tri(diagonal({ outrasDespesasAduaneiras: 2048, servicoWindgateBrl: 73500 }));
+  perto(fixo.bloco7.servico, 73500, 'valor fixo em R$ prevalece sobre o percentual');
+  assert(fixo.bloco7.preco === fixo.bloco6.custo + 73500, 'e o preço acompanha');
+}
+
 secao('Cliente contribuinte tira o DIFAL do custo');
 {
   const nao = tri(diagonal({ clienteContribuinte: false }));
