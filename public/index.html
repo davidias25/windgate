@@ -896,7 +896,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <div><label>Frete internacional (USD)</label><input type="number" id="freteUSD" value="0" oninput="calc()"></div>
           <div><label>Seguro (R$)</label><input type="number" id="seguro" value="0" oninput="calc()"></div>
           <div><label>Capatazia (R$)</label><input type="number" id="capatazia" value="0" oninput="calc()"></div>
-          <div><label>Transporte terrestre (R$)</label><input type="number" id="transporte" value="0" oninput="calc()"></div>
+          <div><label>Transporte terrestre / carreto (R$ cada)</label><input type="number" id="transporte" value="0" oninput="calc()"></div>
+          <div><label title="Quantas viagens de carreto a operação tem. Vários contêineres, vários carretos — e aqui a conta fica à vista em vez de o mesmo valor ser somado em mais de uma linha.">Nº de carretos</label><input type="number" id="carretoQtd" value="1" min="1" step="1" oninput="calc()"></div>
         </div>
         <div class="grouph">Rateadas por item (compõem base do ICMS entrada)</div>
         <div class="frow">
@@ -7364,7 +7365,14 @@ function triCalcular(e){
   const difalNoCusto = contribuinte ? 0 : (DIFAL + FECOP);
 
   /* ---- BLOCO 6 — custo total da operação (WindGate) ---- */
-  const freteTerrestre = triNum(e.freteTerrestreBrl);
+  /* Carreto é por viagem, e uma operação de vários contêineres tem várias. A
+     planilha somava o mesmo valor em três lugares para chegar em três carretos,
+     e ninguém conseguia dizer se eram três viagens ou a mesma contada de novo.
+     Aqui a quantidade é declarada: dá para conferir, aparece no custo com a
+     conta à vista e a trava de duplicidade não confunde uma coisa com a outra. */
+  const carretoUnit = triNum(e.freteTerrestreBrl);
+  const carretoQtd = Math.max(1, triNum(e.freteTerrestreQtd) || 1);
+  const freteTerrestre = carretoUnit * carretoQtd;
   // O custo usa o FOB INTEGRAL: o que sai do caixa é o que se paga ao
   // fornecedor, não o que se declarou na DI. São campos diferentes, e confundir
   // os dois é o que faz a operação parecer mais barata do que é.
@@ -7382,7 +7390,7 @@ function triCalcular(e){
     ['Resultante de impostos (saída)',  resultante],
     ['ICMS líquido da perna ES',        icmsJetLiquido],
     ['DIFAL' + (contribuinte ? ' (cliente contribuinte — fora)' : ''), difalNoCusto],
-    ['Frete terrestre',                 freteTerrestre]
+    [carretoQtd > 1 ? `Frete terrestre (${carretoQtd} carretos × ${triCent(carretoUnit)})` : 'Frete terrestre', freteTerrestre]
   ];
   const custo = parcelasCusto.reduce((a, [, v]) => a + v, 0);
   parcelasCusto.forEach(([nome, v]) => reg('6. custo', nome, v, ''));
@@ -7441,7 +7449,7 @@ function triCalcular(e){
     bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, baseDifal, DIFAL, FECOP,
             markupJet, nfJetCliente, icmsJetLiquido,
               clienteContribuinte: contribuinte, difalNoCusto, baseDupla: !!op.difalBaseDupla },
-    bloco6: { parcelas: parcelasCusto, custo, freteTerrestre },
+    bloco6: { parcelas: parcelasCusto, custo, freteTerrestre, carretoUnit, carretoQtd },
     bloco7: { servico, preco, porProduto,
               margemSobreCusto: custo > 0 ? servico / custo * 100 : 0,
               margemSobrePreco: preco > 0 ? servico / preco * 100 : 0 },
@@ -7506,6 +7514,7 @@ function updatePrice(m){
     tabelaIcmsInterno: ICMS_INTERNO,
     clienteContribuinte: false,          // triangular existe para o não contribuinte
     freteTerrestreBrl: N('transporte'),
+    freteTerrestreQtd: N('carretoQtd'),
     // O serviço é o que se decide na hora: em reais quando digitado no campo,
     // senão o percentual do custo dos botões de margem.
     servicoWindgateBrl: _servicoEmBRL ? m : '',
@@ -7768,7 +7777,7 @@ function criarOpDaCotacao(){
 function snapshot(){
   const fields={}; ['tipoOp','servFora','fabSinal','desR1','desR2','desR3','opNum','cliente','ufDestino','mercadoria','origem','destino','incoterm','modalCntr','qtdCntr','prazo','validade',
     'txFrete','txDesp','pctInv','icmsEnt','icmsDest','pisS','cofS','ipiS','mkp','mkSF','mkJT','outrasAdu','aliqST',
-    'freteUSD','seguro','capatazia','transporte','siscomex','afrmm','honorarios','margemPct','margemBRL']
+    'freteUSD','seguro','capatazia','transporte','carretoQtd','siscomex','afrmm','honorarios','margemPct','margemBRL']
     .forEach(id=>fields[id]=V(id));
   // As fotos guardam só a URL no Storage — o arquivo em si não entra no banco,
   // que é sincronizado inteiro a cada gravação.
@@ -7824,6 +7833,7 @@ function loadQuote(id){
   // Cotação salva antes deste campo existir abre com ele zerado — o ISS da
   // nota de serviço deixou de existir no modelo e não é restaurado.
   if(s.fields.outrasAdu===undefined && $('outrasAdu')) $('outrasAdu').value=0;
+  if(s.fields.carretoQtd===undefined && $('carretoQtd')) $('carretoQtd').value=1;
   state.items=s.items||[]; state.exps=s.exps||[]; state.fotos=s.fotos||[]; state.blocos=s.blocos||propostaBlocosPadrao(); state.id=s.id;
   state.criadoPor=s.criadoPor; state.aprovadoPor=s.aprovadoPor; state.editando=false;
   renderItems(); renderExps(); renderFotos(); if($('tipoOp')) tipoOpChanged(); setStatus(s.status||'draft');
@@ -7854,7 +7864,7 @@ function newQuote(){
   $('modalCntr').value='FCL'; $('qtdCntr').value=1; $('prazo').value=60; $('validade').value=7;
   $('txFrete').value=5.30; $('txDesp').value=5.10; $('pctInv').value=70; $('icmsEnt').value=1.6;
   $('icmsDest').value=4; $('pisS').value=1.65; $('cofS').value=7.6; $('ipiS').value=0; $('mkp').value=1; $('mkSF').value=2000; $('mkJT').value=1000; $('outrasAdu').value=0; $('aliqST').value=16;
-  $('freteUSD').value=0; $('seguro').value=0; $('capatazia').value=0; $('transporte').value=0;
+  $('freteUSD').value=0; $('seguro').value=0; $('capatazia').value=0; $('transporte').value=0; $('carretoQtd').value=1;
   $('siscomex').value=416.46; $('afrmm').value=0; $('honorarios').value=1630;
   $('margemPct').value=25; $('margemBRL').value=0;
   addItem(); state.exps=[]; DEFAULT_EXPS.forEach(e=>addExp({...e}));
