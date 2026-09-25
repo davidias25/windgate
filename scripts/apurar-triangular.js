@@ -63,8 +63,7 @@ const DIAGONAL = {
   markupComercialBrl: 2000.00,   // SF → JeT
   markupJetBrl: 0,               // JeT → cliente (o fixture do prompt não tem)
   ufDestino: 'CE', clienteContribuinte: false, conv5291: false,
-  freteTerrestreBrl: 6000.00,     // por carreto
-  freteTerrestreQtd: 3,          // a planilha do Diagonal tem três viagens
+  freteTerrestreBrl: 6000.00,
   servicoWindgateBrl: 60000.00
 };
 

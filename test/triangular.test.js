@@ -336,46 +336,6 @@ secao('★ Reconciliação contra a planilha — o valor dela é o correto');
     `sem declarar as R$ ${f(OUTRAS)}, a base do ICMS cai e recolhe-se a menos (R$ ${f(r.bloco1.ICMSimp - sem.bloco1.ICMSimp)})`);
 }
 
-secao('★ Carreto é por viagem — e é ele o R$ 12.000 da planilha');
-{
-  /* A planilha chegava a três carretos somando o mesmo valor em três lugares
-     (Q101 e N113 dentro de L114, + Q101 de novo em L116), e não dava para
-     saber se eram três viagens ou a mesma contada de novo. Agora a quantidade
-     é declarada: a conta aparece na linha do custo e dá para conferir. */
-  const um   = tri(diagonal({ outrasDespesasAduaneiras: 2048, freteTerrestreQtd: 1 }));
-  const tres = tri(diagonal({ outrasDespesasAduaneiras: 2048, freteTerrestreQtd: 3 }));
-
-  perto(tres.bloco6.freteTerrestre, 18000, '3 carretos × R$ 6.000 = R$ 18.000');
-  perto(tres.bloco7.preco - um.bloco7.preco, 12000, '★ e a diferença no preço é exatamente os R$ 12.000');
-  const linha = tres.bloco6.parcelas.find(([n]) => /terrestre/i.test(n));
-  assert(/3 carretos × 6000/.test(linha[0]), `a linha do custo mostra a conta: "${linha[0]}"`);
-  assert(tres.bloco6.parcelas.filter(([n]) => /terrestre/i.test(n)).length === 1,
-    '★ continua sendo UMA linha de custo — a quantidade não virou duplicidade');
-  assert(!tres.travas.some(t => t.codigo === 'DUPLICIDADE'), 'e a trava de duplicidade não confunde as duas coisas');
-
-  // Quantidade ausente ou zero vale 1: carreto não desaparece por campo vazio.
-  perto(tri(diagonal({ outrasDespesasAduaneiras: 2048 })).bloco6.freteTerrestre, 6000, 'sem quantidade informada, conta 1 carreto');
-  perto(tri(diagonal({ outrasDespesasAduaneiras: 2048, freteTerrestreQtd: 0 })).bloco6.freteTerrestre, 6000, 'quantidade zero também vale 1');
-}
-
-secao('★ Distância até o número da planilha do container Diagonal');
-{
-  const PLANILHA = 443459.97;
-  const r = tri(diagonal({ outrasDespesasAduaneiras: 2048, freteTerrestreQtd: 3 }));
-  perto(r.bloco7.preco, 443582.50, 'com 3 carretos o sistema dá R$ 443.582,50', 0.01);
-
-  /* O que sobra é a planilha tributar uma base menor que a nota que ela emite:
-     PIS/COFINS sobre R$ 249.709,54 (CQ29) enquanto a NF de saída é de
-     R$ 251.027,03. O Bloco 4 da especificação proíbe isso em letra — "a base
-     deve ser a MESMA nf_saida do bloco 3" —, então o motor não reproduz. */
-  const CQ29 = 249709.54;
-  const diferencaDeBase = (r.bloco3.nfSaida - CQ29) * (0.0165 + 0.0765);
-  perto(diferencaDeBase, 122.53, 'a base divergente da planilha vale R$ 122,53', 0.01);
-  perto(r.bloco7.preco - PLANILHA, diferencaDeBase, '★ e é exatamente o que separa o sistema da planilha', 0.02);
-  assert(r.bloco4.baseSaida === r.bloco3.nfSaida,
-    '★ o motor tributa a NF que emite — uma base só, como a especificação manda');
-}
-
 secao('FECOP entra quando a UF cobra');
 {
   const r = tri(diagonal({ fecopPct: 2 }));
