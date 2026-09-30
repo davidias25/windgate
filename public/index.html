@@ -771,7 +771,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
   <div id="clickupAviso" style="display:none;background:#FF5A6E22;border:1px solid #FF5A6E66;color:#FFB4BE;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
   <div class="stats-row" id="opStats"></div>
+  <div id="opSaldoAviso" style="display:none;margin-bottom:12px"></div>
   <div class="ops-bar">
+    <input id="opBusca" placeholder="Buscar por código, cliente ou produto…" style="width:270px" oninput="renderOps()"
+           title="A busca atravessa o filtro de status: procurar OP21 acha a operação mesmo que ela esteja concluída e o filtro esteja desmarcado.">
+    <button class="btn btn-ghost btn-sm" id="opFiltroBtn" onclick="opFiltroToggle(event)">Status ▾</button>
     <label class="ops-bar-l">Ordenar por</label>
     <select id="opOrdem" onchange="renderOps()">
       <option value="padrao">Padrão (travadas primeiro)</option>
@@ -780,6 +784,20 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </select>
     <label class="chk-inline"><input type="checkbox" id="opSoAtraso" onchange="renderOps()"> Somente atrasadas</label>
     <span class="note" id="opBarNota"></span>
+  </div>
+  <!-- Painel do filtro de status. Fica fora da barra para poder flutuar sobre
+       a grade sem empurrar os cartões para baixo a cada abertura. -->
+  <div id="opFiltroPanel" style="display:none;position:relative;z-index:30;margin:-4px 0 10px">
+    <div style="background:var(--card,#131B2E);border:1px solid var(--line,#25304a);border-radius:10px;padding:12px 14px;max-width:560px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <b style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut,#8FA0BC)">Mostrar quais status</b>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn btn-ghost btn-sm" onclick="opFiltroPreset('ativas')">só ativas</button>
+        <button class="btn btn-ghost btn-sm" onclick="opFiltroPreset('todas')">todas</button>
+      </div>
+      <div id="opFiltroLista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px"></div>
+      <p class="note" style="margin-top:8px">Concluída e Entregue vêm desmarcadas, mas continuam existindo — o contador ao lado diz quantas são, e um clique traz todas para a tela. A busca acima ignora este filtro.</p>
+    </div>
   </div>
   <div class="card" id="docsSemOp" style="display:none;margin-bottom:14px"></div>
   <div class="ops-grid" id="opsGrid"></div>
@@ -1286,6 +1304,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <!-- Séries fixas: o MODELO de cada recorrente. As linhas mensais dela ficam
        na lista de lançamentos abaixo — uma por mês, cada uma com o seu status,
        o seu comprovante e o seu valor. -->
+  <div id="finSaldoAviso" style="display:none"></div>
   <div id="finSeriesAviso" style="display:none"></div>
   <div class="card" id="finSeriesCard" style="display:none">
     <h2>📌 Séries fixas <span class="spacer"></span><span class="note">Cada série gera uma ocorrência por mês. Realizar um mês não mexe nos outros.</span></h2>
@@ -1301,6 +1320,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <option value="pontual">Apenas Pontuais</option>
       </select> &nbsp;
       <select id="finSerieFiltro" style="width:250px;display:none" onchange="renderFin()" title="Ver todos os meses de uma série fixa"></select> &nbsp;
+      <button class="btn btn-ghost btn-sm" id="finConclBtn" style="display:none" onclick="finVerConcluidasComSaldo()" title="Operações já concluídas que ainda têm lançamento Previsto — normalmente parcela esquecida ou lançamento errado">⚠ Concluídas com saldo</button> &nbsp;
       <input id="finBusca" placeholder="Buscar por descrição, operação, categoria, valor…" style="width:290px" oninput="renderFin()"> &nbsp;
       <select id="finStFiltro" style="width:170px" onchange="renderFin()">
         <option value="">— Status (Todos) —</option>
@@ -1482,7 +1502,9 @@ const STATUS_OP = [
   {k:'logistica',  l:'Logística nacional',   c:'#E91E63', tile:'Log. nacional'},
   {k:'documentacao',l:'Trâmite documental',  c:'#6E9BFF', tile:'Documentação'},
   {k:'entregue',   l:'Entregue',             c:'#34C77C'},
-  {k:'concluida',  l:'Concluída',            c:'#34C77C'},
+  // Neutra de propósito: concluída não disputa atenção com o que ainda pede
+  // ação, mas continua tendo cor e nome próprios em vez de virar "entregue".
+  {k:'concluida',  l:'Concluída',            c:'#8FA0BC'},
   {k:'travada',    l:'⚠ Travada',            c:'#FF5A6E', tile:'Travadas'}
 ];
 const stMeta = k => STATUS_OP.find(s=>s.k===k)||STATUS_OP[0];
@@ -2267,6 +2289,81 @@ function showTab(k){
 
 /* ---------- PAINEL (operações) ---------- */
 /* ---------- PAINEL (operações) ---------- */
+/* ---------- OPERAÇÕES ENCERRADAS ----------
+   "Concluída" e "Entregue" dizem que o ciclo operacional acabou. É atributo da
+   operação, nunca motivo para escondê-la: o histórico, os documentos e os
+   lançamentos financeiros continuam sendo dela, e quem precisa conferir seis
+   meses depois precisa achar. Quem decide o que aparece na tela é o filtro —
+   e ele mostra o contador, para ninguém concluir que a operação sumiu. */
+const OP_TERMINAIS = ['entregue', 'concluida'];
+const opEncerrada = o => !!o && OP_TERMINAIS.includes(o.status);
+
+/* O filtro é escolha de cada um e atravessa sessões: quem cuida de pós-venda
+   quer as concluídas na tela, quem cuida de produção não. Fica gravado no
+   usuário, que já sincroniza, em vez de no navegador — assim a escolha segue a
+   pessoa e não a máquina. */
+function opFiltroStatus(){
+  const u = (DB.users && USER && DB.users[USER.key]) || null;
+  if (u && Array.isArray(u.opStatus)) return u.opStatus.slice();
+  return STATUS_OP.filter(s => !OP_TERMINAIS.includes(s.k)).map(s => s.k);
+}
+function opFiltroGravar(lista){
+  if (!(DB.users && USER && DB.users[USER.key])) return;
+  DB.users[USER.key].opStatus = lista.slice();
+  saveDB();
+}
+function opFiltroToggle(ev){
+  if (ev) ev.stopPropagation();
+  const p = $('opFiltroPanel');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') renderOps();
+}
+function opFiltroPreset(qual){
+  opFiltroGravar(qual === 'todas'
+    ? STATUS_OP.map(s => s.k)
+    : STATUS_OP.filter(s => !OP_TERMINAIS.includes(s.k)).map(s => s.k));
+  renderOps();
+}
+function opFiltroMarcar(k, on){
+  const atual = new Set(opFiltroStatus());
+  if (on) atual.add(k); else atual.delete(k);
+  opFiltroGravar(STATUS_OP.map(s => s.k).filter(x => atual.has(x)));
+  renderOps();
+}
+
+/* Saldo em aberto de uma operação: o que ainda falta entrar e sair. Numa
+   operação concluída isso quase sempre é parcela esquecida ou lançamento
+   errado, e é por isso que vale um aviso — não uma trava. */
+function opSaldoAberto(id){
+  let receber = 0, pagar = 0;
+  (DB.fin || []).forEach(l => {
+    if (!l || l.op !== id || l.transf) return;
+    if ((l.status || 'Previsto') === 'Realizado') return;
+    if (l.tipo === 'Receita') receber += +l.valor || 0; else pagar += +l.valor || 0;
+  });
+  return { receber, pagar, tem: receber > 0.005 || pagar > 0.005 };
+}
+/* Resultado financeiro fechado da operação, para o bloco de leitura. */
+function opResultado(id){
+  let rp = 0, rr = 0, dp = 0, dr = 0;
+  (DB.fin || []).forEach(l => {
+    if (!l || l.op !== id || l.transf) return;
+    const v = +l.valor || 0, feito = (l.status || 'Previsto') === 'Realizado';
+    if (l.tipo === 'Receita') { if (feito) rr += v; else rp += v; }
+    else { if (feito) dr += v; else dp += v; }
+  });
+  const receita = rr + rp, custo = dr + dp;
+  return { rp, rr, dp, dr, receita, custo, lucro: receita - custo,
+           margem: receita > 0 ? (receita - custo) / receita * 100 : 0,
+           lucroReal: rr - dr, margemReal: rr > 0 ? (rr - dr) / rr * 100 : 0 };
+}
+/* Concluídas que ainda têm dinheiro em aberto — a lista que o Samir e o Davi
+   conferem. */
+const opsConcluidasComSaldo = () => (DB.ops || [])
+  .filter(o => o && o.status === 'concluida' && opSaldoAberto(o.id).tem)
+  .map(o => Object.assign({ op: o }, opSaldoAberto(o.id)));
+
 function renderOps(){
   try {
     ensureDBStructure();
@@ -2279,10 +2376,17 @@ function renderOps(){
     const ativos=(DB.ops||[]).filter(o=>o && !['entregue','concluida'].includes(o.status)).length;
     const sr=$('opStats'); if(sr) sr.innerHTML='';
     const totAtraso=(DB.ops||[]).filter(opAtrasada).length;
+    // Os cartões de etapa contam só as ativas — somar concluída ali faria
+    // "em produção" crescer com operação que acabou. Concluída ganha cartão
+    // próprio, para existir no número sem poluir os outros.
+    const nConcl=counts['concluida']||0, nEntr=counts['entregue']||0;
+    const comSaldo=opsConcluidasComSaldo().length;
     const tiles=[
       {n:ativos,l:'Operações ativas',c:'#E91E63',sub:totAtraso?`${totAtraso} fora do prazo`:''},
       ...STATUS_OP.filter(s=>s.tile).map(s=>({n:counts[s.k]||0,l:s.tile,c:s.c,
-        sub:atras[s.k]?`${atras[s.k]} atrasada${atras[s.k]>1?'s':''}`:''}))
+        sub:atras[s.k]?`${atras[s.k]} atrasada${atras[s.k]>1?'s':''}`:''})),
+      {n:nConcl,l:'Concluídas',c:'#8FA0BC',
+       sub:comSaldo?`${comSaldo} com saldo em aberto`:(nEntr?`${nEntr} entregue(s)`:'')}
     ];
     if(sr){
       tiles.forEach(t=>{ sr.innerHTML+=`<div class="stat" style="--sc:${t.c}"><div class="n" style="color:${t.c}">${t.n}</div><div class="l">${t.l}</div>${t.sub?`<div class="sub">⏱ ${t.sub}</div>`:''}</div>`; });
@@ -2293,7 +2397,39 @@ function renderOps(){
 
     const ordem=($('opOrdem')&&$('opOrdem').value)||'padrao';
     const soAtraso=!!($('opSoAtraso')&&$('opSoAtraso').checked);
-    let order=(DB.ops||[]).filter(o=>o && (!soAtraso || opAtrasada(o)));
+    const busca=nrm($('opBusca')?$('opBusca').value:'');
+    const marcados=new Set(opFiltroStatus());
+
+    // Pintar o painel do filtro com o que existe de cada status: o contador ao
+    // lado é o que impede alguém de concluir que as concluídas sumiram.
+    const lista=$('opFiltroLista');
+    if(lista){
+      lista.innerHTML=STATUS_OP.map(s=>{
+        const n=counts[s.k]||0;
+        return `<label class="chk-inline" style="justify-content:flex-start">
+          <input type="checkbox" ${marcados.has(s.k)?'checked':''} onchange="opFiltroMarcar('${s.k}',this.checked)">
+          <span style="color:${s.c}">${esc(s.l)}</span>
+          <span class="note" style="margin-left:4px">(${n})</span></label>`;
+      }).join('');
+    }
+    const btn=$('opFiltroBtn');
+    if(btn){
+      const fora=STATUS_OP.filter(s=>!marcados.has(s.k)).reduce((a,s)=>a+(counts[s.k]||0),0);
+      btn.textContent=`Status ▾${fora?` · ${fora} fora`:''}`;
+      btn.style.color=fora?'var(--amber)':'';
+    }
+
+    // Procurar é dizer o que se quer ver, e vale mais que o filtro: buscar
+    // "OP21" tem de achar a operação mesmo concluída e mesmo com o status
+    // desmarcado, senão a pessoa conclui que a operação não existe mais.
+    const casa=o=>nrm([o.id,o.nome,o.cliente,o.prox,o.resp,o.obs,o.navio,
+                       (stMeta(o.status)||{}).l].filter(Boolean).join(' ')).includes(busca);
+    let order=(DB.ops||[]).filter(o=>{
+      if(!o) return false;
+      if(soAtraso && !opAtrasada(o)) return false;
+      if(busca) return casa(o);
+      return marcados.has(o.status) || !o.status;
+    });
     // Operação encerrada acumula dias para sempre; deixá-la competir por tempo
     // enterraria justamente o que ainda espera alguma coisa.
     const encerrada=o=>['entregue','concluida'].includes(o.status);
@@ -2301,17 +2437,45 @@ function renderOps(){
     if(ordem==='dias')        order=order.sort((a,b)=>viva(a,b)||opDiasNoStatus(b)-opDiasNoStatus(a));
     else if(ordem==='atraso') order=order.sort((a,b)=>viva(a,b)||opAtraso(b)-opAtraso(a)||opDiasNoStatus(b)-opDiasNoStatus(a));
     else order=order.slice().sort((a,b)=>(a.status==='travada'?-1:0)-(b.status==='travada'?-1:0));
+    const totalOps=(DB.ops||[]).filter(Boolean).length;
     if(emptyEl){
-      const vazio=!(DB.ops && DB.ops.length);
+      const vazio=!totalOps;
       emptyEl.style.display=(vazio||!order.length)?'block':'none';
       emptyEl.innerHTML = vazio
         ? 'Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.'
-        : 'Nenhuma operação atrasada — desmarque <b>Somente atrasadas</b> para ver todas.';
+        : (busca
+            ? `Nada encontrado para <b>${esc($('opBusca').value)}</b> — a busca já procura em todos os status, inclusive concluídas.`
+            : (soAtraso
+                ? 'Nenhuma operação atrasada — desmarque <b>Somente atrasadas</b> para ver todas.'
+                : 'Nenhuma operação nos status marcados. Abra <b>Status ▾</b> e marque mais.'));
     }
     const nota=$('opBarNota');
-    if(nota) nota.textContent = soAtraso
-      ? `${order.length} de ${(DB.ops||[]).filter(Boolean).length} operação(ões) fora do prazo`
-      : (totAtraso?`${totAtraso} fora do prazo`:'Tudo dentro do prazo');
+    if(nota) nota.innerHTML = busca
+      ? `${order.length} encontrada(s) em <b>todos os status</b> — a busca ignora o filtro`
+      : (soAtraso
+          ? `${order.length} de ${totalOps} operação(ões) fora do prazo`
+          : `${order.length} de ${totalOps} na tela`
+            + (totAtraso?` · <b style="color:var(--amber)">${totAtraso} fora do prazo</b>`:''));
+
+    /* Concluída com dinheiro em aberto quase sempre é parcela esquecida ou
+       lançamento errado. O aviso aparece no painel para quem cuida da
+       operação, e o botão leva direto à conferência no Financeiro. */
+    const av=$('opSaldoAviso');
+    if(av){
+      const pend=opsConcluidasComSaldo();
+      av.innerHTML=pend.length
+        ? `<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F">
+             ⚠️ <b>${pend.length} operação(ões) concluída(s) com saldo em aberto.</b>
+             ${pend.map(p=>`<div style="margin-top:4px">· <b>${esc(p.op.id)}</b> ${esc(p.op.nome||'')} —`
+               + (p.receber>0.005?` <b style="color:#34C77C">${fmt(p.receber)}</b> a receber`:'')
+               + (p.receber>0.005&&p.pagar>0.005?' ·':'')
+               + (p.pagar>0.005?` <b style="color:#FF5A6E">${fmt(p.pagar)}</b> a pagar`:'')
+               + `</div>`).join('')}
+             ${USER.fin?`<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="finVerConcluidasComSaldo()">Conferir no Financeiro →</button></div>`:''}
+           </div>`
+        : '';
+      av.style.display=pend.length?'block':'none';
+    }
     order.forEach(o=>{
       if(!o) return;
       const m=stMeta(o.status)||STATUS_OP[0];
@@ -2320,7 +2484,10 @@ function renderOps(){
       const nDocs = docsDaOp(o.id).length;
       d.innerHTML=`<div class="oh"><div><div class="oid">${esc(o.id||'OP')}</div><div class="onm">${esc(o.nome||'Operação')}</div></div>
         <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-          <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='entregue'||o.status==='concluida'?'ok':'blue')}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span>
+          <span class="pill ${o.status==='travada'?'red travada-tag':(o.status==='concluida'?'draft':(o.status==='entregue'?'ok':'blue'))}" style="background:${m.c||'#2563EB'}22;color:${m.c||'#2563EB'}">${esc(m.l||'Ativa')}</span>
+          ${o.status==='concluida'&&opSaldoAberto(o.id).tem
+            ? '<span class="pill" style="background:#F0B42922;color:#F0B429;font-size:8.5px" title="Concluída, mas ainda tem lançamento Previsto em aberto">⚠ saldo em aberto</span>'
+            : ''}
           ${opPrazoChip(o)}
         </div></div>
         <div class="od">
@@ -2589,11 +2756,93 @@ function openOpModal(id){
       <div><label>Posição atual (0–100%)</label><input type="number" id="m_oppos" min="0" max="100" value="${o&&o.posAtual!==''&&o.posAtual!=null?o.posAtual:''}" placeholder="auto pelo ETA"></div>
     </div>
     <p class="note">🛰️ <b>Posição exata:</b> abra o link do armador, veja onde o navio está e digite o % do trajeto — o mapa espelha na hora (operações com o MESMO link/navio andam juntas no mapa, como um contêiner consolidado). Vazio = estimativa automática pelo cronograma.</p>
+    ${o?opBlocoEncerrada(o):''}
     <div class="modal-actions">
       ${o?'<button class="btn btn-danger" onclick="delOp(\''+esc(o.id)+'\')">Excluir</button>':''}
+      ${o&&o.status==='concluida'&&podeReabrir()?`<button class="btn btn-ghost" style="color:#F0B429;border-color:#F0B42966" onclick="opReabrirModal('${esc(o.id)}')">↩ Reabrir operação</button>`:''}
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-mag" onclick="saveOp(${o?`'${esc(o.id)}'`:'null'})">Salvar</button>
     </div>`);
+}
+
+/* Só Samir e Davi reabrem: voltar o status muda prazo, cobrança e relatório,
+   e é a mesma dupla que responde pelo financeiro. */
+const podeReabrir = () => !!(USER && USER.fin);
+
+/* O que a operação encerrada mostra ao ser aberta: o resultado dela fechado,
+   em leitura, e o saldo que ficou para trás. Quem não vê financeiro (Matheus,
+   Ívina) vê a operação inteira sem este bloco — a restrição é do dinheiro, não
+   da operação. */
+function opBlocoEncerrada(o){
+  if(!opEncerrada(o)) return '';
+  const m = stMeta(o.status) || {};
+  const s = opSaldoAberto(o.id);
+  const cab = `<div class="grouph">${esc(m.l||'Encerrada')}</div>
+    <p class="note">O ciclo operacional terminou. A operação, o histórico e os lançamentos continuam aqui — concluir não arquiva nada.</p>`;
+
+  if(!(USER && USER.fin)){
+    return cab + (s.tem
+      ? `<p class="note" style="color:var(--amber);margin-top:6px">⚠ Esta operação tem acerto financeiro em aberto — o Samir ou o Davi precisam conferir.</p>`
+      : '');
+  }
+
+  const r = opResultado(o.id);
+  const linha = (rot, val, cor) => `<div class="sumline"><span class="lbl">${rot}</span><span class="num"${cor?` style="color:${cor}"`:''}>${fmt(val)}</span></div>`;
+  return cab + `
+    <div style="background:#131B2E;padding:12px 14px;border-radius:8px;margin-top:8px;font-size:12.5px">
+      ${linha('Receita realizada', r.rr, '#34C77C')}
+      ${r.rp>0.005?linha('Receita ainda prevista', r.rp, '#F0B429'):''}
+      ${linha('Custo realizado', r.dr, '#FF5A6E')}
+      ${r.dp>0.005?linha('Custo ainda previsto', r.dp, '#F0B429'):''}
+      <div class="sumline cost"><span>Resultado realizado</span><span class="num" style="color:${r.lucroReal>=0?'#34C77C':'#FF5A6E'}">${fmt(r.lucroReal)}</span></div>
+      <div class="sumline"><span class="lbl">Margem sobre a receita realizada</span><span class="num">${r.rr>0?r.margemReal.toFixed(1)+'%':'—'}</span></div>
+      <p class="note" style="margin-top:8px">Somente leitura. Para corrigir um valor, edite o lançamento na aba Financeiro.</p>
+    </div>
+    ${s.tem?`<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F;margin-top:8px">
+        ⚠️ <b>Operação concluída com saldo em aberto:</b>
+        ${s.receber>0.005?`<b style="color:#34C77C">${fmt(s.receber)}</b> a receber`:''}${s.receber>0.005&&s.pagar>0.005?' · ':''}${s.pagar>0.005?`<b style="color:#FF5A6E">${fmt(s.pagar)}</b> a pagar`:''}.
+        <div class="note" style="margin-top:4px">Não bloqueia a conclusão — mas normalmente é parcela esquecida ou lançamento no código errado.</div>
+      </div>`:''}`;
+}
+
+/* Reabrir devolve a operação ao fluxo, com quem, quando e por quê no
+   histórico. Sem o motivo gravado, o relatório de etapas passa a ter um
+   pulo que ninguém consegue explicar depois. */
+function opReabrirModal(id){
+  const o = (DB.ops||[]).find(x => x && x.id === id);
+  if(!o){ toast('⚠ Operação não encontrada'); return; }
+  if(!podeReabrir()){ toast('⚠ Só o Samir e o Davi podem reabrir'); return; }
+  // Sugere a etapa anterior à conclusão, lida do próprio histórico.
+  const h = opHist(id).filter(x => x && x.para === 'concluida');
+  const anterior = (h.length && h[h.length-1].de) || 'logistica';
+  const opts = STATUS_OP.filter(s => s.k !== 'concluida')
+    .map(s => `<option value="${s.k}"${s.k===anterior?' selected':''}>${esc(s.l)}</option>`).join('');
+  openModal(`<h3>Reabrir <span>${esc(id)}</span></h3>
+    <p class="note" style="margin-bottom:12px">A operação volta ao fluxo normal. Nada do histórico se perde, e os lançamentos continuam como estão.</p>
+    <div class="frow">
+      <div><label>Voltar para a etapa</label><select id="m_reabst">${opts}</select></div>
+      <div style="grid-column:span 2"><label>Por que está reabrindo</label><input id="m_reabmot" placeholder="Ex.: cliente pediu troca de peça / faltou receber a 3ª parcela"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="openOpModal('${esc(id)}')">Cancelar</button>
+      <button class="btn btn-mag" onclick="opReabrirConfirma('${esc(id)}')">Reabrir</button>
+    </div>`);
+}
+function opReabrirConfirma(id){
+  const o = (DB.ops||[]).find(x => x && x.id === id);
+  if(!o){ toast('⚠ Operação não encontrada'); return; }
+  if(!podeReabrir()){ toast('⚠ Só o Samir e o Davi podem reabrir'); return; }
+  const motivo = (V('m_reabmot')||'').trim();
+  if(!motivo){ toast('⚠ Diga por que está reabrindo — é isso que explica o pulo no histórico'); return; }
+  const novo = V('m_reabst') || 'logistica';
+  opRegistrarStatus(o, novo, {});
+  // A linha de mudança já foi gravada; esta carrega o motivo e o rótulo de
+  // reabertura, para o histórico distinguir reabrir de andar para trás.
+  opHistPush({op:id, de:'concluida', para:novo, em:new Date().toISOString(),
+              por:USER?USER.nome.split(' ')[0]:'sistema', tipo:'reabertura', motivo});
+  saveDB(); closeModal(); renderOps(); updateNotifs();
+  try{ if(USER&&USER.fin) renderFin(); }catch(e){}
+  toast(`<b>${esc(id)}</b> reaberta em <b>${esc((stMeta(novo)||{}).l||novo)}</b> ✓`);
 }
 /* Mesmo padrão do seletor de empresa no frete: "Outro…" abre o campo de nome. */
 function portoOptions(sel){
@@ -4347,6 +4596,27 @@ function finFiltrarSerie(recId){
    Ver todos os meses continua existindo, mas como escolha explícita — o botão
    "Todos", que esvazia o seletor de mês —, nunca como efeito colateral de
    filtrar. Quem quiser tudo pede tudo; quem escolheu um mês recebe o mês. */
+/* Visão rápida das concluídas com dinheiro em aberto. Não é um estado novo de
+   filtro: é um atalho que arma os filtros que já existem — todos os meses,
+   só Previsto — e marca as operações a conferir. */
+let _finSoConcluidasComSaldo = false;
+function finVerConcluidasComSaldo(){
+  if(!USER || !USER.fin){ toast('⚠ Financeiro restrito ao Samir e ao Davi'); return; }
+  _finSoConcluidasComSaldo = true;
+  showTab('fin');
+  ['finBusca','finSerieFiltro','finNatFiltro','finEmpresa','finFilter'].forEach(id => { if($(id)) $(id).value = ''; });
+  if($('finStFiltro')) $('finStFiltro').value = 'Previsto';
+  if($('finMesFiltro')) $('finMesFiltro').value = '';   // o saldo não é de um mês só
+  renderFin();
+  const n = opsConcluidasComSaldo().length;
+  toast(n ? `${n} operação(ões) concluída(s) com saldo em aberto` : 'Nenhuma concluída com saldo em aberto ✓');
+}
+function finLimparConcluidasComSaldo(){
+  _finSoConcluidasComSaldo = false;
+  if($('finStFiltro')) $('finStFiltro').value = '';
+  setFinPeriod('mesAtual');
+}
+
 function finFiltros(){
   const v = id => $(id) ? $(id).value : '';
   return {
@@ -4356,7 +4626,10 @@ function finFiltros(){
     natureza: v('finNatFiltro'),
     status:   v('finStFiltro'),
     serie:    v('finSerieFiltro'),
-    busca:    nrm(v('finBusca'))
+    busca:    nrm(v('finBusca')),
+    // Atalho de conferência, não um filtro escondido: some no próximo clique
+    // em qualquer controle da barra.
+    soConcluidasComSaldo: _finSoConcluidasComSaldo
   };
 }
 
@@ -4376,6 +4649,10 @@ function finPassaNoFiltro(l, f){
   if (f.status && (l.status || 'Previsto') !== f.status) return false;
   if (f.serie && l.recId !== f.serie) return false;
   if (f.busca && !finCombina(l, f.busca)) return false;
+  if (f.soConcluidasComSaldo) {
+    const o = l.op && l.op !== 'WindGate' ? (DB.ops || []).find(x => x && x.id === l.op) : null;
+    if (!o || o.status !== 'concluida') return false;
+  }
   return true;
 }
 
@@ -4608,6 +4885,37 @@ function renderFin(){
   // mês do seu jeito, e foi assim que dois deles passaram a descartá-lo.
   const filtros = finFiltros();
   const rows = effectiveItems.filter(l => finPassaNoFiltro(l, filtros));
+
+  /* Concluída com dinheiro em aberto aparece aqui também: o Painel avisa quem
+     cuida da operação, e o Financeiro avisa quem cuida do caixa. */
+  {
+    const pend = opsConcluidasComSaldo();
+    const btn = $('finConclBtn');
+    if (btn) {
+      btn.style.display = pend.length ? '' : 'none';
+      btn.textContent = `⚠ Concluídas com saldo (${pend.length})`;
+      btn.style.color = filtros.soConcluidasComSaldo ? 'var(--amber)' : '';
+    }
+    const av = $('finSaldoAviso');
+    if (av) {
+      const rec = pend.reduce((a, p) => a + p.receber, 0);
+      const pag = pend.reduce((a, p) => a + p.pagar, 0);
+      av.innerHTML = pend.length
+        ? `<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F">
+             ⚠️ <b>Operação concluída com saldo em aberto:</b>
+             <b style="color:#34C77C">${fmt(rec)}</b> a receber · <b style="color:#FF5A6E">${fmt(pag)}</b> a pagar
+             em ${pend.length} operação(ões) — ${pend.map(p => esc(p.op.id)).join(', ')}.
+             <div class="note" style="margin-top:4px">Concluir não exige saldo zerado, então isto não trava nada: normalmente é parcela esquecida ou lançamento no código errado.</div>
+             <div style="margin-top:8px">
+               ${filtros.soConcluidasComSaldo
+                 ? '<button class="btn btn-ghost btn-sm" onclick="finLimparConcluidasComSaldo()">← voltar ao mês</button>'
+                 : '<button class="btn btn-ghost btn-sm" style="color:#F0B429;border-color:#F0B42966" onclick="finVerConcluidasComSaldo()">Ver só esses lançamentos</button>'}
+             </div>
+           </div>`
+        : '';
+      av.style.display = pend.length ? '' : 'none';
+    }
+  }
   // Filtrar não pode largar o recorte de mês, mas também não pode esconder que
   // o que se procura existe em outro mês. Em vez de descartar o mês por conta
   // própria — que era o bug —, a lista conta quantos ficaram de fora e oferece
@@ -4929,6 +5237,20 @@ function saveLanc(id){
 
     const existente = id ? finPorId(id) : null;
     if(id && !existente){ toast('⚠ Lançamento não encontrado'); return; }
+
+    /* Lançar em operação concluída é permitido — acerto de parcela e ajuste de
+       imposto aparecem depois do ciclo fechar. Mas não passa calado: pergunta
+       uma vez e deixa a linha no histórico da operação, senão o número muda e
+       ninguém sabe de onde veio. */
+    if(opFinal && opFinal !== 'WindGate' && (!existente || existente.op !== opFinal)){
+      const alvo = (DB.ops||[]).find(x => x && x.id === opFinal);
+      if(alvo && alvo.status === 'concluida'){
+        if(!confirm(`A operação ${opFinal} está CONCLUÍDA.\n\nConfirmar o lançamento de ${fmt(rawVal)} (${tipo}) nela?`)) return;
+        opHistPush({op:opFinal, de:'concluida', para:'concluida', em:new Date().toISOString(),
+                    por:uName, tipo:'lancamento-pos-conclusao',
+                    motivo:`${tipo} de ${fmt(rawVal)} — ${desc||'sem descrição'}`});
+      }
+    }
 
     // ---- Fixa nova: nasce como série (o modelo) + uma ocorrência por mês ----
     // É aqui que a recorrência deixa de ser virtual. Sem materializar, o

@@ -28,7 +28,15 @@ function criarElemento(id){
     // já foi montada quebra antes de chegar no que o teste quer medir.
     options: [],
     classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
-    appendChild(){}, insertAdjacentHTML(){}, remove(){}, focus(){}, click(){},
+    /* A grade de operações é montada com createElement + appendChild, não com
+       innerHTML. Sem acumular aqui, o teste lia a grade sempre vazia e passava
+       por engano em tudo que verificava ausência. */
+    appendChild(filho){
+      if (filho && typeof filho.innerHTML === 'string') el.innerHTML += filho.innerHTML;
+      return filho;
+    },
+    insertAdjacentHTML(_onde, html){ el.innerHTML += String(html == null ? '' : html); },
+    remove(){}, focus(){}, click(){},
     setAttribute(){}, getAttribute(){ return null; }, removeAttribute(){},
     addEventListener(){}, querySelector(){ return null; }, querySelectorAll(){ return []; },
     get firstChild(){ return null; },
