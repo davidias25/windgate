@@ -370,5 +370,66 @@ secao('CRITÉRIO 3 — o backfill não tem o que restaurar');
   assert(/Receita OP20/.test(t.linhas.join('')), 'o lançamento da operação recém-concluída continua lá');
 }
 
+/* ==================================================================== */
+secao('★ Excluir a operação NÃO apaga os lançamentos dela');
+{
+  /* Foi assim que a "OP 13 OP14 OP15" tirou 15 lançamentos do caixa num
+     clique, em 18/09: a exclusão cascateava para DB.fin, e o tombstone guarda
+     só o id — nem valor nem tipo dá para recuperar depois. */
+  const app = novoApp();
+  const finAntes = app.avaliar('DB.fin.length');
+  const daOp = app.avaliar("DB.fin.filter(l=>l.op==='OP21')");
+  assert(daOp.length === 4, 'a OP21 tem 4 lançamentos antes');
+
+  const antes = app.gmMetrics('2026-09');
+  const realAntes = { rec: antes.rec, desp: antes.desp };
+
+  app.delOpConfirmado('OP21');
+
+  assert(!app.avaliar("DB.ops.some(o=>o.id==='OP21')"), 'a operação sai do Painel');
+  assert(app.avaliar('DB.fin.length') === finAntes, `★ nenhum lançamento foi apagado (${finAntes} antes e depois)`);
+  const depoisDaOp = app.avaliar("DB.fin.filter(l=>l.op==='OP21')");
+  assert(depoisDaOp.length === 4, '★ os 4 lançamentos da operação continuam lá');
+  assert(depoisDaOp.every(l => l.op === 'OP21'), '★ com o código da operação preservado, para dar para religar');
+
+  // E continuam somando no caixa — é esse o ponto.
+  const depois = app.gmMetrics('2026-09');
+  assert(depois.rec === realAntes.rec && depois.desp === realAntes.desp,
+    `★ o realizado do mês não muda (${f(depois.rec)} / ${f(depois.desp)})`);
+  const t = telaFin(app);
+  assert(t.linhas.length === 6, '★ e a listagem do Financeiro continua com os 6');
+  assert(/Recebimento parcelas/.test(t.linhas.join('')), 'inclusive o realizado da operação excluída');
+
+  // Aparecem marcados, para alguém decidir o que fazer com eles.
+  assert(/>OP21</.test(t.opsBody), '★ a operação órfã continua no Resultado por operação');
+  assert(/OP21<\/b><div[^>]*>⚠ operação não cadastrada/.test(t.opsBody),
+    'marcada como não cadastrada — o convite para recadastrar ou corrigir o vínculo');
+
+  // A exclusão deixa rastro: quem, quando e o que ficou.
+  const log = app.avaliar("DB.opStatusHist.filter(h=>h.op==='OP21' && h.tipo==='exclusao')");
+  assert(log.length === 1, '★ a exclusão fica registrada no histórico');
+  assert(log[0].por === 'Samir' && !!log[0].em, 'com quem excluiu e quando');
+  assert(/4 lançamento\(s\) preservado\(s\)/.test(log[0].motivo),
+    `dizendo o que ficou para trás: "${log[0].motivo}"`);
+
+  // Recriar a operação com o mesmo código religa tudo.
+  app.avaliar("DB.ops.push({id:'OP21',nome:'NSC recadastrada',cliente:'NSC',status:'logistica'});");
+  const t2 = telaFin(app);
+  assert(!/⚠ operação não cadastrada/.test(t2.opsBody.match(/<tr><td><b>OP21<\/b>[\s\S]{0,200}/)[0]),
+    '★ recadastrar a operação com o mesmo código religa os lançamentos');
+  assert(app.opResultado('OP21').rr === 200000, 'e o resultado dela volta inteiro');
+}
+
+secao('Excluir operação sem lançamento nenhum segue simples');
+{
+  const app = novoApp();
+  const n = app.avaliar('DB.fin.length');
+  app.delOpConfirmado('OP45');   // cotação, sem lançamentos
+  assert(!app.avaliar("DB.ops.some(o=>o.id==='OP45')"), 'sai do Painel');
+  assert(app.avaliar('DB.fin.length') === n, 'e nada acontece com o Financeiro');
+  const log = app.avaliar("DB.opStatusHist.filter(h=>h.op==='OP45' && h.tipo==='exclusao')");
+  assert(log.length === 1 && /sem lançamentos/.test(log[0].motivo), 'o histórico registra que não havia lançamento');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhas} falharam.`);
 process.exit(falhas ? 1 : 0);
