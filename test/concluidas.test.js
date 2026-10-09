@@ -268,8 +268,12 @@ secao('Visão rápida "Concluídas com saldo em aberto"');
   assert(app.document.getElementById('finMesFiltro').value === '',
     'e em todos os meses — saldo em aberto não é de um mês só');
 
+  /* Sair da visão solta o recorte. Conferir contra o mês do cenário, e não
+     contra o mês corrente: o teste passava em setembro e quebrou sozinho na
+     virada para outubro, sem nada ter mudado no código. */
   app.finLimparConcluidasComSaldo();
-  assert(linhasFin(app).length > 2, 'sair da visão devolve a lista normal');
+  assert(!app.finFiltros().soConcluidasComSaldo, 'sair da visão solta o recorte de concluídas');
+  assert(telaFin(app).linhas.length === 6, 'e a lista do mês do cenário volta inteira');
 }
 
 secao('CRITÉRIO 6 — reabrir devolve ao fluxo sem perder histórico');

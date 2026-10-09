@@ -1273,6 +1273,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('mesAtual')">Este Mês</button>
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('proxMes')">Próximo Mês ↗</button>
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('todos')">Todos</button>
+      <button class="btn btn-ghost btn-sm" id="finSeriesBtn" style="display:none" onclick="finSeriesModal()" title="O modelo de cada despesa fixa: renovar, encerrar e conferir as ocorrências">📌 Séries fixas</button>
       <button class="btn btn-ghost" onclick="openTransfModal()">⇄ Transferência entre empresas</button>
       <button class="btn btn-mag" onclick="openLancModal()">+ Novo Lançamento</button>
     </div>
@@ -1800,6 +1801,9 @@ function ensureDBStructure(){
   // Séries de lançamento fixo. A série é o modelo; quem vive no fluxo de
   // caixa são as ocorrências mensais, que ficam em DB.fin com `recId`.
   if (!Array.isArray(DB.finRec)) DB.finRec = [];
+  // Flag de EXIBIÇÃO do quadro de séries. Nasce desligada: o quadro vive no
+  // botão "Séries fixas" do alto da aba. Não desliga o motor de recorrência.
+  if (DB.settings && DB.settings.finMostrarSeries === undefined) DB.settings.finMostrarSeries = false;
   if (!Array.isArray(DB.docs)) DB.docs = [];
   if (!Array.isArray(DB.fretes)) DB.fretes = [];
   if (!Array.isArray(DB.fornecedores)) DB.fornecedores = [];
@@ -4524,8 +4528,17 @@ function renderFinSeries(){
   const empFiltro = $('finEmpresa') ? $('finEmpresa').value : '';
   const series = finSeries().filter(s => s && (!empFiltro || (s.empresa || 'WindGate') === empFiltro));
 
+  /* O quadro continua existindo, inteiro, atrás de uma flag de exibição: na
+     rotina do mês o que interessa é o lançamento daquele mês, não o modelo que
+     o gerou. A gestão mudou de porta, não foi apagada — está no botão
+     "Séries fixas" no alto da aba. */
   const card = $('finSeriesCard');
-  if (card) card.style.display = series.length ? '' : 'none';
+  if (card) card.style.display = (FIN_SERIES_NA_ABA() && series.length) ? '' : 'none';
+  const atalho = $('finSeriesBtn');
+  if (atalho){
+    atalho.style.display = series.length ? '' : 'none';
+    atalho.textContent = `📌 Séries fixas (${series.length})`;
+  }
 
   const aviso = $('finSeriesAviso');
   const renovar = finSeriesParaRenovar().filter(s => !empFiltro || (s.empresa || 'WindGate') === empFiltro);
@@ -4550,7 +4563,14 @@ function renderFinSeries(){
     aviso.style.display = (renovar.length || conferir.length) ? '' : 'none';
   }
 
-  box.innerHTML = series.map(s => {
+  box.innerHTML = finSerieLinhas(series);
+}
+
+/* As linhas da tabela de séries, num lugar só. O quadro na aba e o modal de
+   gestão desenham as MESMAS linhas — esconder o quadro não podia virar uma
+   segunda cópia desta tabela para manter. */
+function finSerieLinhas(series){
+  return series.map(s => {
     const ocs = finOcorrencias(s._id);
     const feitas = ocs.filter(o => o.status === 'Realizado').length;
     const pago = ocs.filter(o => o.status === 'Realizado').reduce((a, o) => a + (+o.valor || 0), 0);
@@ -4571,6 +4591,45 @@ function renderFinSeries(){
       </td>
     </tr>`;
   }).join('');
+}
+
+/* ---------- GESTÃO DAS SÉRIES, FORA DA ABA ----------
+   O quadro das séries saiu da tela do Financeiro: na rotina do mês interessa o
+   lançamento daquele mês, não o modelo que o gerou. Mas o 🔎 e o ↻ só existiam
+   ali, e sem eles não haveria onde renovar, encerrar ou conferir uma série —
+   só pelo banco. Então o quadro não foi apagado: mudou de porta. */
+const FIN_SERIES_NA_ABA = () => !!(DB.settings && DB.settings.finMostrarSeries);
+
+function finSeriesModal(){
+  if(!(USER && USER.fin)){ toast('⚠ Financeiro restrito ao Samir e ao Davi'); return; }
+  const series = finSeries();
+  const naAba = FIN_SERIES_NA_ABA();
+  openModal(`<h3>📌 Séries <span>fixas</span></h3>
+    <p class="note" style="margin-bottom:10px">O modelo de cada recorrente. Cada série gera <b>uma ocorrência por mês</b>, e são as ocorrências que aparecem na lista de lançamentos — aqui se renova, se encerra e se confere.</p>
+    ${series.length ? `<div style="overflow-x:auto;max-height:52vh">
+      <table><thead><tr><th>Descrição</th><th>Tipo</th><th>Categoria</th><th class="r">Valor padrão</th><th>Vencimento</th><th>Período</th><th>Progresso</th><th>Situação</th><th></th></tr></thead>
+      <tbody>${finSerieLinhas(series)}</tbody></table></div>`
+      : '<p class="note">Nenhuma série fixa cadastrada. Elas nascem ao lançar uma despesa com natureza <b>Fixa Mensal</b>.</p>'}
+    <div class="frow" style="margin-top:12px">
+      <div style="grid-column:span 3">
+        <label class="chk-inline" style="justify-content:flex-start">
+          <input type="checkbox" id="m_seriesNaAba" ${naAba?'checked':''} onchange="finSeriesNaAbaSet(this.checked)">
+          <span>Mostrar este quadro direto na aba Financeiro</span>
+        </label>
+        <p class="note" style="margin-top:4px">Desligado, o quadro fica só aqui. Ligar traz de volta exatamente como era — nada foi apagado.</p>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+}
+
+/* A flag é de exibição e nada mais: não desliga o motor de recorrência, não
+   mexe em série nem em ocorrência. Fica em settings para poder ser virada da
+   tela, sem deploy. */
+function finSeriesNaAbaSet(on){
+  if(!DB.settings) DB.settings = {};
+  DB.settings.finMostrarSeries = !!on;
+  saveDB(); renderFin();
+  toast(on ? 'Quadro das séries de volta na aba ✓' : 'Quadro das séries só por aqui ✓');
 }
 
 /* O select de séries é reconstruído a cada render: a lista muda quando alguém
@@ -4601,6 +4660,9 @@ function finConferenciaResolvida(){
 /* Ver uma série inteira: filtra por ela e tira o recorte de mês, senão só
    apareceria a ocorrência do mês que já estava na tela. */
 function finFiltrarSerie(recId){
+  // O 🔎 agora costuma ser clicado de dentro do modal de gestão; sem fechar,
+  // a lista filtrada ficaria atrás dele.
+  closeModal();
   const sel = $('finSerieFiltro');
   if (sel) sel.value = recId;
   // Ver a série inteira é ver todos os meses, e quem clicou aqui pediu isso.

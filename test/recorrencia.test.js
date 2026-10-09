@@ -744,6 +744,96 @@ secao('Migração das fixas antigas');
   assert(app.avaliar('DB.finRec.length') === 3, '★ migrar duas vezes não duplica séries');
 }
 
+/* ==================================================================== */
+secao('★ Quadro das séries escondido por flag — e nada mais muda');
+{
+  const app = novoApp();
+  const s1 = criarFixaMensal(app);
+  const s2 = criarFixaMensal(app, { m_ldesc: 'Contabilidade', m_lval: '900', m_lvenc: '2026-09-20' });
+
+  // Fotografia do que NÃO pode mudar.
+  const seriesAntes = app.avaliar('DB.finRec.length');
+  const ocsAntes    = app.avaliar('DB.fin.filter(l=>l.recId).length');
+  const t0 = telaDoMes(app, '2026-09');
+  const somaDe = t => {
+    const ids = [];
+    t.linhas.join('').replace(/onchange="setFinStatus\('([^']+)'/g, (m, id) => { ids.push(id); return m; });
+    const regs = ids.map(id => app.finPorId(id)).filter(Boolean);
+    return {
+      n: regs.length,
+      prev: regs.filter(l => l.status !== 'Realizado').reduce((a, l) => a + (+l.valor || 0), 0),
+      real: regs.filter(l => l.status === 'Realizado').reduce((a, l) => a + (+l.valor || 0), 0)
+    };
+  };
+  const antes = somaDe(t0);
+
+  // Padrão: flag desligada → quadro escondido.
+  assert(app.avaliar('DB.settings.finMostrarSeries') === false, 'a flag nasce desligada');
+  assert(app.document.getElementById('finSeriesCard').style.display === 'none',
+    '★ o quadro "Séries fixas" não aparece na aba');
+
+  // Mas o atalho de gestão existe e conta as séries.
+  const btn = app.document.getElementById('finSeriesBtn');
+  assert(btn.style.display === '' && /Séries fixas \(2\)/.test(btn.textContent),
+    `★ o botão de gestão aparece com o contador: "${btn.textContent}"`);
+
+  // Nada no banco mudou.
+  assert(app.avaliar('DB.finRec.length') === seriesAntes, `★ contagem de séries igual (${seriesAntes})`);
+  assert(app.avaliar('DB.fin.filter(l=>l.recId).length') === ocsAntes, `★ ocorrências iguais (${ocsAntes})`);
+
+  // As ocorrências continuam na listagem e nas somas.
+  const depois = somaDe(telaDoMes(app, '2026-09'));
+  assert(depois.n === antes.n && depois.prev === antes.prev && depois.real === antes.real,
+    `★ listagem e somas idênticas (${depois.n} linhas · previsto ${app.fmt(depois.prev)} · realizado ${app.fmt(depois.real)})`);
+  assert(/Fixa 1\/12/.test(telaDoMes(app, '2026-09').linhas.join('')), 'com a tag "Fixa 1/12" na linha do mês');
+
+  // O motor continua rodando: os meses seguintes seguem materializados.
+  ['2026-10', '2026-11', '2027-08'].forEach(m =>
+    assert(telaDoMes(app, m).linhas.length === 2, `★ ${m} continua com as 2 ocorrências — o motor não parou`));
+
+  // O modal de gestão desenha as MESMAS linhas, com 🔎 e ↻.
+  app.finSeriesModal();
+  const modal = app.document.getElementById('modalBox').innerHTML;
+  assert(/Aluguel do escritório/.test(modal) && /Contabilidade/.test(modal), '★ o modal lista as 2 séries');
+  assert(/finFiltrarSerie/.test(modal) && /finRenovarModal/.test(modal), '★ com o 🔎 e o ↻ preservados');
+  assert(/Valor padrão/.test(modal) && /Progresso/.test(modal) && /Situação/.test(modal),
+    'e as mesmas colunas do quadro original');
+
+  // Virar a flag traz o quadro de volta, intacto.
+  app.finSeriesNaAbaSet(true);
+  assert(app.document.getElementById('finSeriesCard').style.display === '',
+    '★ reverter a flag traz o quadro de volta');
+  const corpo = app.document.getElementById('finSeriesBody').innerHTML;
+  assert(/Aluguel do escritório/.test(corpo) && /finRenovarModal/.test(corpo),
+    'com as linhas e as ações como eram');
+  assert(app.avaliar('DB.finRec.length') === seriesAntes, 'e sem ter mexido em série nenhuma');
+
+  app.finSeriesNaAbaSet(false);
+  assert(app.document.getElementById('finSeriesCard').style.display === 'none', 'e desligar esconde de novo');
+}
+
+secao('Renovar e encerrar continuam funcionando pelo modal');
+{
+  const app = novoApp();
+  const s = criarFixaMensal(app);
+  app.finSeriesNaAbaSet(false);
+
+  // Renovação pelo caminho novo.
+  app.finSeriesModal();
+  app.finRenovarModal(s._id);
+  preencher(app, { m_renmeses: '12', m_renval: '4500' });
+  app.finRenovarConfirma(s._id);
+  assert(app.finOcorrencias(s._id).length === 24, '★ renovar pelo modal funciona (24 ocorrências)');
+
+  // O aviso de renovação continua na aba, fora do quadro escondido.
+  const curta = criarFixaMensal(app, { m_lvenc: app.agHoje().slice(0,7) + '-15', m_lrec_total: '2', m_ldesc: 'Software mensal' });
+  app.renderFin();
+  const aviso = app.document.getElementById('finSeriesAviso');
+  assert(aviso.style.display === '' && /Software mensal/.test(aviso.innerHTML),
+    '★ o aviso de "termina em…" segue aparecendo na aba — ele não é o quadro');
+  assert(/finRenovarModal/.test(aviso.innerHTML), 'com o botão de renovar à mão');
+}
+
 secao('A tela mostra as séries e o que a migração deixou em aberto');
 {
   const app = novoApp();
