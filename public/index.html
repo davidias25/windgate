@@ -1168,7 +1168,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <h2>Clientes <span class="spacer"></span>
       <input id="crmBusca" placeholder="Buscar por nome, empresa, segmento, cidade…" style="width:280px" oninput="renderCrm()">
     </h2>
-    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Empresa</th><th>Segmento</th><th>Telefone</th><th>E-mail</th><th>Cidade / UF</th><th class="r">Oportun.</th><th>Resp.</th><th></th></tr></thead><tbody id="crmCliBody"></tbody></table></div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Empresa</th><th>Segmento</th><th>Telefone</th><th>E-mail</th><th>Cidade / UF</th><th class="r">Oportun.</th><th class="r">Docs</th><th>Resp.</th><th></th></tr></thead><tbody id="crmCliBody"></tbody></table></div>
     <div class="empty" id="crmCliEmpty" style="display:none">Nenhum cliente cadastrado — clique em <b>+ Novo cliente</b>.</div>
   </div>
 
@@ -1750,7 +1750,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmOps','parceiros','opStatusHist'];
+const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmDocs','crmOps','parceiros','opStatusHist'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -1811,6 +1811,10 @@ function ensureDBStructure(){
   if (!Array.isArray(DB.agendaTasks)) DB.agendaTasks = [];
   if (!Array.isArray(DB.crm)) DB.crm = [];        // clientes
   if (!Array.isArray(DB.crmOps)) DB.crmOps = [];  // oportunidades
+  // Documentos comerciais do CLIENTE (proposta, contrato, cadastro). Os da
+  // operação continuam em DB.docs — são repositórios com fronteira, não dois
+  // repositórios concorrentes.
+  if (!Array.isArray(DB.crmDocs)) DB.crmDocs = [];
   if (!Array.isArray(DB.parceiros)) DB.parceiros = []; // fornecedores, despachantes, agentes
   // Histórico de etapas: alimenta o contador de prazo e, depois, o tempo médio
   // por etapa na Gestão do Mês. Só cresce — nada aqui é sobrescrito.
@@ -3305,8 +3309,27 @@ function openOpDocsModal(op){
   const url = o && o.planilhaUrl;
   const emb = url ? urlPlanilhaEmbed(url) : '';
 
+  /* Comerciais da oportunidade que virou esta operação. Aparecem POR
+     REFERÊNCIA: o arquivo continua morando no CRM, e aqui há só o acesso.
+     Copiar criaria dois repositórios concorrentes, e aí ninguém saberia qual
+     é a versão boa. */
+  const comerciais = (USER && USER.fin) ? crmDocsDaOperacao(op) : [];
+  const blocoCrm = comerciais.length ? `
+    <div class="grouph" style="margin-top:16px">📎 COMERCIAIS (DO CRM)</div>
+    <p class="note">Estes vivem no CRM, no cliente — aqui é só o acesso. Editar ou excluir é por lá.</p>
+    ${comerciais.map(({doc, oport, via}) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px">
+        <span class="pill blue" style="font-size:9px">${esc(doc.tipo)} v${doc.versao}</span>
+        <b style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(doc.nome)}</b>
+        <span class="note" style="white-space:nowrap">${esc(crmNomeCli(doc.clienteId))} · ${esc(oport.titulo||'—')}</span>
+        <span class="pill draft" style="font-size:8.5px" title="Como o vínculo foi estabelecido">via ${esc(via)}</span>
+        ${doc.link?`<a href="${esc(doc.link)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#7FA6FF">↗ ver</a>`:''}
+        <button class="btn btn-ghost btn-sm" style="padding:2px 7px" onclick="crmDocPainel('${esc(doc.clienteId)}')" title="Abrir no CRM">CRM →</button>
+      </div>`).join('')}` : '';
+
   openModal(`<h3>📁 Documentos — <span>${esc(op||'sem operação')}</span>${o?` · ${esc(o.nome||'')}`:''}</h3>
     ${blocos}
+    ${blocoCrm}
     <div class="grouph" style="margin-top:18px">📊 PLANILHA DE CUSTOS</div>
     <div class="frow">
       <div style="grid-column:span 3"><label>Link do Google Sheets desta operação</label>
@@ -5998,7 +6021,15 @@ function renderCrm(){
       <td>${c.segmento?`<span class="pill draft">${esc(c.segmento)}</span>`:'<span class="note">—</span>'}</td>
       <td>${esc(c.fone||'—')}</td><td class="note">${esc(c.email||'—')}</td>
       <td>${esc([e.cidade,e.uf].filter(Boolean).join('/')||'—')}</td>
-      <td class="r num">${n}</td><td>${esc(c.resp||'—')}</td>
+      <td class="r num">${n}</td>
+      <td class="r">${(() => {
+        // 📎 com contador: conta a versão mais recente de cada documento, não
+        // cada revisão — senão o número cresce a cada proposta revisada.
+        const nd = crmDocContagem(c._id);
+        return `<button class="btn btn-ghost btn-sm" style="padding:2px 8px${nd ? '' : ';opacity:.5'}"
+          onclick="crmDocPainel('${id}')" title="Documentos deste cliente — propostas, contrato, cadastro">📎 ${nd}</button>`;
+      })()}</td>
+      <td>${esc(c.resp||'—')}</td>
       <td style="white-space:nowrap"><button class="btn btn-blue btn-sm" onclick="crmVerCliente('${id}')">Ficha</button> <button class="btn btn-ghost btn-sm" onclick="crmEditarCliente('${id}')">Editar</button> <button class="del" onclick="crmDelCliente('${id}')">✕</button></td></tr>`;
   }).join('');
 
@@ -6102,7 +6133,11 @@ function crmEditarCliente(id){
   const c=crmCliente(id);
   if(!c){ toast('⚠ Cliente não encontrado'); renderCrm(); return; }
   openModal(`<h3>Editar <span>cliente</span></h3>${crmClienteCampos(c)}
-    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-mag" onclick="crmSalvarCliente('${esc(id)}')">Salvar alterações</button></div>`);
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="crmDocPainel('${esc(id)}')" title="Propostas, contrato, cadastro e especificações deste cliente">📎 Documentos (${crmDocContagem(id)})</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="crmSalvarCliente('${esc(id)}')">Salvar alterações</button>
+    </div>`);
 }
 /* ViaCEP preenche o endereço. Se não responder, o campo continua digitável —
    o cadastro não pode depender de um serviço de fora. */
@@ -6120,6 +6155,426 @@ async function crmBuscarCep(){
     $('m_cli_num').focus();
   }catch(e){ toast('⚠ Não deu para consultar o CEP agora — preencha à mão'); }
 }
+/* ============================================================
+   DOCUMENTOS DO CLIENTE (CRM)
+   ============================================================
+   Os documentos pertencem ao CLIENTE, não à oportunidade. O mesmo cliente tem
+   várias oportunidades — o Márcio tem lavadora, empilhadeira e desempenadeira
+   —, e o cadastro, o contrato e o histórico são dele, não de cada linha. Por
+   isso o vínculo à oportunidade é OPCIONAL: a proposta nasce ligada à
+   oportunidade que a originou, o cartão CNPJ fica solto no cliente.
+
+   Fronteira com a aba Documentação: lá moram os documentos da OPERAÇÃO (BL,
+   DI, invoice, packing list). Aqui moram os COMERCIAIS (proposta, contrato,
+   cadastro, especificação recebida na negociação). Quando a oportunidade vira
+   operação, a Documentação passa a MOSTRAR os comerciais dela — por
+   referência, não por cópia. Um arquivo, um lugar de verdade, dois acessos. */
+
+const CRM_DOC_TIPOS = ['Proposta', 'Contrato', 'Cadastro/CNPJ', 'Especificação técnica', 'Comprovante', 'Outro'];
+/* Contrato é o único sigiloso: condição comercial fechada não circula fora de
+   quem responde pelo negócio. */
+const CRM_DOC_SIGILOSOS = ['Contrato'];
+/* Proposta primeiro: é o que se procura com mais frequência e o que mais
+   ganha versão. */
+const CRM_DOC_ORDEM = CRM_DOC_TIPOS;
+const CRM_DOC_DIAS_LIXEIRA = 90;
+
+const crmDocs = () => (Array.isArray(DB.crmDocs) ? DB.crmDocs : (DB.crmDocs = []));
+const crmMeuNome = () => (USER && USER.nome) ? USER.nome.split(' ')[0] : '';
+
+/* ---------- permissões ----------
+   Samir e Davi fazem tudo. Ívina e Matheus veem e anexam nos clientes sob
+   responsabilidade deles, e não excluem — apagar documento comercial é
+   decisão de quem responde pelo negócio. */
+const crmDocEhMeuCliente = cli => !!cli && !!crmMeuNome() && nrm(cli.resp || '') === nrm(crmMeuNome());
+const crmDocPodeVer = d => !d || !CRM_DOC_SIGILOSOS.includes(d.tipo) || !!(USER && USER.fin);
+const crmDocPodeAnexar = cli => !!(USER && (USER.fin || crmDocEhMeuCliente(cli)));
+const crmDocPodeExcluir = () => !!(USER && USER.fin);
+/* Tipo que a pessoa pode escolher ao anexar: quem não vê contrato também não
+   o cria, senão subiria um arquivo que desapareceria da própria vista. */
+const crmDocTiposPermitidos = () => CRM_DOC_TIPOS.filter(t => !CRM_DOC_SIGILOSOS.includes(t) || (USER && USER.fin));
+
+/* ---------- consultas ---------- */
+/* A chave da versão é cliente + tipo + oportunidade. Subir outra proposta da
+   mesma oportunidade não substitui a anterior: vira v2, e a v1 continua como
+   prova do que foi efetivamente enviado ao cliente. */
+const crmDocChave = d => [d.clienteId, d.tipo, d.oportunidadeId || ''].join('|');
+
+function crmDocsDoCliente(clienteId, opts){
+  opts = opts || {};
+  return crmDocs().filter(d => d && d.clienteId === clienteId
+    && (opts.incluirRemovidos ? true : !d.removidoEm)
+    && (opts.ignorarPermissao ? true : crmDocPodeVer(d)));
+}
+/* Contagem para o 📎 da lista: só o que a pessoa pode ver, e só a versão mais
+   recente de cada chave — contar v1 e v2 como dois arquivos faria o número
+   crescer a cada revisão de proposta. */
+function crmDocContagem(clienteId){
+  return crmDocUltimas(crmDocsDoCliente(clienteId)).length;
+}
+/* Última versão de cada chave. */
+function crmDocUltimas(lista){
+  const porChave = {};
+  lista.forEach(d => {
+    const k = crmDocChave(d);
+    if (!porChave[k] || (+d.versao || 1) > (+porChave[k].versao || 1)) porChave[k] = d;
+  });
+  return Object.values(porChave);
+}
+const crmDocVersoes = (lista, d) => lista.filter(x => crmDocChave(x) === crmDocChave(d))
+  .sort((a, b) => (+b.versao || 1) - (+a.versao || 1));
+
+function crmDocProximaVersao(clienteId, tipo, oportunidadeId){
+  // Conta inclusive as removidas: reaproveitar v2 depois de apagar a v2 faria
+  // duas versões diferentes com o mesmo número no histórico.
+  const iguais = crmDocs().filter(d => d && d.clienteId === clienteId && d.tipo === tipo
+    && (d.oportunidadeId || '') === (oportunidadeId || ''));
+  return iguais.reduce((a, d) => Math.max(a, +d.versao || 1), 0) + 1;
+}
+
+/* ---------- auditoria ----------
+   Quem subiu, quem baixou, quem excluiu. Fica no próprio documento, que já
+   sincroniza, com teto para o histórico de download não crescer sem fim.
+   O que se registra é o clique no botão desta tela: o link do Storage é
+   público, então um acesso direto à URL não passa por aqui. */
+function crmDocLog(d, acao){
+  if (!d) return;
+  if (!Array.isArray(d.acessos)) d.acessos = [];
+  d.acessos.push({ quem: crmMeuNome(), acao: acao, em: new Date().toISOString() });
+  if (d.acessos.length > 50) d.acessos = d.acessos.slice(-50);
+}
+
+/* ---------- criar ---------- */
+function crmDocCriar(campos){
+  const cli = crmCliente(campos.clienteId);
+  if (!crmDocPodeAnexar(cli)) { toast('⚠ Você só anexa em clientes sob sua responsabilidade'); return null; }
+  const tipo = CRM_DOC_TIPOS.includes(campos.tipo) ? campos.tipo : 'Outro';
+  if (CRM_DOC_SIGILOSOS.includes(tipo) && !(USER && USER.fin)) { toast('⚠ Contrato é restrito ao Samir e ao Davi'); return null; }
+  const d = {
+    _id: novoId(),
+    clienteId: campos.clienteId,
+    oportunidadeId: campos.oportunidadeId || '',
+    tipo: tipo,
+    nome: campos.nome || 'documento',
+    link: campos.link || '',
+    obs: campos.obs || '',
+    versao: crmDocProximaVersao(campos.clienteId, tipo, campos.oportunidadeId),
+    enviadoPor: crmMeuNome(),
+    dataUpload: new Date().toISOString(),
+    origem: campos.origem || 'manual',
+    removidoEm: null, removidoPor: '',
+    acessos: []
+  };
+  crmDocLog(d, 'upload');
+  crmDocs().unshift(d);
+  return d;
+}
+
+/* Exclusão é reversível: o arquivo sai da lista e fica na lixeira do cliente.
+   Documento comercial apagado por engano é prova perdida de negociação. */
+function crmDocExcluir(id){
+  const d = crmDocs().find(x => x && x._id === id);
+  if (!d) { toast('⚠ Documento não encontrado'); return; }
+  if (!crmDocPodeExcluir()) { toast('⚠ Só o Samir e o Davi excluem documento'); return; }
+  if (!confirm(`Remover "${d.nome}" (v${d.versao})?\n\nEle sai da lista e fica recuperável na lixeira do cliente por ${CRM_DOC_DIAS_LIXEIRA} dias.`)) return;
+  d.removidoEm = new Date().toISOString();
+  d.removidoPor = crmMeuNome();
+  crmDocLog(d, 'exclusao');
+  saveDB(); crmDocPainel(d.clienteId); renderCrm();
+  toast('Documento removido — recuperável na lixeira ✓');
+}
+function crmDocRestaurar(id){
+  const d = crmDocs().find(x => x && x._id === id);
+  if (!d) { toast('⚠ Documento não encontrado'); return; }
+  if (!crmDocPodeExcluir()) { toast('⚠ Só o Samir e o Davi restauram'); return; }
+  d.removidoEm = null; d.removidoPor = '';
+  crmDocLog(d, 'restauracao');
+  saveDB(); crmDocPainel(d.clienteId); renderCrm();
+  toast('Documento restaurado ✓');
+}
+/* Baixar passa por aqui para o acesso ficar registrado. */
+function crmDocBaixar(id){
+  const d = crmDocs().find(x => x && x._id === id);
+  if (!d || !d.link) { toast('⚠ Documento sem arquivo'); return; }
+  if (!crmDocPodeVer(d)) { toast('⚠ Sem permissão para este documento'); return; }
+  crmDocLog(d, 'download'); saveDB();
+  window.open(d.link, '_blank');
+}
+
+/* ---------- ponte com a Documentação da operação ----------
+   A oportunidade guarda o `quoteId` e a cotação guarda o código da operação em
+   `opNum` — é esse o caminho formal. Onde ele não existe (a maioria das
+   oportunidades antigas não tem cotação vinculada), o nome do cliente serve de
+   reserva, e a tela diz de onde veio o vínculo para ninguém confiar demais. */
+function crmOportsDaOperacao(opId){
+  if (!opId || opId === 'WindGate') return [];
+  const alvo = nrm(opId);
+  const quotesCasando = Object.keys(DB.quotes || {}).filter(q => {
+    const f = (DB.quotes[q] || {}).fields || {};
+    return f.opNum && nrm(f.opNum) === alvo;
+  });
+  const porQuote = (DB.crmOps || []).filter(o => o && o.quoteId && quotesCasando.includes(o.quoteId));
+  if (porQuote.length) return porQuote.map(o => ({ op: o, via: 'cotação' }));
+
+  const operacao = (DB.ops || []).find(x => x && x.id === opId);
+  if (!operacao || !operacao.cliente) return [];
+  const nomeCli = nrm(operacao.cliente);
+  return (DB.crmOps || []).filter(o => {
+    if (!o || !CRM_ENCERRADAS.includes(o.etapa)) return false;   // só oportunidade fechada
+    const c = crmCliente(o.clienteId);
+    if (!c) return false;
+    const n = [nrm(c.empresa), nrm(c.nome)].filter(Boolean);
+    return n.some(x => x === nomeCli || x.includes(nomeCli) || nomeCli.includes(x));
+  }).map(o => ({ op: o, via: 'nome do cliente' }));
+}
+/* Documentos comerciais que a Documentação de uma operação deve mostrar. */
+function crmDocsDaOperacao(opId){
+  const vinc = crmOportsDaOperacao(opId);
+  if (!vinc.length) return [];
+  const out = [];
+  vinc.forEach(({ op, via }) => {
+    crmDocUltimas(crmDocsDoCliente(op.clienteId).filter(d => (d.oportunidadeId || '') === op._id))
+      .forEach(d => out.push({ doc: d, oport: op, via }));
+  });
+  return out;
+}
+
+/* ---------- PAINEL DE DOCUMENTOS DO CLIENTE ---------- */
+let _crmDocVerVersoes = {};   // chave → mostrar histórico
+let _crmDocVerLixeira = false;
+
+function crmDocPainel(clienteId){
+  const cli = crmCliente(clienteId);
+  if (!cli) { toast('⚠ Cliente não encontrado'); return; }
+  const podeAnexar = crmDocPodeAnexar(cli);
+  const podeExcluir = crmDocPodeExcluir();
+  const todos = crmDocsDoCliente(clienteId);
+  const ultimas = crmDocUltimas(todos);
+  const opos = crmOpsDoCliente(clienteId);
+
+  /* Agrupado por tipo, Proposta primeiro: é o que mais se procura e o que mais
+     ganha versão. Tipo sem nenhum arquivo não ocupa espaço. */
+  const blocos = CRM_DOC_ORDEM.map(tipo => {
+    if (CRM_DOC_SIGILOSOS.includes(tipo) && !(USER && USER.fin)) return '';
+    const doTipo = ultimas.filter(d => d.tipo === tipo)
+      .sort((a, b) => String(b.dataUpload || '').localeCompare(String(a.dataUpload || '')));
+    if (!doTipo.length) return '';
+    return `<div class="grouph" style="margin-top:14px">${esc(tipo.toUpperCase())} · ${doTipo.length}</div>
+      ${doTipo.map(d => crmDocLinha(d, todos, podeExcluir)).join('')}`;
+  }).join('');
+
+  const lixo = crmDocsDoCliente(clienteId, { incluirRemovidos: true })
+    .filter(d => d.removidoEm && (Date.now() - new Date(d.removidoEm).getTime()) < CRM_DOC_DIAS_LIXEIRA * 864e5);
+
+  openModal(`<h3>📎 Documentos — <span>${esc(cli.empresa || cli.nome)}</span></h3>
+    <p class="note" style="margin-bottom:10px">
+      Os documentos são do <b>cliente</b>: aparecem em todas as ${opos.length} oportunidade(s) dele.
+      O vínculo a uma oportunidade é opcional — a proposta nasce ligada à que a originou, o cadastro fica solto.
+    </p>
+
+    ${podeAnexar ? `
+    <div id="crmDocDrop"
+         ondragover="event.preventDefault();this.style.borderColor='#E91E63'"
+         ondragleave="this.style.borderColor='var(--line,#25304a)'"
+         ondrop="crmDocSoltar(event,'${esc(clienteId)}')"
+         style="border:1.5px dashed var(--line,#25304a);border-radius:10px;padding:14px;text-align:center;margin-bottom:12px">
+      <div style="font-size:12.5px">Arraste o arquivo aqui — ou
+        <button class="btn btn-mag btn-sm" onclick="crmDocAnexarModal('${esc(clienteId)}')">+ Anexar documento</button>
+      </div>
+      <div class="note" style="margin-top:4px">PDF, JPG, PNG, DOCX ou XLSX · até 25 MB</div>
+      <div id="crmDocDropSt" class="note" style="margin-top:6px"></div>
+    </div>` : `<p class="note" style="color:var(--amber);margin-bottom:10px">
+      👁 Somente leitura: este cliente está sob responsabilidade de <b>${esc(cli.resp || '—')}</b>.
+    </p>`}
+
+    ${blocos || '<p class="note">Nenhum documento anexado a este cliente ainda.</p>'}
+
+    ${lixo.length ? `<div style="margin-top:16px">
+      <button class="btn btn-ghost btn-sm" onclick="_crmDocVerLixeira=!_crmDocVerLixeira;crmDocPainel('${esc(clienteId)}')">
+        🗑 ${_crmDocVerLixeira ? 'esconder' : 'ver'} removidos (${lixo.length})</button>
+      ${_crmDocVerLixeira ? `<div style="margin-top:8px">${lixo.map(d => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;opacity:.75">
+          <span class="pill draft" style="font-size:9px">${esc(d.tipo)} v${d.versao}</span>
+          <span style="text-decoration:line-through">${esc(d.nome)}</span>
+          <span class="note">removido por ${esc(d.removidoPor || '—')} em ${esc(String(d.removidoEm).slice(0, 10).split('-').reverse().join('/'))}</span>
+          <span class="spacer" style="flex:1"></span>
+          ${podeExcluir ? `<button class="btn btn-ghost btn-sm" onclick="crmDocRestaurar('${esc(d._id)}')">restaurar</button>` : ''}
+        </div>`).join('')}
+        <p class="note" style="margin-top:6px">Recuperável por ${CRM_DOC_DIAS_LIXEIRA} dias. Depois disso sai desta lista, mas o registro não é destruído.</p>
+      </div>` : ''}
+    </div>` : ''}
+
+    <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
+}
+
+function crmDocLinha(d, todos, podeExcluir){
+  const versoes = crmDocVersoes(todos, d);
+  const chave = crmDocChave(d);
+  const aberto = !!_crmDocVerVersoes[chave];
+  const oport = d.oportunidadeId ? (DB.crmOps || []).find(o => o && o._id === d.oportunidadeId) : null;
+  const dt = String(d.dataUpload || '').slice(0, 10).split('-').reverse().join('/');
+  const linha = (x, atual) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px${atual ? '' : ';opacity:.7;padding-left:18px'}">
+      <span class="pill ${atual ? 'blue' : 'draft'}" style="font-size:9px">v${x.versao}</span>
+      <b style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.nome)}</b>
+      <span class="note" style="white-space:nowrap">${esc(String(x.dataUpload || '').slice(0, 10).split('-').reverse().join('/'))} · ${esc(x.enviadoPor || '—')}</span>
+      ${x.origem === 'proposta-automatica' ? '<span class="pill teal" style="font-size:8.5px" title="Anexada pelo próprio sistema ao liberar o PDF da proposta">auto</span>' : ''}
+      ${x.link ? `<a href="${esc(x.link)}" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 7px;color:#7FA6FF" onclick="crmDocLog(crmDocs().find(y=>y._id==='${esc(x._id)}'),'visualizacao');saveDB()">↗ ver</a>` : '<span class="note">sem arquivo</span>'}
+      ${x.link ? `<button class="btn btn-ghost btn-sm" style="padding:2px 7px" onclick="crmDocBaixar('${esc(x._id)}')" title="Baixar e registrar o acesso">⤓</button>` : ''}
+      ${podeExcluir ? `<button class="del" onclick="crmDocExcluir('${esc(x._id)}')" title="Remover (recuperável)">✕</button>` : ''}
+    </div>`;
+  return `<div style="margin-top:4px">
+    ${linha(d, true)}
+    ${oport ? `<div class="note" style="padding-left:18px">↳ oportunidade: <b>${esc(oport.titulo || '—')}</b> <span class="pill" style="background:${crmEtapaCor(oport.etapa)}22;color:${crmEtapaCor(oport.etapa)};font-size:8.5px">${esc(oport.etapa)}</span></div>` : ''}
+    ${d.obs ? `<div class="note" style="padding-left:18px">📝 ${esc(d.obs)}</div>` : ''}
+    ${versoes.length > 1 ? `<div style="padding-left:18px;margin-top:2px">
+      <button class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:10.5px"
+        onclick="_crmDocVerVersoes[${JSON.stringify(chave).replace(/"/g, '&quot;')}]=${aberto ? 'false' : 'true'};crmDocPainel('${esc(d.clienteId)}')">
+        ${aberto ? 'esconder' : 'ver'} versões anteriores (${versoes.length - 1})</button>
+    </div>${aberto ? versoes.slice(1).map(x => linha(x, false)).join('') : ''}` : ''}
+  </div>`;
+}
+
+/* ---------- anexar ---------- */
+function crmDocAnexarModal(clienteId, oportunidadeId){
+  const cli = crmCliente(clienteId);
+  if (!cli) { toast('⚠ Cliente não encontrado'); return; }
+  if (!crmDocPodeAnexar(cli)) { toast('⚠ Você só anexa em clientes sob sua responsabilidade'); return; }
+  const opos = crmOpsDoCliente(clienteId);
+  openModal(`<h3>Anexar documento — <span>${esc(cli.empresa || cli.nome)}</span></h3>
+    <div class="frow">
+      <div><label>Tipo</label><select id="m_cd_tipo" onchange="crmDocPreverVersao('${esc(clienteId)}')">
+        ${crmDocTiposPermitidos().map(t => `<option${t === 'Proposta' ? ' selected' : ''}>${esc(t)}</option>`).join('')}
+      </select></div>
+      <div style="grid-column:span 2"><label>Oportunidade (opcional)</label>
+        <select id="m_cd_opo" onchange="crmDocPreverVersao('${esc(clienteId)}')">
+          <option value="">— nenhuma: documento do cliente —</option>
+          ${opos.map(o => `<option value="${esc(o._id)}"${o._id === oportunidadeId ? ' selected' : ''}>${esc(o.titulo || '—')}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>📁 Arquivo (PDF, JPG, PNG, DOCX, XLSX · até 25 MB)</label>
+        <input type="file" id="m_cd_file" style="background:#171f33;padding:8px"
+               accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
+               onchange="crmDocUpload(this.files[0],'${esc(clienteId)}')">
+        <div id="m_cd_st" class="note" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>Ou cole a URL do arquivo</label>
+        <input id="m_cd_link" placeholder="https://…"></div>
+    </div>
+    <div class="frow">
+      <div style="grid-column:span 3"><label>Observação (opcional)</label>
+        <input id="m_cd_obs" placeholder="Ex.: versão revisada depois da reunião do dia 12"></div>
+    </div>
+    <p class="note" id="m_cd_versao" style="margin-top:6px"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="crmDocPainel('${esc(clienteId)}')">Voltar</button>
+      <button class="btn btn-mag" onclick="crmDocSalvar('${esc(clienteId)}')">Anexar</button>
+    </div>`);
+  crmDocPreverVersao(clienteId);
+}
+/* Diz, antes de anexar, que número de versão vai sair. Sem isso a pessoa não
+   sabe se está substituindo ou criando revisão — e nunca substitui. */
+function crmDocPreverVersao(clienteId){
+  const el = $('m_cd_versao'); if (!el) return;
+  const v = crmDocProximaVersao(clienteId, V('m_cd_tipo'), V('m_cd_opo'));
+  el.innerHTML = v > 1
+    ? `Vai entrar como <b>v${v}</b> — a v${v - 1} continua no histórico, nada é substituído.`
+    : 'Primeira versão deste tipo para esta oportunidade.';
+}
+
+const CRM_DOC_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'docx', 'xlsx'];
+const CRM_DOC_MAX = 25 * 1024 * 1024;
+/* Confere antes de subir: o servidor também confere, mas falhar aqui dá a
+   mensagem certa em vez de um erro genérico depois do upload inteiro. */
+function crmDocArquivoInvalido(file){
+  if (!file) return 'Nenhum arquivo selecionado';
+  const ext = String(file.name || '').split('.').pop().toLowerCase();
+  if (!CRM_DOC_EXTS.includes(ext)) return `Formato .${ext} não aceito — use PDF, JPG, PNG, DOCX ou XLSX`;
+  if (file.size > CRM_DOC_MAX) return `Arquivo de ${(file.size / 1048576).toFixed(1)} MB — o limite é 25 MB`;
+  return '';
+}
+
+async function crmDocUpload(file, clienteId){
+  const st = $('m_cd_st');
+  const erro = crmDocArquivoInvalido(file);
+  if (erro) { if (st) { st.style.color = '#FF5A6E'; st.textContent = '⚠ ' + erro; } return; }
+  if (st) { st.style.color = '#7FA6FF'; st.textContent = 'Enviando…'; }
+  const res = await uploadFileUniversal(file);
+  if (res.success) {
+    if ($('m_cd_link')) $('m_cd_link').value = res.url;
+    if (st) { st.style.color = '#34C77C'; st.textContent = `✓ ${res.fileName} enviado (${res.source})`; }
+  } else if (st) { st.style.color = '#FF5A6E'; st.textContent = '⚠ ' + (res.message || 'Erro no upload'); }
+}
+
+function crmDocSalvar(clienteId){
+  const link = V('m_cd_link').trim();
+  if (!link) { toast('⚠ Envie o arquivo ou cole a URL'); return; }
+  const f = $('m_cd_file');
+  const nome = (f && f.files && f.files[0] && f.files[0].name) || link.split('/').pop() || 'documento';
+  const d = crmDocCriar({ clienteId, oportunidadeId: V('m_cd_opo'), tipo: V('m_cd_tipo'),
+                          nome, link, obs: V('m_cd_obs').trim() });
+  if (!d) return;
+  saveDB(); crmDocPainel(clienteId); renderCrm();
+  toast(`<b>${esc(d.tipo)} v${d.versao}</b> anexada a ${esc(crmNomeCli(clienteId))} ✓`);
+}
+
+/* Arrastar e soltar no painel: sobe direto, com o tipo que a pessoa escolhe
+   depois no modal já preenchido com o arquivo. */
+async function crmDocSoltar(ev, clienteId){
+  ev.preventDefault();
+  const box = $('crmDocDrop'); if (box) box.style.borderColor = 'var(--line,#25304a)';
+  const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  const st = $('crmDocDropSt');
+  const erro = crmDocArquivoInvalido(file);
+  if (erro) { if (st) { st.style.color = '#FF5A6E'; st.textContent = '⚠ ' + erro; } return; }
+  if (st) { st.style.color = '#7FA6FF'; st.textContent = `Enviando ${file.name}…`; }
+  const res = await uploadFileUniversal(file);
+  if (!res.success) { if (st) { st.style.color = '#FF5A6E'; st.textContent = '⚠ ' + (res.message || 'Erro no upload'); } return; }
+  // Abre o modal já com o arquivo no lugar: o tipo e a oportunidade ainda são
+  // escolha de quem soltou, e chutar "Outro" encheria a lista de avulsos.
+  crmDocAnexarModal(clienteId);
+  if ($('m_cd_link')) $('m_cd_link').value = res.url;
+  if ($('m_cd_st')) { $('m_cd_st').style.color = '#34C77C'; $('m_cd_st').textContent = `✓ ${res.fileName} enviado — escolha o tipo e anexe`; }
+  _crmDocNomeSolto = res.fileName;
+  crmDocPreverVersao(clienteId);
+}
+let _crmDocNomeSolto = '';
+
+/* ---------- anexo automático da proposta ----------
+   Proposta gerada pelo próprio sistema não deveria exigir upload manual: quem
+   acabou de liberar o PDF já disse tudo o que o anexo precisa saber. */
+async function crmDocAnexarProposta(blob, nomeArquivo, nomeCliente, quoteId){
+  try {
+    const cli = crmClientePorNome(nomeCliente);
+    if (!cli) return { ok: false, motivo: `cliente "${nomeCliente}" não está no CRM` };
+    if (!crmDocPodeAnexar(cli)) return { ok: false, motivo: 'sem permissão para anexar neste cliente' };
+    const oport = quoteId ? (DB.crmOps || []).find(o => o && o.quoteId === quoteId) : null;
+    const file = new File([blob], nomeArquivo, { type: 'application/pdf' });
+    const res = await uploadFileUniversal(file);
+    if (!res.success) return { ok: false, motivo: res.message || 'falha no upload' };
+    const d = crmDocCriar({ clienteId: cli._id, oportunidadeId: oport ? oport._id : '',
+                            tipo: 'Proposta', nome: nomeArquivo, link: res.url,
+                            obs: 'Gerada pelo sistema', origem: 'proposta-automatica' });
+    if (!d) return { ok: false, motivo: 'documento não criado' };
+    saveDB(); renderCrm();
+    return { ok: true, doc: d, cliente: cli, oport };
+  } catch (e) {
+    console.error('Anexo automático da proposta:', e);
+    return { ok: false, motivo: e.message || 'erro inesperado' };
+  }
+}
+/* Casa o nome digitado na cotação com o cadastro do CRM. É o mesmo critério
+   que a aba já usa para sugerir oportunidade a partir de cotação. */
+function crmClientePorNome(nome){
+  const alvo = nrm(nome);
+  if (!alvo) return null;
+  return (DB.crm || []).find(c => c && [nrm(c.empresa), nrm(c.nome)].filter(Boolean)
+    .some(n => n === alvo || n.includes(alvo) || alvo.includes(n))) || null;
+}
+
 function crmSalvarCliente(editId){
   const nome=V('m_cli_nome').trim(), empresa=V('m_cli_emp').trim();
   if(!nome && !empresa){ toast('⚠ Informe o nome do cliente ou a empresa'); return; }
@@ -8842,6 +9297,20 @@ async function gerarPropostaPDF(){
     const nome='Proposta_WindGate_'+(cliente.replace(/[^\w\dÀ-ú]+/g,'_')||'Cliente')+(V('opNum')?'_'+V('opNum'):'')+'.pdf';
     doc.save(nome);
     toast('📄 Proposta gerada no padrão WindGate ✓');
+
+    /* Proposta gerada pelo próprio sistema não deveria exigir upload manual:
+       quem acabou de liberar o PDF já disse o cliente e a cotação. Anexa ao
+       cliente no CRM, com a versão incrementada — e falha em silêncio no toast,
+       nunca derrubando a geração do PDF, que é o que a pessoa pediu. */
+    try {
+      const r = await crmDocAnexarProposta(doc.output('blob'), nome, cliente, state.id);
+      if (r && r.ok) {
+        toast(`📎 Anexada em <b>${esc(r.cliente.empresa||r.cliente.nome)}</b> como Proposta <b>v${r.doc.versao}</b>`
+          + (r.oport?` · ${esc(r.oport.titulo||'')}`:' · sem oportunidade vinculada') + ' ✓');
+      } else if (r) {
+        toast(`📄 PDF gerado. Não anexei no CRM: ${esc(r.motivo)} — dá para anexar à mão no 📎 do cliente.`);
+      }
+    } catch(e){ console.warn('Anexo automático da proposta falhou:', e); }
   }catch(e){ console.error(e); toast('⚠ Erro ao gerar PDF — abrindo versão de impressão.'); gerarPropostaPrint(); }
 }
 

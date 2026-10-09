@@ -104,7 +104,17 @@ function carregarApp(){
     location: { href: 'http://localhost/', origin: 'http://localhost', hostname: 'localhost', protocol: 'http:' },
     navigator: { userAgent: 'node', clipboard: { writeText: async () => {} } },
     alert(){}, confirm(){ return true; }, prompt(){ return null; },
-    Blob: function(){}, URL: { createObjectURL(){ return ''; }, revokeObjectURL(){} },
+    /* `Blob` e `File` são o que o anexo automático da proposta usa para
+       embalar o PDF antes do upload; sem `name` e `size` o código que confere
+       formato e tamanho não tem o que ler. */
+    Blob: function(partes){ this.partes = partes || []; this.size = (partes || []).join('').length; },
+    File: function(partes, nome, opts){
+      this.partes = partes || []; this.name = nome || 'arquivo';
+      this.size = (partes || []).join('').length; this.type = (opts || {}).type || '';
+    },
+    URL: { createObjectURL(){ return ''; }, revokeObjectURL(){} },
+    // Abrir aba é efeito de navegador; o teste só precisa saber que foi pedido.
+    open(url){ ctx._abriu = url; return null; },
     FormData: function(){},
     XMLHttpRequest: function(){},
     performance: { now: () => Date.now() },
