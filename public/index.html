@@ -1274,25 +1274,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('proxMes')">Próximo Mês ↗</button>
       <button class="btn btn-ghost btn-sm" onclick="setFinPeriod('todos')">Todos</button>
       <button class="btn btn-ghost btn-sm" id="finSeriesBtn" style="display:none" onclick="finSeriesModal()" title="O modelo de cada despesa fixa: renovar, encerrar e conferir as ocorrências">📌 Séries fixas</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirRecuperacaoStorage()" title="Reencontra no Supabase Storage os arquivos já enviados que ficaram sem registro na aba Documentos">📥 Recuperar do Supabase</button>
       <button class="btn btn-ghost" onclick="openTransfModal()">⇄ Transferência entre empresas</button>
       <button class="btn btn-mag" onclick="openLancModal()">+ Novo Lançamento</button>
     </div>
   </div>
 
-  <!-- Planilha de custos geral da empresa (Google Sheets embutido) -->
-  <div class="card">
-    <h2>📊 Planilha de custos <span class="spacer"></span>
-      <button class="btn btn-ghost btn-sm" onclick="togglePlanilhaGeral()">⚙️ Link</button>
-      <button class="btn btn-ghost btn-sm" onclick="abrirRecuperacaoStorage()">📥 Recuperar do Supabase</button>
-    </h2>
-    <div id="planilhaGeralBox" style="display:none" class="frow">
-      <div style="grid-column:span 3"><label>Link do Google Sheets</label>
-        <input id="planilhaGeralUrl" placeholder="https://docs.google.com/spreadsheets/d/…" onchange="salvarPlanilhaGeral(this.value)">
-        <p class="note" style="margin-top:6px">A planilha precisa estar compartilhada (“qualquer pessoa com o link”) para aparecer aqui.</p>
-      </div>
-    </div>
-    <div id="planilhaGeralView"></div>
-  </div>
 
   <!-- Dashboard de Cards Métricos (Solicitados pelo Usuário) -->
   <div class="fin-dash-grid" id="finDashGrid"></div>
@@ -3345,27 +3332,12 @@ function openOpDocsModal(op){
     <div class="modal-actions" style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Fechar</button></div>`);
 }
 
-/* Planilha de custos geral — a do financeiro, uma para a empresa toda. */
-function togglePlanilhaGeral(){
-  const b=$('planilhaGeralBox'); if(!b) return;
-  b.style.display = b.style.display==='none' ? 'grid' : 'none';
-}
-function salvarPlanilhaGeral(url){
-  DB.settings=DB.settings||{};
-  DB.settings.planilhaCustosUrl=String(url||'').trim();
-  saveDB(); renderPlanilhaGeral(); toast('Planilha de custos vinculada ✓');
-}
-function renderPlanilhaGeral(){
-  const box=$('planilhaGeralView'); if(!box) return;
-  const url=(DB.settings&&DB.settings.planilhaCustosUrl)||'';
-  const inp=$('planilhaGeralUrl'); if(inp && !inp.value) inp.value=url;
-  if(!url){ box.innerHTML='<p class="note">Nenhuma planilha vinculada. Clique em <b>⚙️ Link</b> e cole o endereço do Google Sheets.</p>'; return; }
-  const emb=urlPlanilhaEmbed(url);
-  box.innerHTML = emb
-    ? `<iframe src="${esc(emb)}" style="width:100%;height:560px;border:1px solid #23304F;border-radius:8px;background:#fff"></iframe>
-       <p class="note" style="margin-top:6px"><a href="${esc(url)}" target="_blank" style="color:#7FA6FF">abrir no Google Sheets ↗</a></p>`
-    : `<p class="note">⚠ O link informado não é uma planilha do Google Sheets.</p>`;
-}
+/* A planilha de custos geral saiu da aba Financeiro: o que a aba responde hoje
+   vem dos lançamentos, e a planilha embutida era uma segunda versão da mesma
+   verdade, atualizada à mão. O endereço dela continua gravado em
+   `DB.settings.planilhaCustosUrl` — nada foi apagado, e religar é só devolver
+   o card.
+   A planilha POR OPERAÇÃO continua viva, no painel de Documentos de cada uma. */
 
 /* Google Sheets só embute pela URL de preview; a de edição é bloqueada. */
 function urlPlanilhaEmbed(url){
@@ -4768,7 +4740,6 @@ function finPassaNoFiltro(l, f){
 
 function renderFin(){
   if(!USER.fin){ return; }
-  renderPlanilhaGeral();
   fillOpSelect('finFilter', true);
   fillFinSerieSelect();
   renderFinSeries();
