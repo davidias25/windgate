@@ -257,6 +257,31 @@ function secao(t){ console.log(`\n--- ${t} ---`); }
       assert(f.dentroDoRaio === false, `★ e o de São Paulo sai "fora" (${f.distancia} m)`);
     }
 
+    secao('A cerca configurada é devolvida para a tela mostrar');
+    {
+      /* O modal abria sempre em branco porque nunca lia a configuração de
+         volta. Quem salvava e reabria via campos vazios e concluía que nada
+         tinha gravado — a tela dizia o contrário do banco. */
+      const { token } = await entrar('samir');
+      const r = await req('GET', '/api/ponto', { token });
+      assert(r.json.config && typeof r.json.config.lat === 'number',
+        '★ GET /api/ponto devolve a configuração junto, para a tela preencher os campos');
+      assert(r.json.config.raio === 150 && r.json.config.rotulo === 'Escritório Maceió',
+        `★ com raio e nome: ${r.json.config.raio} m · ${r.json.config.rotulo}`);
+
+      // Reconfigurar substitui, não acumula.
+      await req('POST', '/api/ponto/config', { token,
+        corpo: { lat: -3.76832, lon: -38.486016, raio: 200, rotulo: 'Escritório Fortaleza' } });
+      const r2 = await req('GET', '/api/ponto', { token });
+      assert(r2.json.config.raio === 200 && r2.json.config.rotulo === 'Escritório Fortaleza',
+        '★ alterar a cerca substitui a anterior');
+
+      // Registro anterior à cerca fica como estava: ponto não se reescreve.
+      const antigos = r2.json.registros.filter(x => x.dentroDoRaio === null && !x.semLocalizacao);
+      assert(antigos.length >= 1,
+        '★ registros batidos antes da cerca continuam sem classificação — não são reescritos');
+    }
+
     secao('O ponto não encosta no banco central');
     {
       const { token } = await entrar('samir');

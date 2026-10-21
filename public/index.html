@@ -7420,16 +7420,31 @@ async function pontoAbrirRelatorio(){
       box.innerHTML = '<div class="card"><p class="note" style="color:var(--red)">403 — acesso restrito à diretoria.</p></div>';
       return;
     }
-    const regs = (await r1.json()).registros || [];
+    const j1 = await r1.json();
+    const regs = j1.registros || [];
     const dias = (await r2.json()).dias || [];
-    box.innerHTML = pontoRelatorioHtml(regs, dias, de, ate);
+    box.innerHTML = pontoRelatorioHtml(regs, dias, de, ate, j1.config || {});
   }catch(e){
     box.innerHTML = '<div class="card"><p class="note" style="color:var(--red)">⚠ Não consegui carregar os registros.</p></div>';
   }
 }
 
-function pontoRelatorioHtml(regs, dias, de, ate){
+function pontoRelatorioHtml(regs, dias, de, ate, cfg){
+  cfg = cfg || {};
   const nome = k => ((DB.users||{})[k]||{}).nome || k;
+  const temCerca = typeof cfg.lat === 'number' && typeof cfg.lon === 'number';
+  /* O escritório configurado precisa aparecer FORA do modal: sem isto, a
+     única forma de saber se havia cerca era abrir a configuração. */
+  const faixaCerca = temCerca
+    ? `<div class="note" style="margin-bottom:10px">
+         📍 <b>${esc(cfg.rotulo || 'Escritório')}</b> · raio de <b>${esc(String(cfg.raio))} m</b> ·
+         <a href="https://www.google.com/maps?q=${cfg.lat},${cfg.lon}" target="_blank" style="color:#7FA6FF">ver no mapa ↗</a>
+         <button class="btn btn-ghost btn-sm" style="margin-left:8px;padding:1px 7px" onclick="pontoConfigModal()">alterar</button>
+       </div>`
+    : `<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F;margin-bottom:10px">
+         Sem local do escritório cadastrado — os registros saem sem a marcação de <b>dentro</b> ou <b>fora</b>.
+         <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="pontoConfigModal()">cadastrar agora</button>
+       </div>`;
   const alerta = r => r.semLocalizacao ? 'sem localização'
     : (r.precisao != null && r.precisao > 100 ? `precisão ${r.precisao} m` : '')
       + (r.dentroDoRaio === false ? (r.precisao > 100 ? ' · ' : '') + 'fora do local' : '');
@@ -7444,7 +7459,12 @@ function pontoRelatorioHtml(regs, dias, de, ate){
       <td>${r.semLocalizacao
             ? `<span class="pill draft" title="${esc(r.motivoSemLocal||'')}">⚠ sem localização</span>`
             : `<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" style="color:#7FA6FF">📍 mapa</a>`}</td>
-      <td class="note">${r.precisao!=null?`±${r.precisao} m`:'—'}${r.dentroDoRaio!=null?` · ${r.dentroDoRaio?'dentro':'<b style="color:var(--amber)">fora</b>'}`:''}</td>
+      <td class="note">${r.precisao!=null?`±${r.precisao} m`:'—'}${
+        r.dentroDoRaio===true ? ` · <b style="color:#34C77C">dentro</b>${r.distancia!=null?` (${r.distancia} m)`:''}`
+        : r.dentroDoRaio===false ? ` · <b style="color:var(--amber)">fora</b>${r.distancia!=null?` (${r.distancia} m)`:''}`
+        // Registro anterior ao cadastro do escritório não tem como ser
+        // classificado, e dizer isso é melhor que deixar a coluna muda.
+        : (temCerca && !r.semLocalizacao ? ' · <span class="note">antes da cerca</span>' : '')}</td>
       <td class="note">${esc(r.justificativa||'')}</td>
     </tr>`;
   }).join('');
@@ -7462,6 +7482,7 @@ function pontoRelatorioHtml(regs, dias, de, ate){
   return `<div class="card">
       <h2>Resumo por dia <span class="spacer"></span>
         <button class="btn btn-ghost btn-sm" onclick="pontoExportar('${de}','${ate}')">⤓ Exportar CSV</button></h2>
+      ${faixaCerca}
       <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Colaborador</th><th>1ª entrada</th><th>Última saída</th><th class="r">Horas</th><th>Atenção</th></tr></thead>
       <tbody>${resumo||'<tr><td colspan="6" class="note">Nenhum registro no período.</td></tr>'}</tbody></table></div>
     </div>
@@ -7490,29 +7511,85 @@ async function pontoExportar(de, ate){
   }catch(e){ toast('⚠ Falha ao exportar'); }
 }
 
-function pontoConfigModal(){
+/* O modal abria em branco e não mostrava o que já estava gravado: quem salvava
+   e reabria via campos vazios e concluía que nada tinha sido salvo. Agora ele
+   busca a configuração atual antes de desenhar. */
+async function pontoConfigModal(){
+  let cfg = {};
+  try{
+    const r = await apiFetch('/api/ponto');
+    if(r.status === 403){ toast('⚠ Acesso restrito à diretoria'); return; }
+    if(r.ok) cfg = (await r.json()).config || {};
+  }catch(e){ toast('⚠ Não consegui ler a configuração atual'); }
+
+  const temLocal = typeof cfg.lat === 'number' && typeof cfg.lon === 'number';
   openModal(`<h3>📍 Escritório e <span>raio</span></h3>
-    <p class="note" style="margin-bottom:10px">Com o endereço cadastrado, cada registro passa a sair marcado como <b>dentro</b> ou <b>fora</b> do local. Sinaliza, não bloqueia.</p>
+    <p class="note" style="margin-bottom:10px">
+      Para que serve: com o local cadastrado, cada ponto batido passa a sair marcado como
+      <b>dentro</b> ou <b>fora</b> do escritório, com a distância em metros. É sinalização —
+      não impede ninguém de bater o ponto de onde estiver.
+    </p>
+
+    ${temLocal ? `<div class="rulebox" style="border-color:#34C77C66;background:#34C77C0F;margin-bottom:12px">
+        ✅ <b>Configurado:</b> ${esc(cfg.rotulo || 'Escritório')} — raio de <b>${esc(String(cfg.raio || 150))} m</b>
+        <div class="note" style="margin-top:4px">
+          ${cfg.lat.toFixed(6)}, ${cfg.lon.toFixed(6)} ·
+          <a href="https://www.google.com/maps?q=${cfg.lat},${cfg.lon}" target="_blank" style="color:#7FA6FF">ver no mapa ↗</a>
+        </div>
+      </div>`
+      : `<div class="rulebox" style="border-color:#F0B42966;background:#F0B4290F;margin-bottom:12px">
+        Ainda não há local cadastrado — por isso os registros saem sem a marcação de dentro/fora.
+      </div>`}
+
     <div class="frow">
-      <div><label>Latitude</label><input id="m_pt_lat" type="number" step="0.000001" placeholder="-9.665800"></div>
-      <div><label>Longitude</label><input id="m_pt_lon" type="number" step="0.000001" placeholder="-35.735300"></div>
-      <div><label>Raio (metros)</label><input id="m_pt_raio" type="number" min="10" step="10" value="150"></div>
+      <div><label>Latitude</label><input id="m_pt_lat" type="number" step="0.000001" value="${temLocal ? cfg.lat : ''}" placeholder="-3.768320"></div>
+      <div><label>Longitude</label><input id="m_pt_lon" type="number" step="0.000001" value="${temLocal ? cfg.lon : ''}" placeholder="-38.486016"></div>
+      <div><label>Raio (metros)</label><input id="m_pt_raio" type="number" min="10" step="10" value="${esc(String(cfg.raio || 150))}"></div>
     </div>
-    <div class="frow"><div style="grid-column:span 3"><label>Nome do local</label><input id="m_pt_rot" placeholder="Escritório Maceió"></div></div>
-    <p class="note" style="margin-top:8px">A latitude e a longitude saem do Google Maps: clique com o botão direito no ponto e copie os números.</p>
+    <div class="frow"><div style="grid-column:span 3"><label>Nome do local</label>
+      <input id="m_pt_rot" value="${esc(cfg.rotulo || '')}" placeholder="Escritório Fortaleza"></div></div>
+
+    <div style="margin-top:8px">
+      <button class="btn btn-ghost btn-sm" onclick="pontoUsarMinhaLocal()">📍 Usar minha localização atual</button>
+      <span id="m_pt_st" class="note" style="margin-left:8px"></span>
+    </div>
+    <p class="note" style="margin-top:8px">
+      Ou copie do Google Maps: botão direito no ponto do mapa e clique nos números que aparecem.
+      <br>A marcação vale para os pontos batidos <b>a partir de agora</b> — os anteriores ficam como estão, porque registro de ponto não se reescreve.
+    </p>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-mag" onclick="pontoSalvarConfig()">Salvar</button>
     </div>`);
 }
+
+/* Copiar coordenada do Google Maps é onde a pessoa erra. Estando no escritório,
+   o próprio aparelho já sabe onde fica. */
+async function pontoUsarMinhaLocal(){
+  const st = $('m_pt_st');
+  if(st){ st.style.color='#7FA6FF'; st.textContent='Obtendo localização…'; }
+  const pos = await pontoPosicao();
+  if(pos.erro){ if(st){ st.style.color='#FF5A6E'; st.textContent='⚠ '+pos.erro; } return; }
+  $('m_pt_lat').value = pos.lat.toFixed(6);
+  $('m_pt_lon').value = pos.lon.toFixed(6);
+  if(st){ st.style.color='#34C77C'; st.textContent=`✓ posição obtida (±${Math.round(pos.precisao)} m)`; }
+}
+
 async function pontoSalvarConfig(){
+  const lat = N('m_pt_lat'), lon = N('m_pt_lon');
+  if(!lat || !lon){ toast('⚠ Informe a latitude e a longitude — ou use "minha localização atual"'); return; }
   try{
     const r = await apiFetch('/api/ponto/config', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ lat:N('m_pt_lat'), lon:N('m_pt_lon'), raio:N('m_pt_raio'), rotulo:V('m_pt_rot') }) });
+      body: JSON.stringify({ lat, lon, raio:N('m_pt_raio'), rotulo:V('m_pt_rot') }) });
     if(r.status === 403){ toast('⚠ Acesso restrito à diretoria'); return; }
     if(!r.ok) throw new Error();
-    closeModal(); toast('Local do escritório salvo ✓'); pontoAbrirRelatorio();
+    const j = await r.json();
+    closeModal();
+    toast(`📍 <b>${esc(j.config.rotulo||'Escritório')}</b> salvo — raio de ${esc(String(j.config.raio))} m ✓`);
+    // Abre o relatório para a marcação aparecer na hora, em vez de só na
+    // próxima vez que alguém pensar em conferir.
+    pontoAbrirRelatorio();
   }catch(e){ toast('⚠ Falha ao salvar'); }
 }
 
