@@ -804,6 +804,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
   <div class="empty" id="opsEmpty" style="display:none">Nenhuma operação ativa. Clique em <b>+ Nova operação</b> para começar.</div>
 </section>
 
+<!-- ========== PONTO ========== -->
+<section class="view" id="view-ponto">
+  <div class="view-head">
+    <div><h1>Pon<span>to</span></h1><p>Registro de presença. A localização é pedida só no momento do clique — não há rastreamento contínuo.</p></div>
+  </div>
+  <div id="pontoBody"></div>
+</section>
+
 <!-- ========== COTAÇÕES ========== -->
 <section class="view" id="view-cotacoes">
   <div class="view-head">
@@ -1668,6 +1676,31 @@ const SUPABASE_CONFIG = {
   bucket: 'windgate-docs'
 };
 
+/* Token da sessão, só na memória da aba. Em localStorage ele sobreviveria ao
+   fechar o navegador e ficaria para quem pegasse o aparelho depois; a sessão
+   já é curta de propósito. */
+let WG_TOKEN = null;
+
+/* Toda chamada à API passa por aqui para levar o token. Antes não havia o que
+   levar: o PIN era conferido no navegador e o servidor não perguntava nada —
+   `/api/db` devolvia o banco inteiro para qualquer requisição. */
+async function apiFetch(path, opts){
+  opts = Object.assign({}, opts);
+  opts.headers = Object.assign({}, opts.headers,
+    WG_TOKEN ? { Authorization: 'Bearer ' + WG_TOKEN } : {});
+  const r = await fetch(getApiUrl(path), opts);
+  // Sessão vencida no meio do uso: avisa e devolve ao login, em vez de deixar
+  // a tela falhando em silêncio a cada sincronização.
+  if (r.status === 401 && WG_TOKEN) { WG_TOKEN = null; sessaoExpirou(); }
+  return r;
+}
+function sessaoExpirou(){
+  if (sessaoExpirou._avisou) return;
+  sessaoExpirou._avisou = true;
+  try { toast('⚠ Sessão expirada — entre de novo'); } catch(e){}
+  setTimeout(() => location.reload(), 1800);
+}
+
 function getApiUrl(path) {
   if (!path) return '';
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
@@ -1683,8 +1716,8 @@ async function uploadFileUniversal(file) {
   try {
     const fd = new FormData();
     fd.append('arquivo', file);
-    const backendUrl = getApiUrl('/api/upload');
-    const res = await fetch(backendUrl, { method: 'POST', body: fd });
+    // Pelo apiFetch para levar o token: a rota de upload deixou de ser aberta.
+    const res = await apiFetch('/api/upload', { method: 'POST', body: fd });
     if (res.ok) {
       const json = await res.json();
       if (json.success && (json.finalUrl || json.supabaseUrl || json.localUrl)) {
@@ -1851,7 +1884,7 @@ function saveDB(){
     const ok=await store.set(DBKEY, payload);
     if(!ok) console.warn('persistência indisponível — usando memória');
     try {
-      await fetch(getApiUrl('/api/db'), {
+      await apiFetch('/api/db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload
@@ -1890,7 +1923,7 @@ function aplicarSincronizacao(serverDB){
 
 async function loadDB(){
   try {
-    const res = await fetch(getApiUrl('/api/db'));
+    const res = await apiFetch('/api/db');
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.db) {
@@ -1913,7 +1946,7 @@ setInterval(async ()=>{
   const modal = $('modalBg');
   if (modal && modal.classList.contains('show')) return;
   try {
-    const res = await fetch(getApiUrl('/api/db'));
+    const res = await apiFetch('/api/db');
     if (!res.ok) return;
     const json = await res.json();
     if (!json.success || !json.db) return;
@@ -2179,11 +2212,46 @@ function renderLogin(){
 }
 
 function cancelLogin(){ _pendingUser=null; $('pinArea').classList.remove('show'); }
-function tryLogin(){
-  const u=DB.users[_pendingUser];
-  if($('pinInput').value===u.pin){ USER={key:_pendingUser,...u}; enterApp(); }
-  else{ $('pinErr').textContent='PIN incorreto — tente novamente.'; $('pinInput').value=''; $('pinInput').focus(); }
+/* O PIN passa a ser conferido no SERVIDOR, que devolve o token da sessão.
+   Enquanto era conferido aqui, o acesso era decoração: bastava abrir o
+   DevTools, ou chamar /api/db direto, para ver tudo sem senha nenhuma. */
+async function tryLogin(){
+  const pin=$('pinInput').value, erro=$('pinErr');
+  erro.textContent='Entrando…';
+  try{
+    const r=await fetch(getApiUrl('/api/auth/login'), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({usuario:_pendingUser, pin})
+    });
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok || !j.success){
+      erro.textContent=j.message||'PIN incorreto — tente novamente.';
+      $('pinInput').value=''; $('pinInput').focus(); return;
+    }
+    WG_TOKEN = j.token || null;
+    _ehDiretoria = !!j.ehDiretoria;
+    erro.textContent='Carregando…';
+
+    /* Só agora o banco pode ser pedido: é o token que abre a porta. */
+    try { await loadDB(); } catch(e){ console.error('Aviso ao carregar banco:', e); }
+    ensureDBStructure();
+    try { migrateDB(); } catch(e){ console.error('Aviso na migração:', e); }
+
+    erro.textContent='';
+    const u=DB.users[_pendingUser]||{};
+    USER={key:_pendingUser,...u};
+    // Sem segredo configurado o servidor avisa que a autenticação está
+    // desligada; entra, mas o aviso tem de aparecer em vez de ficar no log.
+    if(j.semAuth) setTimeout(()=>toast('⚠ Servidor sem WINDGATE_DB_SECRET — autenticação desligada'),600);
+    enterApp();
+  }catch(e){
+    // Servidor fora do ar: antes dava para entrar porque o PIN era local.
+    // Agora não dá, e dizer isso é melhor do que um "PIN incorreto" falso.
+    erro.textContent='Servidor indisponível — sem ele não é possível entrar.';
+    $('pinInput').value='';
+  }
 }
+let _ehDiretoria = false;
 function logout(){ USER=null; $('app').style.display='none'; $('loginScreen').style.display='flex'; cancelLogin(); }
 
 const TABS=[
@@ -2198,10 +2266,15 @@ const TABS=[
   {k:'agenda',   ic:'📅', l:'Agenda'},
   {k:'gestao',   ic:'📊', l:'Gestão'},
   {k:'fin',      ic:'💰', l:'Financeiro', lock:true},
+  {k:'ponto',    ic:'🕐', l:'Ponto'},
   {k:'org',      ic:'🏢', l:'Organograma'},
   {k:'config',   ic:'⚙️', l:'Config'}
 ];
 function enterApp(){
+  /* A aba Ponto é de todo mundo: quem bate ponto precisa dela. O que muda por
+     pessoa é o que ela mostra — e isso quem decide é o servidor, não a lista
+     de abas gravada no usuário. */
+  if(USER && Array.isArray(USER.tabs) && !USER.tabs.includes('ponto')) USER.tabs=[...USER.tabs,'ponto'];
   $('loginScreen').style.display='none'; $('app').style.display='block';
   const nav=$('tabsNav'); nav.innerHTML='';
   TABS.filter(t=>USER.tabs.includes(t.k)).forEach((t,i)=>{
@@ -2279,6 +2352,7 @@ function showTab(k){
   if(k==='agenda') renderAgenda();
   if(k==='gestao') renderGestao();
   if(k==='mapa') renderMapa();
+  if(k==='ponto') renderPonto();
   updateNotifs();
 }
 
@@ -2992,7 +3066,7 @@ async function importarOperacoesClickUp(silencioso){
   const btn=$('btnSyncClickUp'), aviso=$('clickupAviso');
   if(btn){ btn.disabled=true; btn.textContent='🔄 Sincronizando…'; }
   try{
-    const res=await fetch(getApiUrl('/api/integrations/clickup/operacoes'));
+    const res=await apiFetch('/api/integrations/clickup/operacoes');
     const j=await res.json();
 
     if(j.erro){
@@ -3042,7 +3116,7 @@ async function importarOperacoesClickUp(silencioso){
    salvamento atualize a mesma tarefa em vez de criar uma duplicada. */
 function sincronizarClickUp(op){
   if(!op) return;
-  fetch(getApiUrl('/api/integrations/clickup/tarefa'), {
+  apiFetch('/api/integrations/clickup/tarefa', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(op)
@@ -3383,7 +3457,7 @@ async function abrirRecuperacaoStorage(){
   openModal('<h3>📥 Recuperar do <span>Supabase</span></h3><p class="note">Consultando o Storage…</p>');
   let j;
   try{
-    const res=await fetch(getApiUrl('/api/storage/arquivos'));
+    const res=await apiFetch('/api/storage/arquivos');
     j=await res.json();
   }catch(e){
     openModal(`<h3>📥 Recuperar do <span>Supabase</span></h3>
@@ -7137,6 +7211,311 @@ function updateNotifs(){
 function toggleBell(ev){ ev.stopPropagation(); updateNotifs(); $('bellPanel').classList.toggle('show'); }
 document.addEventListener('click',()=>{ const p=$('bellPanel'); if(p) p.classList.remove('show'); });
 
+
+/* ============================================================
+   PONTO
+   ============================================================
+   O colaborador vê só o botão e a confirmação do horário. A listagem, os
+   mapas e os relatórios são do Samir, e quem garante isso é o servidor: as
+   rotas de consulta devolvem 403 para qualquer outro. Esta tela não guarda
+   registro nenhum em memória — tudo que ela mostra veio de uma resposta
+   autorizada na hora. */
+
+/* A sequência do dia. Cada tipo sabe o que oferecer depois, e "outro" existe
+   para o dia que não cabe no padrão — quem não almoça ficaria travado. */
+const PONTO_FLUXO = {
+  null:      { k:'entrada', l:'Registrar entrada',   c:'#34C77C' },
+  saida:     { k:'entrada', l:'Registrar entrada',   c:'#34C77C' },
+  entrada:   { k:'almoco',  l:'Saída para almoço',   c:'#F0B429' },
+  almoco:    { k:'volta',   l:'Volta do almoço',     c:'#22B8CF' },
+  volta:     { k:'saida',   l:'Registrar saída',     c:'#FF5A6E' },
+  ajuste:    { k:'entrada', l:'Registrar entrada',   c:'#34C77C' },
+  outro:     { k:'entrada', l:'Registrar entrada',   c:'#34C77C' }
+};
+const PONTO_ROTULO = { entrada:'Entrada', almoco:'Saída p/ almoço', volta:'Volta do almoço',
+                       saida:'Saída', outro:'Registro avulso', ajuste:'Ajuste' };
+
+let _pontoEstado = null, _pontoOcupado = false;
+
+async function renderPonto(){
+  if(!USER) return;
+  const alvo = $('pontoBody'); if(!alvo) return;
+  try{
+    const r = await apiFetch('/api/ponto/meu-estado');
+    if(!r.ok) throw new Error('estado indisponível');
+    _pontoEstado = await r.json();
+  }catch(e){
+    alvo.innerHTML = `<div class="card"><p class="note" style="color:var(--red)">
+      ⚠ Não consegui falar com o servidor. O ponto só registra com o servidor no ar — a hora é dele, não do aparelho.</p></div>`;
+    return;
+  }
+
+  // Aviso de privacidade com aceite, uma vez por pessoa.
+  if(!_pontoEstado.cienciaEm){ alvo.innerHTML = pontoCienciaHtml(); return; }
+
+  const prox = PONTO_FLUXO[_pontoEstado.ultimoTipo] || PONTO_FLUXO[null];
+  const agora = new Date();
+  const dataBR = agora.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+
+  alvo.innerHTML = `
+    <div class="card" style="text-align:center;max-width:520px;margin:0 auto">
+      <div class="note" style="font-size:13px">${esc(dataBR)}</div>
+      <h2 style="justify-content:center;margin:6px 0 2px">${esc(USER.nome)}</h2>
+      <div id="pontoRelogio" style="font-size:40px;font-weight:800;letter-spacing:.02em;color:var(--mag)">--:--</div>
+      <p class="note" style="margin-bottom:14px">
+        ${_pontoEstado.ultimaHora
+          ? `Último registro de hoje: <b>${esc(PONTO_ROTULO[_pontoEstado.ultimoTipo]||_pontoEstado.ultimoTipo)}</b> às <b>${esc(_pontoEstado.ultimaHora)}</b>`
+          : 'Nenhum registro hoje.'}
+      </p>
+
+      <button id="pontoBtn" class="btn btn-mag" style="width:100%;padding:18px;font-size:16px;font-weight:800;background:${prox.c};border-color:${prox.c}"
+              onclick="pontoRegistrar('${prox.k}')">${esc(prox.l)}</button>
+
+      <div id="pontoMsg" style="margin-top:12px;font-size:13px;line-height:1.7"></div>
+
+      <div style="margin-top:14px">
+        <button class="btn btn-ghost btn-sm" onclick="pontoRegistrar('outro')">outro registro</button>
+      </div>
+      <p class="note" style="margin-top:14px;line-height:1.6">
+        A localização é pedida só no momento do clique. Não há rastreamento contínuo.
+        ${_pontoEstado.ehDiretoria ? '' : 'Os registros são acessados somente pela diretoria.'}
+      </p>
+    </div>
+
+    ${_pontoEstado.ehDiretoria ? `
+    <div style="max-width:960px;margin:18px auto 0">
+      <button class="btn btn-ghost" onclick="pontoAbrirRelatorio()">📋 Ver registros da equipe</button>
+      <button class="btn btn-ghost" onclick="pontoConfigModal()">📍 Escritório e raio</button>
+    </div>
+    <div id="pontoRelatorio" style="max-width:960px;margin:12px auto 0"></div>` : ''}`;
+
+  pontoRelogio();
+}
+
+/* O relógio é do aparelho e serve só para a pessoa se situar. A hora que vale
+   é a que o servidor devolve no registro, e é ela que aparece na confirmação. */
+function pontoRelogio(){
+  const el = $('pontoRelogio'); if(!el) return;
+  const t = () => { const d=new Date();
+    el.textContent = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
+  t(); clearInterval(pontoRelogio._i); pontoRelogio._i = setInterval(t, 20000);
+}
+
+function pontoCienciaHtml(){
+  return `<div class="card" style="max-width:560px;margin:0 auto">
+    <h2>Antes de começar</h2>
+    <p style="font-size:13.5px;line-height:1.8;margin:10px 0">
+      A WindGate registra sua localização apenas no momento em que você bate o ponto,
+      para controle de jornada. Os dados são acessados somente pela diretoria.
+    </p>
+    <label class="chk-inline" style="justify-content:flex-start;margin-bottom:12px">
+      <input type="checkbox" id="pontoCienteChk"> <span>Li e estou ciente</span>
+    </label>
+    <button class="btn btn-mag" style="width:100%" onclick="pontoAceitarCiencia()">Continuar</button>
+  </div>`;
+}
+async function pontoAceitarCiencia(){
+  if(!$('pontoCienteChk') || !$('pontoCienteChk').checked){ toast('⚠ Marque "Li e estou ciente" para continuar'); return; }
+  try{
+    const r = await apiFetch('/api/ponto/ciencia', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    if(!r.ok) throw new Error();
+    toast('Ciência registrada ✓'); renderPonto();
+  }catch(e){ toast('⚠ Não consegui registrar a ciência — tente de novo'); }
+}
+
+/* Pede a posição UMA vez, no clique. Alta precisão, com teto de espera: sem
+   ele o GPS de celular em local fechado deixa a pessoa olhando para o botão. */
+function pontoPosicao(){
+  return new Promise(resolve => {
+    if(!navigator.geolocation) return resolve({ erro:'Este navegador não oferece localização' });
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat:p.coords.latitude, lon:p.coords.longitude, precisao:p.coords.accuracy }),
+      e => resolve({ erro: e.code===1 ? 'Permissão de localização negada'
+                        : e.code===3 ? 'Tempo esgotado ao buscar o GPS'
+                        : 'Falha ao obter a localização' }),
+      { enableHighAccuracy:true, timeout:12000, maximumAge:0 }
+    );
+  });
+}
+
+async function pontoRegistrar(tipo){
+  if(_pontoOcupado) return;
+  _pontoOcupado = true;
+  const btn = $('pontoBtn'), msg = $('pontoMsg');
+  const rotuloAntes = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Obtendo localização…'; }
+  if(msg) msg.innerHTML = '';
+
+  const pos = await pontoPosicao();
+
+  /* Localização negada ou falha: o ponto NÃO é gravado em silêncio. A pessoa
+     escolhe — e, se escolher seguir, o registro nasce marcado para o Samir. */
+  if(pos.erro){
+    if(btn){ btn.disabled=false; btn.textContent=rotuloAntes; }
+    _pontoOcupado = false;
+    if(msg) msg.innerHTML = `
+      <div class="rulebox" style="border-color:#FF5A6E66;background:#FF5A6E0F;text-align:left">
+        ⚠ <b>${esc(pos.erro)}.</b> O ponto não foi registrado.
+        <div class="note" style="margin-top:6px">Libere a localização nas permissões do navegador e tente de novo —
+        ou registre sem localização: o registro fica marcado e a diretoria vê a marcação.</div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-mag btn-sm" onclick="pontoRegistrar('${esc(tipo)}')">Tentar de novo</button>
+          <button class="btn btn-ghost btn-sm" onclick="pontoEnviar('${esc(tipo)}', null, ${JSON.stringify(pos.erro).replace(/"/g,'&quot;')})">Registrar sem localização</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if(btn) btn.textContent = 'Registrando…';
+  await pontoEnviar(tipo, pos, '');
+}
+
+async function pontoEnviar(tipo, pos, motivo){
+  _pontoOcupado = true;
+  const btn = $('pontoBtn'), msg = $('pontoMsg');
+  try{
+    const corpo = pos
+      ? { tipo, lat:pos.lat, lon:pos.lon, precisao:pos.precisao }
+      : { tipo, motivoSemLocal: motivo || 'Sem localização' };
+    const r = await apiFetch('/api/ponto', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
+    const j = await r.json().catch(()=>({}));
+
+    if(r.status === 409){
+      if(msg) msg.innerHTML = `<div class="note" style="color:var(--amber)">⚠ ${esc(j.message||'Registro repetido')}</div>`;
+      return;
+    }
+    if(!r.ok){ throw new Error(j.message || 'Falha ao registrar'); }
+
+    if(msg) msg.innerHTML = `
+      <div class="rulebox" style="border-color:#34C77C66;background:#34C77C0F">
+        ✅ <b>Ponto registrado às ${esc(j.hora)}</b> — ${esc(PONTO_ROTULO[j.tipo]||j.tipo)}
+        ${j.semLocalizacao ? '<div class="note" style="color:var(--amber);margin-top:4px">Registrado <b>sem localização</b> — a diretoria vê essa marcação.</div>' : ''}
+        ${pos && pos.precisao > 100 ? `<div class="note" style="margin-top:4px">Precisão de ${Math.round(pos.precisao)} m — o sinal estava fraco.</div>` : ''}
+      </div>`;
+    await renderPonto();
+    // O renderPonto refez a tela; devolve a confirmação para ela não sumir.
+    const novo = $('pontoMsg');
+    if(novo && msg) novo.innerHTML = msg.innerHTML;
+  }catch(e){
+    if(msg) msg.innerHTML = `<div class="note" style="color:var(--red)">⚠ ${esc(e.message||'Erro ao registrar')} — o ponto NÃO foi gravado.</div>`;
+  }finally{
+    _pontoOcupado = false;
+    if(btn) btn.disabled = false;
+  }
+}
+
+/* ---------- visão da diretoria ---------- */
+async function pontoAbrirRelatorio(){
+  const box = $('pontoRelatorio'); if(!box) return;
+  box.innerHTML = '<p class="note">Carregando…</p>';
+  const hoje = new Date(), ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const de = ini.toISOString().slice(0,10), ate = hoje.toISOString().slice(0,10);
+  try{
+    const [r1, r2] = await Promise.all([
+      apiFetch(`/api/ponto?de=${de}&ate=${ate}`),
+      apiFetch(`/api/ponto/resumo?de=${de}&ate=${ate}`)
+    ]);
+    if(r1.status === 403 || r2.status === 403){
+      box.innerHTML = '<div class="card"><p class="note" style="color:var(--red)">403 — acesso restrito à diretoria.</p></div>';
+      return;
+    }
+    const regs = (await r1.json()).registros || [];
+    const dias = (await r2.json()).dias || [];
+    box.innerHTML = pontoRelatorioHtml(regs, dias, de, ate);
+  }catch(e){
+    box.innerHTML = '<div class="card"><p class="note" style="color:var(--red)">⚠ Não consegui carregar os registros.</p></div>';
+  }
+}
+
+function pontoRelatorioHtml(regs, dias, de, ate){
+  const nome = k => ((DB.users||{})[k]||{}).nome || k;
+  const alerta = r => r.semLocalizacao ? 'sem localização'
+    : (r.precisao != null && r.precisao > 100 ? `precisão ${r.precisao} m` : '')
+      + (r.dentroDoRaio === false ? (r.precisao > 100 ? ' · ' : '') + 'fora do local' : '');
+
+  const linhas = regs.slice().sort((a,b)=>String(b.em).localeCompare(String(a.em))).map(r=>{
+    const av = alerta(r);
+    return `<tr${av?' style="background:#F0B4290D"':''}>
+      <td>${esc(String(r.data).split('-').reverse().join('/'))}</td>
+      <td><b>${esc(r.hora)}</b></td>
+      <td>${esc(nome(r.usuario))}</td>
+      <td><span class="pill ${r.tipo==='entrada'?'ok':r.tipo==='saida'?'red':'blue'}">${esc(PONTO_ROTULO[r.tipo]||r.tipo)}</span></td>
+      <td>${r.semLocalizacao
+            ? `<span class="pill draft" title="${esc(r.motivoSemLocal||'')}">⚠ sem localização</span>`
+            : `<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" style="color:#7FA6FF">📍 mapa</a>`}</td>
+      <td class="note">${r.precisao!=null?`±${r.precisao} m`:'—'}${r.dentroDoRaio!=null?` · ${r.dentroDoRaio?'dentro':'<b style="color:var(--amber)">fora</b>'}`:''}</td>
+      <td class="note">${esc(r.justificativa||'')}</td>
+    </tr>`;
+  }).join('');
+
+  const resumo = dias.map(d=>`<tr${d.incompleto?' style="background:#F0B4290D"':''}>
+      <td>${esc(String(d.data).split('-').reverse().join('/'))}</td>
+      <td>${esc(nome(d.usuario))}</td>
+      <td>${esc(d.primeira||'—')}</td><td>${esc(d.ultima||'—')}</td>
+      <td class="r num"><b>${(d.horas||0).toFixed(2).replace('.',',')}h</b></td>
+      <td>${d.incompleto?'<span class="pill draft">incompleto</span>':''}
+          ${d.semLocalizacao?`<span class="pill" style="background:#F0B42922;color:#F0B429">${d.semLocalizacao} sem local.</span>`:''}
+          ${d.fora?`<span class="pill red">${d.fora} fora</span>`:''}</td>
+    </tr>`).join('');
+
+  return `<div class="card">
+      <h2>Resumo por dia <span class="spacer"></span>
+        <button class="btn btn-ghost btn-sm" onclick="pontoExportar('${de}','${ate}')">⤓ Exportar CSV</button></h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Colaborador</th><th>1ª entrada</th><th>Última saída</th><th class="r">Horas</th><th>Atenção</th></tr></thead>
+      <tbody>${resumo||'<tr><td colspan="6" class="note">Nenhum registro no período.</td></tr>'}</tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Registros <span class="spacer"></span><span class="note">${regs.length} no período</span></h2>
+      <div style="overflow-x:auto;max-height:50vh"><table><thead><tr><th>Data</th><th>Hora</th><th>Colaborador</th><th>Tipo</th><th>Local</th><th>Precisão</th><th>Justificativa</th></tr></thead>
+      <tbody>${linhas||'<tr><td colspan="7" class="note">Nenhum registro.</td></tr>'}</tbody></table></div>
+      <p class="note" style="margin-top:8px">Registros não são editados nem apagados. Correção entra como <b>Ajuste</b>, com justificativa e autor.</p>
+    </div>`;
+}
+
+/* O CSV sai por uma rota protegida: o download precisa levar o token, então
+   vem como blob em vez de um link direto. */
+async function pontoExportar(de, ate){
+  try{
+    const r = await apiFetch(`/api/ponto/export.csv?de=${de}&ate=${ate}`);
+    if(r.status === 403){ toast('⚠ Acesso restrito à diretoria'); return; }
+    if(!r.ok) throw new Error();
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ponto_${de}_${ate}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    toast('CSV exportado ✓');
+  }catch(e){ toast('⚠ Falha ao exportar'); }
+}
+
+function pontoConfigModal(){
+  openModal(`<h3>📍 Escritório e <span>raio</span></h3>
+    <p class="note" style="margin-bottom:10px">Com o endereço cadastrado, cada registro passa a sair marcado como <b>dentro</b> ou <b>fora</b> do local. Sinaliza, não bloqueia.</p>
+    <div class="frow">
+      <div><label>Latitude</label><input id="m_pt_lat" type="number" step="0.000001" placeholder="-9.665800"></div>
+      <div><label>Longitude</label><input id="m_pt_lon" type="number" step="0.000001" placeholder="-35.735300"></div>
+      <div><label>Raio (metros)</label><input id="m_pt_raio" type="number" min="10" step="10" value="150"></div>
+    </div>
+    <div class="frow"><div style="grid-column:span 3"><label>Nome do local</label><input id="m_pt_rot" placeholder="Escritório Maceió"></div></div>
+    <p class="note" style="margin-top:8px">A latitude e a longitude saem do Google Maps: clique com o botão direito no ponto e copie os números.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-mag" onclick="pontoSalvarConfig()">Salvar</button>
+    </div>`);
+}
+async function pontoSalvarConfig(){
+  try{
+    const r = await apiFetch('/api/ponto/config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ lat:N('m_pt_lat'), lon:N('m_pt_lon'), raio:N('m_pt_raio'), rotulo:V('m_pt_rot') }) });
+    if(r.status === 403){ toast('⚠ Acesso restrito à diretoria'); return; }
+    if(!r.ok) throw new Error();
+    closeModal(); toast('Local do escritório salvo ✓'); pontoAbrirRelatorio();
+  }catch(e){ toast('⚠ Falha ao salvar'); }
+}
+
 /* ---------- GESTÃO DO MÊS ---------- */
 function gmKey(){ return V('gmMes')||new Date().toISOString().slice(0,7); }
 function gmData(){ const k=gmKey(); if(!DB.gestao[k]) DB.gestao[k]={gestor:'Samir',destaques:'',desafios:'',prox:'',metas:[]}; return DB.gestao[k]; }
@@ -7588,7 +7967,7 @@ function consultarTTCE(ncm){
   clearTimeout(_ttceT);
   _ttceT=setTimeout(async()=>{
     try{
-      const r=await fetch(getApiUrl(`/api/ncm/${ncm}/tratamento`));
+      const r=await apiFetch(`/api/ncm/${ncm}/tratamento`);
       const j=await r.json();
 
       // Sem certificado no servidor a consulta simplesmente não existe para o
@@ -7691,7 +8070,7 @@ function ncmAuto(i,raw){
       // Alíquotas oficiais (TEC + TIPI). Não sobrescrevem o que a equipe já
       // conferiu e salvou na biblioteca — essa continua tendo a última palavra.
       try{
-        const ra=await fetch(getApiUrl('/api/aliquotas/'+ncm));
+        const ra=await apiFetch('/api/aliquotas/'+ncm);
         const ja=await ra.json();
         if(ja.encontrado && getNCMAliquotas(ncm).origem!=='lib'){
           if(ja.ii!=null){ it.ii=ja.ii; if($('item_ii_'+i)) $('item_ii_'+i).value=ja.ii; }
@@ -9329,18 +9708,26 @@ function gerarPropostaPrint(){
    ============================================================ */
 let _cotaInit=false;
 window.addEventListener('DOMContentLoaded', async ()=>{
+  /* O banco deixou de ser público, então ele só é carregado DEPOIS do login —
+     antes disso não há token para pedi-lo. A tela de login precisa apenas da
+     lista de quem existe, que vem de uma rota com nome, papel e cor, sem PIN. */
+  DB = defaultDB();
   try {
-    await loadDB();
+    const r = await fetch(getApiUrl('/api/auth/usuarios'));
+    const j = await r.json();
+    if (j && j.success && Array.isArray(j.usuarios) && j.usuarios.length) {
+      const base = defaultDB().users;
+      const novos = {};
+      j.usuarios.forEach(u => {
+        novos[u.key] = Object.assign({ tabs: (base[u.key] || {}).tabs || ['painel'] },
+                                     base[u.key] || {}, { nome: u.nome, papel: u.papel, cor: u.cor });
+      });
+      DB.users = novos;
+    }
   } catch(e) {
-    console.error('Aviso ao carregar banco:', e);
-    DB = defaultDB();
+    console.warn('Lista de usuários indisponível — usando a padrão:', e.message);
   }
   ensureDBStructure();
-  try {
-    migrateDB();
-  } catch(e) {
-    console.error('Aviso na migração:', e);
-  }
   renderLogin();
 
   try {

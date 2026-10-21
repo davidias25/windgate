@@ -13,6 +13,15 @@ process.env.WINDGATE_DB_FILE = TEST_DB_FILE;
 // testada; só o envio para a nuvem fica desligado.
 process.env.SUPABASE_DISABLED = '1';
 
+/* O banco central deixou de ser público: a suíte precisa de um usuário para
+   entrar. Semeia o arquivo temporário ANTES de carregar o servidor, porque é
+   dele que o login lê o PIN. */
+const PIN_TESTE = '9137';
+fs.writeFileSync(TEST_DB_FILE, JSON.stringify({
+  users: { samir: { nome: 'Samir (teste)', pin: PIN_TESTE, fin: true, tabs: ['painel', 'fin'] } },
+  ops: [], docs: [], fin: [], settings: { schema: 15 }, _removidos: {}
+}));
+
 const app = require('../src/server');
 const { criarTarefaOperacao, operacaoDaTarefa, statusInterno } = require('../src/integrations/clickup.service');
 const { mesclarDB } = require('../src/services/db-merge.service');
@@ -66,14 +75,32 @@ async function runTests() {
 
     // 1.8. Testar API de Banco de Dados Centralizado (Sincronização Multi-usuário)
     console.log('\n--- Testando Central DB API (Sincronização Multi-usuário) ---');
-    const resDbGet = await fetch(`${baseUrl}/api/db`);
+    /* O banco central deixou de ser aberto. A suíte entra como o Samir e usa o
+       token daí em diante — e, de quebra, prova que o login do servidor
+       funciona. O PIN sai do próprio banco de teste. */
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: 'samir', pin: PIN_TESTE })
+    });
+    const jsonLogin = await login.json();
+    assert(login.status === 200 && (jsonLogin.token || jsonLogin.semAuth),
+      'POST /api/auth/login autentica o Samir no servidor');
+    const TOKEN = jsonLogin.token || null;
+    const comToken = (extra) => Object.assign({ 'Content-Type': 'application/json' },
+      TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}, extra || {});
+
+    const semToken = await fetch(`${baseUrl}/api/db`);
+    assert(semToken.status === 401 || jsonLogin.semAuth,
+      'GET /api/db sem token é recusado (401) — antes devolvia o banco inteiro');
+
+    const resDbGet = await fetch(`${baseUrl}/api/db`, { headers: comToken() });
     const jsonDbGet = await resDbGet.json();
     assert(resDbGet.status === 200, 'GET /api/db retorna HTTP 200');
     assert(jsonDbGet.success === true, 'GET /api/db retorna success = true');
 
     const resDbPost = await fetch(`${baseUrl}/api/db`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: comToken(),
       body: JSON.stringify({ ops: [], docs: [{ op: 'OP10', nome: 'Invoice.pdf' }] })
     });
     const jsonDbPost = await resDbPost.json();
@@ -211,15 +238,15 @@ async function runTests() {
     assert(!mesclado.docs.some(d => d._id === 's'), 'Documento excluído não ressuscita quando um cliente antigo salva');
 
     const resMerge1 = await fetch(`${baseUrl}/api/db`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: comToken(),
       body: JSON.stringify({ docs: [{ _id: 'api-1', nome: 'Doc A' }] })
     });
     await resMerge1.json();
     await fetch(`${baseUrl}/api/db`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: comToken(),
       body: JSON.stringify({ docs: [{ _id: 'api-2', nome: 'Doc B' }] })
     });
-    const aposMerge = (await (await fetch(`${baseUrl}/api/db`)).json()).db;
+    const aposMerge = (await (await fetch(`${baseUrl}/api/db`, { headers: comToken() })).json()).db;
     assert(aposMerge.docs.some(d => d._id === 'api-1') && aposMerge.docs.some(d => d._id === 'api-2'),
       'POST /api/db mescla em vez de substituir — nenhum documento é perdido');
 
@@ -271,7 +298,7 @@ async function runTests() {
 
     // 6.4. Listagem do Storage (recuperar documentos já enviados)
     console.log('\n--- Testando Listagem do Supabase Storage ---');
-    const resArq = await fetch(`${baseUrl}/api/storage/arquivos`);
+    const resArq = await fetch(`${baseUrl}/api/storage/arquivos`, { headers: comToken() });
     const jsonArq = await resArq.json();
     assert(resArq.status === 200, 'GET /api/storage/arquivos retorna HTTP 200');
     assert(Array.isArray(jsonArq.arquivos), 'GET /api/storage/arquivos retorna array de arquivos');
@@ -318,6 +345,7 @@ async function runTests() {
 
     const resUploadValid = await fetch(`${baseUrl}/api/upload`, {
       method: 'POST',
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
       body: formDataValid
     });
     const jsonUploadValid = await resUploadValid.json();
@@ -339,6 +367,7 @@ async function runTests() {
 
     const resUploadInvalid = await fetch(`${baseUrl}/api/upload`, {
       method: 'POST',
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
       body: formDataInvalid
     });
     const jsonUploadInvalid = await resUploadInvalid.json();
@@ -349,7 +378,7 @@ async function runTests() {
     console.log('\n--- Testando Deletar Arquivo (DELETE /api/upload) ---');
     const resDelete = await fetch(`${baseUrl}/api/upload`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: comToken(),
       body: JSON.stringify({ url: jsonUploadValid.finalUrl || jsonUploadValid.localUrl })
     });
     const jsonDelete = await resDelete.json();

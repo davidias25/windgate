@@ -47,6 +47,8 @@ const { normalizarStatus } = require('./services/op-status.service');
 const { consultarTratamento } = require('./integrations/siscomex.service');
 const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
+const auth = require('./services/auth.service');
+const pontoStore = require('./services/ponto-store.service');
 
 // O banco é carregado de forma assíncrona (vem do Supabase Storage). As rotas
 // esperam essa carga terminar para não responderem "vazio" durante o boot —
@@ -60,12 +62,12 @@ const bancoPronto = dbStore.carregar(DB_FILE_PATH)
 app.use('/api/cotacoes', cotacoesRoutes);
 
 // Rotas do Banco Central Sincronizado (Multi-usuário)
-app.get('/api/db', async (req, res) => {
+app.get('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;
   return res.json({ success: true, db: memoryDB || null });
 });
 
-app.post('/api/db', async (req, res) => {
+app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
   try {
     await bancoPronto;
     const newDB = req.body;
@@ -102,6 +104,243 @@ app.post('/api/db', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+/* ============================================================
+   AUTENTICAÇÃO E PONTO
+   ============================================================ */
+
+if (!auth.authAtiva()) {
+  console.warn('⚠️ WINDGATE_DB_SECRET ausente — autenticação DESLIGADA. As rotas seguem abertas, como já estavam.');
+} else {
+  console.log(`🔐 Autenticação ativa · diretoria do ponto: ${auth.DIRETORIA.join(', ')}`);
+}
+
+/* O PIN passa a ser conferido aqui, não no navegador. */
+app.post('/api/auth/login', async (req, res) => {
+  await bancoPronto;
+  const { usuario, pin } = req.body || {};
+  if (!auth.authAtiva()) {
+    return res.json({ success: true, token: null, semAuth: true,
+      message: 'Autenticação desligada no servidor (sem WINDGATE_DB_SECRET).' });
+  }
+  if (!auth.pinConfere(memoryDB, usuario, pin)) {
+    // Mesma resposta para usuário inexistente e PIN errado: dizer qual dos
+    // dois falhou entrega a lista de usuários a quem tenta adivinhar.
+    return res.status(401).json({ success: false, message: 'Usuário ou PIN incorreto.' });
+  }
+  const u = (memoryDB.users || {})[usuario] || {};
+  res.json({
+    success: true,
+    token: auth.emitirToken(usuario),
+    usuario,
+    nome: u.nome || usuario,
+    ehDiretoria: auth.ehDiretoria(usuario),
+    validadeHoras: auth.HORAS_VALIDADE
+  });
+});
+
+/* Lista para a TELA DE LOGIN: só chave, nome, papel e cor. Sem PIN e sem
+   mais nada — é o mínimo para desenhar os cartões de usuário antes de haver
+   sessão, e por isso pode ficar aberta. */
+app.get('/api/auth/usuarios', async (req, res) => {
+  await bancoPronto;
+  const us = (memoryDB && memoryDB.users) || {};
+  res.json({ success: true, usuarios: Object.entries(us).map(([k, u]) => ({
+    key: k, nome: (u && u.nome) || k, papel: (u && u.papel) || '', cor: (u && u.cor) || '#2563EB'
+  })) });
+});
+
+/* Diz ao navegador se a sessão ainda vale, sem devolver dado nenhum. */
+app.get('/api/auth/sessao', auth.exigirTokenSeAtiva, (req, res) => {
+  res.json({ success: true, usuario: req.usuario.k, ehDiretoria: auth.ehDiretoria(req.usuario.k) });
+});
+
+/* ---------- PONTO ---------- */
+
+const PONTO_TIPOS = ['entrada', 'almoco', 'volta', 'saida', 'outro', 'ajuste'];
+const PONTO_JANELA_MS = 60 * 1000;   // clique duplicado
+
+/* Bater ponto. O usuário vem do TOKEN — mandar outro no corpo não adianta. */
+app.post('/api/ponto', auth.exigirToken, async (req, res) => {
+  try {
+    const dados = await pontoStore.carregar();
+    const quem = req.usuario.k;
+    const b = req.body || {};
+    const tipo = PONTO_TIPOS.includes(b.tipo) ? b.tipo : 'outro';
+    const t = pontoStore.agoraSP();
+
+    /* Clique duplicado barrado aqui, não no botão: botão é contornável, e dois
+       registros iguais em segundos sujam o relatório sem informar nada. */
+    const ultimo = dados.registros.filter(r => r.usuario === quem && r.tipo === tipo).pop();
+    if (ultimo && (Date.now() - new Date(ultimo.em).getTime()) < PONTO_JANELA_MS) {
+      return res.status(409).json({ success: false, duplicado: true,
+        message: `Você já registrou "${tipo}" há menos de 1 minuto.`, hora: ultimo.hora });
+    }
+
+    const temLocal = typeof b.lat === 'number' && typeof b.lon === 'number' && isFinite(b.lat) && isFinite(b.lon);
+    const cfg = dados.config || {};
+    let dentroDoRaio = null, distancia = null;
+    if (temLocal && typeof cfg.lat === 'number' && typeof cfg.lon === 'number' && cfg.raio > 0) {
+      distancia = pontoStore.distanciaMetros(b.lat, b.lon, cfg.lat, cfg.lon);
+      dentroDoRaio = distancia <= cfg.raio;
+    }
+
+    const reg = {
+      id: require('crypto').randomUUID(),
+      usuario: quem,
+      tipo,
+      em: t.em, data: t.data, hora: t.hora, horaCompleta: t.horaCompleta,
+      lat: temLocal ? b.lat : null,
+      lon: temLocal ? b.lon : null,
+      precisao: temLocal && isFinite(b.precisao) ? Math.round(b.precisao) : null,
+      semLocalizacao: !temLocal,
+      motivoSemLocal: temLocal ? '' : String(b.motivoSemLocal || '').slice(0, 200),
+      dentroDoRaio, distancia,
+      ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+      // Só o ajuste carrega justificativa; os demais nascem do clique.
+      justificativa: tipo === 'ajuste' ? String(b.justificativa || '').slice(0, 500) : ''
+    };
+    if (tipo === 'ajuste' && !reg.justificativa) {
+      return res.status(400).json({ success: false, message: 'Ajuste exige justificativa.' });
+    }
+
+    dados.registros.push(reg);
+    await pontoStore.salvar(dados);
+
+    /* A resposta devolve SÓ a confirmação do horário. Quem não é diretoria não
+       recebe localização nem histórico — nem o próprio. */
+    res.json({ success: true, hora: reg.hora, data: reg.data, tipo: reg.tipo,
+               semLocalizacao: reg.semLocalizacao });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+/* Estado do botão: só o tipo do último registro de hoje. Sem horário, sem
+   localização, sem histórico — o bastante para o botão saber o que oferecer. */
+app.get('/api/ponto/meu-estado', auth.exigirToken, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  const hoje = pontoStore.agoraSP().data;
+  const meus = dados.registros.filter(r => r.usuario === req.usuario.k && r.data === hoje);
+  const ultimo = meus[meus.length - 1];
+  res.json({
+    success: true,
+    hoje,
+    ultimoTipo: ultimo ? ultimo.tipo : null,
+    ultimaHora: ultimo ? ultimo.hora : null,
+    quantidadeHoje: meus.length,
+    cienciaEm: (dados.ciencias || {})[req.usuario.k] || null,
+    ehDiretoria: auth.ehDiretoria(req.usuario.k)
+  });
+});
+
+/* Aceite do aviso de privacidade, com data e hora do servidor. */
+app.post('/api/ponto/ciencia', auth.exigirToken, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  dados.ciencias = dados.ciencias || {};
+  if (!dados.ciencias[req.usuario.k]) {
+    dados.ciencias[req.usuario.k] = pontoStore.agoraSP().em;
+    await pontoStore.salvar(dados);
+  }
+  res.json({ success: true, em: dados.ciencias[req.usuario.k] });
+});
+
+/* ---------- daqui para baixo, SÓ a diretoria ---------- */
+
+app.get('/api/ponto', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  const { de, ate, usuario } = req.query || {};
+  const lista = dados.registros.filter(r =>
+    (!de || r.data >= de) && (!ate || r.data <= ate) && (!usuario || r.usuario === usuario));
+  res.json({ success: true, registros: lista, config: dados.config || {}, total: lista.length });
+});
+
+/* Resumo por pessoa e por dia: primeira entrada, última saída e horas. */
+app.get('/api/ponto/resumo', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  const { de, ate, usuario } = req.query || {};
+  const lista = dados.registros.filter(r =>
+    (!de || r.data >= de) && (!ate || r.data <= ate) && (!usuario || r.usuario === usuario));
+  res.json({ success: true, dias: resumirPonto(lista) });
+});
+
+app.get('/api/ponto/export.csv', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  const { de, ate, usuario } = req.query || {};
+  const lista = dados.registros.filter(r =>
+    (!de || r.data >= de) && (!ate || r.data <= ate) && (!usuario || r.usuario === usuario));
+  const cab = ['data', 'hora', 'colaborador', 'tipo', 'latitude', 'longitude', 'precisao_m',
+               'status_localizacao', 'dentro_do_raio', 'distancia_m', 'ip', 'dispositivo', 'justificativa'];
+  const linhas = lista.map(r => [r.data, r.hora, r.usuario, r.tipo,
+    r.lat == null ? '' : r.lat, r.lon == null ? '' : r.lon, r.precisao == null ? '' : r.precisao,
+    r.semLocalizacao ? 'SEM LOCALIZACAO' : 'com localizacao',
+    r.dentroDoRaio == null ? '' : (r.dentroDoRaio ? 'dentro' : 'fora'),
+    r.distancia == null ? '' : r.distancia, r.ip, r.userAgent, r.justificativa || '']);
+  const csv = [cab, ...linhas]
+    .map(l => l.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(';')).join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ponto_${de || 'inicio'}_${ate || 'hoje'}.csv"`);
+  res.send('﻿' + csv);   // BOM: sem ele o Excel abre os acentos errados
+});
+
+/* Endereço do escritório e raio, para marcar cada ponto como dentro ou fora. */
+app.post('/api/ponto/config', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+  const dados = await pontoStore.carregar();
+  const b = req.body || {};
+  dados.config = {
+    lat: isFinite(b.lat) ? +b.lat : null,
+    lon: isFinite(b.lon) ? +b.lon : null,
+    raio: isFinite(b.raio) ? Math.max(10, +b.raio) : 150,
+    rotulo: String(b.rotulo || '').slice(0, 120)
+  };
+  await pontoStore.salvar(dados);
+  res.json({ success: true, config: dados.config });
+});
+
+/**
+ * Horas do dia: soma os pares entrada→saída e desconta almoço→volta.
+ * Dia com registro ímpar sai marcado como incompleto em vez de chutar o
+ * horário que falta — relatório de jornada não pode inventar hora.
+ */
+function resumirPonto(registros) {
+  const porChave = {};
+  registros.forEach(r => {
+    const k = r.usuario + '|' + r.data;
+    (porChave[k] = porChave[k] || []).push(r);
+  });
+  return Object.entries(porChave).map(([k, regs]) => {
+    const [usuario, data] = k.split('|');
+    regs.sort((a, b) => String(a.em).localeCompare(String(b.em)));
+    const min = h => { const [a, b] = String(h || '00:00').split(':').map(Number); return a * 60 + b; };
+    const entradas = regs.filter(r => r.tipo === 'entrada');
+    const saidas = regs.filter(r => r.tipo === 'saida');
+    const almocos = regs.filter(r => r.tipo === 'almoco');
+    const voltas = regs.filter(r => r.tipo === 'volta');
+
+    let trabalhado = 0, incompleto = false;
+    if (entradas.length && saidas.length) {
+      trabalhado = min(saidas[saidas.length - 1].hora) - min(entradas[0].hora);
+      const nInt = Math.min(almocos.length, voltas.length);
+      for (let i = 0; i < nInt; i++) trabalhado -= (min(voltas[i].hora) - min(almocos[i].hora));
+      if (almocos.length !== voltas.length) incompleto = true;
+    } else incompleto = true;
+
+    return {
+      usuario, data,
+      primeira: entradas.length ? entradas[0].hora : (regs[0] ? regs[0].hora : null),
+      ultima: saidas.length ? saidas[saidas.length - 1].hora : (regs[regs.length - 1] ? regs[regs.length - 1].hora : null),
+      minutos: Math.max(trabalhado, 0),
+      horas: Math.max(trabalhado, 0) / 60,
+      incompleto,
+      registros: regs.length,
+      semLocalizacao: regs.filter(r => r.semLocalizacao).length,
+      precisaoRuim: regs.filter(r => r.precisao != null && r.precisao > 100).length,
+      fora: regs.filter(r => r.dentroDoRaio === false).length
+    };
+  }).sort((a, b) => b.data.localeCompare(a.data) || a.usuario.localeCompare(b.usuario));
+}
 
 // Banco de alíquotas oficiais (TEC/Gecex + TIPI/Receita), atualizado a cada 15 dias
 app.get('/api/aliquotas/status', async (req, res) => {
@@ -171,7 +410,7 @@ app.get('/api/ncm/:code', async (req, res) => {
 });
 
 // Rota de Upload de Arquivos / Documentos com integração opcional Google Drive & Supabase Storage
-app.post('/api/upload', uploadMiddleware.single('arquivo'), async (req, res) => {
+app.post('/api/upload', auth.exigirTokenSeAtiva, uploadMiddleware.single('arquivo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Nenhum arquivo enviado.' });
@@ -214,7 +453,7 @@ app.post('/api/upload', uploadMiddleware.single('arquivo'), async (req, res) => 
 
 // Rota para reencontrar no Storage os arquivos que já foram enviados,
 // para recompor a aba Documentos sem precisar subir tudo de novo.
-app.get('/api/storage/arquivos', async (req, res) => {
+app.get('/api/storage/arquivos', auth.exigirTokenSeAtiva, async (req, res) => {
   try {
     const { arquivos, erro } = await listarArquivos();
     res.status(200).json({ success: !erro, arquivos, total: arquivos.length, erro });
@@ -224,7 +463,7 @@ app.get('/api/storage/arquivos', async (req, res) => {
 });
 
 // Rota para Deletar Arquivos / Documentos do Supabase Storage e Servidor Local
-app.delete('/api/upload', async (req, res) => {
+app.delete('/api/upload', auth.exigirTokenSeAtiva, async (req, res) => {
   try {
     const targetUrl = (req.body && req.body.url) || req.query.url;
     if (!targetUrl) {
