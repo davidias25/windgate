@@ -7391,7 +7391,6 @@ async function pontoEnviar(tipo, pos, motivo){
       <div class="rulebox" style="border-color:#34C77C66;background:#34C77C0F">
         ✅ <b>Ponto registrado às ${esc(j.hora)}</b> — ${esc(PONTO_ROTULO[j.tipo]||j.tipo)}
         ${j.semLocalizacao ? '<div class="note" style="color:var(--amber);margin-top:4px">Registrado <b>sem localização</b> — a diretoria vê essa marcação.</div>' : ''}
-        ${pos && pos.precisao > 100 ? `<div class="note" style="margin-top:4px">Precisão de ${Math.round(pos.precisao)} m — o sinal estava fraco.</div>` : ''}
       </div>`;
     await renderPonto();
     // O renderPonto refez a tela; devolve a confirmação para ela não sumir.
@@ -7445,9 +7444,12 @@ function pontoRelatorioHtml(regs, dias, de, ate, cfg){
          Sem local do escritório cadastrado — os registros saem sem a marcação de <b>dentro</b> ou <b>fora</b>.
          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="pontoConfigModal()">cadastrar agora</button>
        </div>`;
+  /* A precisão do GPS saiu da tela: ela varia com prédio, nuvem e aparelho, e
+     um "±30 km" assustava sem dizer nada acionável. O servidor continua
+     gravando, e ela segue no CSV para quem precisar auditar um caso. O que
+     fica à vista é o que se decide com ele: dentro ou fora do escritório. */
   const alerta = r => r.semLocalizacao ? 'sem localização'
-    : (r.precisao != null && r.precisao > 100 ? `precisão ${r.precisao} m` : '')
-      + (r.dentroDoRaio === false ? (r.precisao > 100 ? ' · ' : '') + 'fora do local' : '');
+    : (r.dentroDoRaio === false ? 'fora do local' : '');
 
   const linhas = regs.slice().sort((a,b)=>String(b.em).localeCompare(String(a.em))).map(r=>{
     const av = alerta(r);
@@ -7459,12 +7461,12 @@ function pontoRelatorioHtml(regs, dias, de, ate, cfg){
       <td>${r.semLocalizacao
             ? `<span class="pill draft" title="${esc(r.motivoSemLocal||'')}">⚠ sem localização</span>`
             : `<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" style="color:#7FA6FF">📍 mapa</a>`}</td>
-      <td class="note">${r.precisao!=null?`±${r.precisao} m`:'—'}${
-        r.dentroDoRaio===true ? ` · <b style="color:#34C77C">dentro</b>${r.distancia!=null?` (${r.distancia} m)`:''}`
-        : r.dentroDoRaio===false ? ` · <b style="color:var(--amber)">fora</b>${r.distancia!=null?` (${r.distancia} m)`:''}`
+      <td>${
+        r.dentroDoRaio===true ? '<span class="pill ok">dentro</span>'
+        : r.dentroDoRaio===false ? '<span class="pill" style="background:#F0B42922;color:#F0B429">fora</span>'
         // Registro anterior ao cadastro do escritório não tem como ser
         // classificado, e dizer isso é melhor que deixar a coluna muda.
-        : (temCerca && !r.semLocalizacao ? ' · <span class="note">antes da cerca</span>' : '')}</td>
+        : (temCerca && !r.semLocalizacao ? '<span class="note">antes da cerca</span>' : '<span class="note">—</span>')}</td>
       <td class="note">${esc(r.justificativa||'')}</td>
     </tr>`;
   }).join('');
@@ -7488,7 +7490,7 @@ function pontoRelatorioHtml(regs, dias, de, ate, cfg){
     </div>
     <div class="card">
       <h2>Registros <span class="spacer"></span><span class="note">${regs.length} no período</span></h2>
-      <div style="overflow-x:auto;max-height:50vh"><table><thead><tr><th>Data</th><th>Hora</th><th>Colaborador</th><th>Tipo</th><th>Local</th><th>Precisão</th><th>Justificativa</th></tr></thead>
+      <div style="overflow-x:auto;max-height:50vh"><table><thead><tr><th>Data</th><th>Hora</th><th>Colaborador</th><th>Tipo</th><th>Local</th><th>No escritório</th><th>Justificativa</th></tr></thead>
       <tbody>${linhas||'<tr><td colspan="7" class="note">Nenhum registro.</td></tr>'}</tbody></table></div>
       <p class="note" style="margin-top:8px">Registros não são editados nem apagados. Correção entra como <b>Ajuste</b>, com justificativa e autor.</p>
     </div>`;
