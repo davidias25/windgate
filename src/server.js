@@ -49,6 +49,7 @@ const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
 const auth = require('./services/auth.service');
 const pontoStore = require('./services/ponto-store.service');
+const historico = require('./services/historico.service');
 
 // O banco é carregado de forma assíncrona (vem do Supabase Storage). As rotas
 // esperam essa carga terminar para não responderem "vazio" durante o boot —
@@ -73,6 +74,27 @@ app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
     const newDB = req.body;
     if (!newDB || typeof newDB !== 'object') {
       return res.status(400).json({ success: false, message: 'Dados de banco de dados inválidos.' });
+    }
+
+    /* Hub 2.0 · Fase 0 — se o banco da nuvem não carregou no boot (falha de
+       rede, Storage fora), NÃO aceitar a cópia de um navegador como se fosse o
+       banco inteiro: ela pode estar velha ou incompleta e sobrescreveria o
+       banco bom na nuvem. Tenta carregar de novo antes de mesclar. */
+    if (!memoryDB && dbStore.remotaAtiva()) {
+      const recarregado = await dbStore.carregar(DB_FILE_PATH);
+      if (recarregado) memoryDB = recarregado;
+      else if (process.env.WINDGATE_PERMITIR_BANCO_NOVO !== '1') {
+        return res.status(503).json({ success: false,
+          message: 'Banco central indisponível no momento. Nada foi gravado — tente de novo em instantes.' });
+      }
+    }
+
+    /* Toda exclusão é reversível: antes de aplicar uma exclusão nova, guarda
+       uma fotografia do banco como estava. */
+    const exclusoes = historico.exclusoesNovas(memoryDB, newDB);
+    if (exclusoes.length && memoryDB) {
+      await dbStore.fotografar(memoryDB, [historico.caminhoExclusao(new Date())]);
+      console.log(`🗂  ${exclusoes.length} exclusão(ões) nova(s) — fotografia do banco guardada antes.`);
     }
     // Guarda a versão anterior antes de sobrescrever — o banco central é a única
     // cópia das operações, então uma gravação ruim não pode ser irreversível.
@@ -533,6 +555,7 @@ app.get('/api/health', async (req, res) => {
     // Permite conferir de fora se o banco está sendo guardado fora do disco
     // efêmero do Render — sem isso a perda de dados só aparece no próximo reinício.
     persistencia: dbStore.estado(),
+    historico: dbStore.estadoHistorico(),
     registros: memoryDB
       ? { ops: (memoryDB.ops || []).length, docs: (memoryDB.docs || []).length, fin: (memoryDB.fin || []).length }
       : null

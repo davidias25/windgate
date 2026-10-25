@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js",
+    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js && node test/historico.test.js",
     "test:recorrencia": "node test/recorrencia.test.js",
     "verificar:filtros": "node scripts/verificar-filtros.js",
     "verificar:recorrencia": "node scripts/verificar-recorrencia.js",
@@ -14,7 +14,10 @@
     "apurar:triangular": "node scripts/apurar-triangular.js",
     "test:concluidas": "node test/concluidas.test.js",
     "test:crmdocs": "node test/crmdocs.test.js",
-    "test:ponto": "node test/ponto.test.js"
+    "test:ponto": "node test/ponto.test.js",
+    "test:historico": "node test/historico.test.js",
+    "conferir:migracao": "node scripts/conferir-migracao.js",
+    "historico": "node scripts/historico.js"
   },
   "keywords": [
     "windgate",
