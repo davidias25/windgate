@@ -17,7 +17,8 @@
     "test:ponto": "node test/ponto.test.js",
     "test:historico": "node test/historico.test.js",
     "conferir:migracao": "node scripts/conferir-migracao.js",
-    "historico": "node scripts/historico.js"
+    "historico": "node scripts/historico.js",
+    "copiar:teste": "node scripts/copiar-para-teste.js"
   },
   "keywords": [
     "windgate",
