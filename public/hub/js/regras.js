@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -345,19 +345,21 @@
      torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês */
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso'],
       torre: ['resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso'],
       torre: ['resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
       caps: ['fin.lancar'],
       torre: ['resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
+    contador: { nome: 'Contabilidade (acesso externo)', foco: 'Notas fiscais e extratos do trimestre para a apuração',
+      caps: ['fiscal.ver'], torre: [], externo: true },
     documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
       caps: ['crm.ver', 'pedidos.ver'],
       torre: ['resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
   };
-  const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos' };
+  const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos', pedro: 'contador' };
   function perfilDe(db, k) {
     const u = (db && db.users && db.users[k]) || {};
     const id = (u.perfilHub && PERFIS[u.perfilHub]) ? u.perfilHub : PERFIL_PADRAO[k] || (u.fin ? 'operacoes' : 'documentos');
@@ -727,6 +729,67 @@
     return { nome, partes, total, faixa, erros: b.erros, funcao: metricasFuncao(db, nome, perfilId, mes, h), anterior: ma == null ? null : Math.round(ma * 100) };
   }
 
+
+  /* ---------- Fiscal & Contabilidade ---------- */
+  const trimestreDe = iso => { const d = String(iso || ''); if (!ehISO(d)) return ''; return d.slice(0, 4) + '-T' + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1); };
+  const mesesDoTrimestre = t => { const [a, q] = String(t).split('-T'); const i = (+q - 1) * 3 + 1; return [i, i + 1, i + 2].map(m => a + '-' + String(m).padStart(2, '0')); };
+  /** Fechamento do trimestre: o que entrou e o que falta antes de mandar ao contador. */
+  function fechamentoTrimestre(db, tri, hoje) {
+    const h = hoje || hojeISO(), meses = mesesDoTrimestre(tri), cfg = ((db.hubPainel || {})._fiscal) || {};
+    const notas = (db.hubNotas || []).filter(n => n && trimestreDe(n.data) === tri);
+    const contas = (cfg.contas || []).filter(c => c && c.ativa !== false);
+    const extratos = (db.hubExtratos || []).filter(e => e && meses.includes(e.mes));
+    const faltaExtrato = [];
+    contas.forEach(c => meses.forEach(m => { if (m < h.slice(0, 7) && !extratos.some(e => e.contaId === c.id && e.mes === m)) faltaExtrato.push({ conta: c, mes: m }); }));
+    const pend = notas.filter(n => n.status === 'recebida' || n.status === 'conferir');
+    const semArquivo = notas.filter(n => !n.xmlLink && !n.pdfLink && n.origem !== 'sefaz');
+    const porTipo = {}; notas.forEach(n => { const k = n.tipo || 'outra'; porTipo[k] = porTipo[k] || { qtd: 0, valor: 0 }; porTipo[k].qtd++; porTipo[k].valor += +n.valor || 0; });
+    const entrega = (cfg.entregas || {})[tri] || null;
+    return { tri, meses, notas, porTipo, pend, semArquivo, extratos, contas, faltaExtrato, entrega, pronto: !pend.length && !faltaExtrato.length };
+  }
+  /** Lê um extrato OFX: período, saldo e lançamentos. */
+  function lerOFX(txt) {
+    const s = String(txt || ''); if (!/<OFX>/i.test(s)) return null;
+    const v = (b, t) => { const m = new RegExp('<' + t + '>([^<\\r\\n]*)', 'i').exec(b); return m ? m[1].trim() : ''; };
+    const dt = x => x ? x.slice(0, 4) + '-' + x.slice(4, 6) + '-' + x.slice(6, 8) : '';
+    const trs = (s.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || []).map(b => ({ data: dt(v(b, 'DTPOSTED')), valor: +String(v(b, 'TRNAMT')).replace(',', '.'), memo: v(b, 'MEMO') || v(b, 'NAME'), id: v(b, 'FITID') }));
+    return { banco: v(s, 'ORG') || v(s, 'BANKID'), conta: v(s, 'ACCTID'), inicio: dt(v(s, 'DTSTART')), fim: dt(v(s, 'DTEND')), saldo: +String(v(s, 'BALAMT') || 0).replace(',', '.'), transacoes: trs };
+  }
+  /** Concilia o extrato com o Financeiro: mesmo valor, data até 3 dias de diferença. */
+  function conciliar(db, transacoes, empresa) {
+    const usados = new Set();
+    return (transacoes || []).map(t => {
+      const alvo = (db.fin || []).find(l => l && !usados.has(l._id) && realizado(l) && (!empresa || (l.empresa || 'WindGate') === empresa)
+        && Math.abs(valorDe(l) - Math.abs(t.valor)) < 0.01 && (t.valor < 0) === !ehReceita(l)
+        && Math.abs(diasEntre(soData(l.liquidadoEm || vencDe(l)), t.data) || 0) <= 3);
+      if (alvo) usados.add(alvo._id);
+      return Object.assign({}, t, { lancId: alvo ? alvo._id : null });
+    });
+  }
+
+
+  const tagXml = (xml, nome) => { const m = new RegExp(`<(?:\\w+:)?${nome}[^>]*>([^<]*)</(?:\\w+:)?${nome}>`, 'i').exec(xml); return m ? m[1].trim() : ''; };
+  const blocoXml = (xml, nome) => { const m = new RegExp(`<(?:\\w+:)?${nome}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${nome}>`, 'i').exec(xml); return m ? m[1] : ''; };
+  /** Lê o essencial de um XML de NF-e. */
+  function lerXmlNFe(xml) {
+    const s = String(xml || '');
+    const id = (/Id="NFe(\d{44})"/i.exec(s) || [])[1] || (/<chNFe>(\d{44})<\/chNFe>/i.exec(s) || [])[1] || '';
+    if (!id && !/<infNFe/i.test(s)) return null;
+    const emit = blocoXml(s, 'emit'), dest = blocoXml(s, 'dest'), ide = blocoXml(s, 'ide'), tot = blocoXml(s, 'ICMSTot');
+    return { chave: id, numero: tagXml(ide, 'nNF'), serie: tagXml(ide, 'serie'), data: (tagXml(ide, 'dhEmi') || tagXml(ide, 'dEmi')).slice(0, 10),
+      emitente: tagXml(emit, 'xNome'), emitenteCnpj: tagXml(emit, 'CNPJ') || tagXml(emit, 'CPF'), destinatario: tagXml(dest, 'xNome'), destCnpj: tagXml(dest, 'CNPJ') || tagXml(dest, 'CPF'),
+      valor: +(tagXml(tot, 'vNF') || 0), cfop: tagXml(s, 'CFOP'), natureza: tagXml(ide, 'natOp') };
+  }
+  const soDigitos = x => String(x || '').replace(/\D/g, '');
+  /** Entrada ou saída, e de qual empresa do grupo, pelo CNPJ. */
+  function classificarNota(n, cnpjs) {
+    const nossos = Object.entries(cnpjs || {}).map(([emp, c]) => [emp, soDigitos(c)]).filter(([, c]) => c);
+    const e = nossos.find(([, c]) => c === soDigitos(n.emitenteCnpj)), d = nossos.find(([, c]) => c === soDigitos(n.destCnpj));
+    if (e) return { tipo: 'saida', empresa: e[0] };
+    if (d) return { tipo: 'entrada', empresa: d[0] };
+    return { tipo: 'entrada', empresa: '' };
+  }
+
   /* ---------- Formatação ---------- */
   const fmtBRL = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const fmtBRLk = v => { const n = +v || 0; return Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil' : fmtBRL(n); };
@@ -735,6 +798,7 @@
   return {
     COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
+    lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
     DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,

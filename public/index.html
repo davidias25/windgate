@@ -1880,7 +1880,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmDocs','crmOps','parceiros','opStatusHist','hubRecados','hubPedidos','hubErros'];
+const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmDocs','crmOps','parceiros','opStatusHist','hubRecados','hubPedidos','hubErros','hubNotas','hubExtratos'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -2381,6 +2381,9 @@ const TABS=[
   {k:'config',   ic:'⚙️', l:'Configurações',     g:'Gestão'}
 ];
 function enterApp(){
+  /* Acesso externo (contador) só existe no Hub 2.0, onde o servidor entrega a ele
+     apenas notas e extratos. O sistema antigo não tem esse filtro de tela. */
+  if(USER && USER.perfilHub==='contador'){ location.href='/hub/'; return; }
   /* A aba Ponto é de todo mundo: quem bate ponto precisa dela. O que muda por
      pessoa é o que ela mostra — e isso quem decide é o servidor, não a lista
      de abas gravada no usuário. */

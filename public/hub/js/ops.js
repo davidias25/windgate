@@ -57,6 +57,7 @@
     const pct = W.checklistPct(db, o.id);
     const r = H.pode('fin.resultado') ? W.resultadoPorOp(db, 'todas').find(x => x.op === o.id) : null;
     const abas = [['resumo', 'Resumo'], ['etapas', 'Etapas & histórico'], ['logistica', 'Logística & contêineres'], ['docs', `Documentos${pct != null ? ' · ' + pct + '%' : ''}`]];
+    abas.push(['chat', 'Conversa']);
     if (H.pode('fin.lancar')) abas.push(['fin', H.pode('fin.ver') ? 'Financeiro da operação' : 'Lançamentos da operação']);
 
     el.innerHTML = `
@@ -77,7 +78,7 @@
     el.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { abaFicha = b.dataset.aba; H.render(); });
     el.querySelector('[data-acao="etapa"]').onclick = () => mudarEtapa(o);
     if (!abas.find(a => a[0] === abaFicha)) abaFicha = 'resumo';
-    ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin })[abaFicha](el.querySelector('#fichaAba'), o);
+    ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat })[abaFicha](el.querySelector('#fichaAba'), o);
   };
 
   function campo(o, k, rot, tipo, extra) {
@@ -124,6 +125,8 @@
         ${campo(o, 'embarque', 'Embarque (ETD)', 'date')}${campo(o, 'eta', 'Chegada prevista (ETA)', 'date')}${campo(o, 'navio', 'Navio', 'text', { w: 'w2' })}
         ${campo(o, 'armador', 'Armador')}${campo(o, 'bl', 'BL')}${campo(o, 'tracking', 'Link de tracking do armador', 'url', { w: 'w2' })}
         ${campo(o, 'posAtual', 'Posição atual (texto)', 'text', { w: 'w4' })}
+        ${campo(o, 'duimp', 'Número da DUIMP', 'text', { w: 'w2' })}${campo(o, 'duimpVersao', 'Versão')}
+        <div class="f"><span class="lbl">Situação no Portal Único</span><span class="ro">${o.duimpSituacao ? esc([o.duimpSituacao.situacao, o.duimpSituacao.canal ? 'canal ' + o.duimpSituacao.canal : ''].filter(Boolean).join(' · ') || 'consultada') + `<br><small class="note">${W.dataBR(o.duimpSituacao.atualizadoEm)}</small>` : '<span class="note">aguardando integração</span>'}</span></div>
       </div></div>
       <div class="box"><div class="box-h"><h2>Contêineres</h2><button class="btn sm" data-addc>+ Contêiner</button></div>
         ${cont.length ? `<div class="tw"><table><thead><tr><th>Número</th><th>Tipo</th><th>Lacre</th><th></th></tr></thead><tbody>${cont.map((c, i) => `<tr><td class="mono">${esc(c.numero)}</td><td>${esc(c.tipo || '')}</td><td class="mono">${esc(c.lacre || '')}</td><td class="num"><button class="btn ghost sm" data-delc="${i}">Remover</button></td></tr>`).join('')}</tbody></table></div>`
@@ -196,6 +199,11 @@
     const ex = H.db.docs.find(d => d && d.op === op && d.nome === it.titulo);
     if (ex) { ex.link = it.link; ex.status = map[it.status] || 'recebido'; }
     else H.db.docs.unshift({ _id: W.novoId(), op, grupo: 'outros', nome: it.titulo, cat: it.titulo, link: it.link, status: map[it.status] || 'recebido', por: it.coletadoPor || H.nomeUsuario(H.userKey), obs: 'via checklist', data: W.hojeISO() });
+  }
+
+  function abaChat(box, o) {
+    box.innerHTML = '<section class="box" id="chatPane"></section>';
+    if (H.chatPainel) { if (H.chat && !H.chat.carregado) H.chatBuscar().then(() => { const p = document.querySelector('#chatPane'); if (p) H.chatPainel(p, 'op:' + o.id); }); else H.chatPainel(box.querySelector('#chatPane'), 'op:' + o.id); }
   }
 
   function abaFin(box, o) {

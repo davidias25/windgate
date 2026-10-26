@@ -60,4 +60,10 @@ async function lerPedido({ texto, imagem }, fetchImpl) {
   };
 }
 
-module.exports = { ativa, lerPedido, extrairJSON, blocoImagem, MODELO };
+/** Uma chamada mínima para conferir se a chave e o crédito estão ok. */
+async function testar(fetchImpl) {
+  if (!ativa()) { const e = new Error('Falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  return (await chamar([{ type: 'text', text: 'Responda apenas: OK' }], 'Responda em uma palavra.', fetchImpl)).trim().slice(0, 40);
+}
+
+module.exports = { ativa, testar, lerPedido, extrairJSON, blocoImagem, MODELO };

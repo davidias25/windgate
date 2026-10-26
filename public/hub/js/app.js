@@ -14,6 +14,7 @@
   async function api(caminho, opts) {
     const o = Object.assign({ headers: {} }, opts || {});
     if (H.token) o.headers.Authorization = 'Bearer ' + H.token;
+    if (H.userKey) o.headers['X-Hub-Usuario'] = H.userKey;   // só usado quando o login do servidor está desligado
     const r = await fetch(caminho, o);
     if (r.status === 401) { sair('Sessão expirada — entre de novo.'); throw new Error('401'); }
     return r;
@@ -160,9 +161,9 @@
   const MENU = [
     { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos']] },
     { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['I:portal', 'Portal do Cliente']] },
-    { g: 'Financeiro & Fiscal', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
+    { g: 'Financeiro & Fiscal', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
     { g: 'Inteligência', itens: [['L:frete', 'Fretes & Benchmark'], ['L:sourcing', 'Sourcing China'], ['L:parceiros', 'Fornecedores'], ['I:tracking', 'Tracking ao vivo']] },
-    { g: 'Gestão', itens: [['L:agenda', 'Agenda & Tarefas'], ['L:gestao', 'Gestão do Mês'], ['produtividade', 'Produtividade & Ranking'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe & Acessos'], ['L:config', 'Configurações']] }
+    { g: 'Gestão', itens: [['chat', 'Chat WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:gestao', 'Gestão do Mês'], ['produtividade', 'Produtividade & Ranking'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
   ];
 
   function montarMenu() {
@@ -189,9 +190,11 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
   const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
   function podeTela(k) {
+    // Acesso externo (contador): só Fiscal e o canal de contabilidade do chat.
+    if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat';
     if (k === 'implantacao') return true;
     if (k.startsWith('L:')) {
       const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
@@ -204,7 +207,7 @@
   H.podeTela = podeTela;
 
   function ir(tela, param) {
-    if (!podeTela(tela)) { H.toast('Esta área não faz parte do seu perfil.'); tela = 'torre'; param = null; }
+    if (!podeTela(tela)) { H.toast('Esta área não faz parte do seu perfil.'); tela = H.perfil().externo ? 'fiscal' : 'torre'; param = null; }
     H.estado = { tela, param: param == null ? null : param };
     try { history.replaceState(null, '', '#' + tela + (param ? '-' + encodeURIComponent(param) : '')); } catch (e) {}
     render(); window.scrollTo(0, 0);
@@ -265,9 +268,10 @@
     montarMenu();
     const h = decodeURIComponent((location.hash || '').slice(1));
     if (h) { const i = h.indexOf('-'); H.estado = i > 0 ? { tela: h.slice(0, i), param: h.slice(i + 1) } : { tela: h, param: null }; }
-    if (!podeTela(H.estado.tela)) H.estado = { tela: 'torre', param: null };
+    if (!podeTela(H.estado.tela) || (H.perfil().externo && H.estado.tela === 'torre')) H.estado = { tela: H.perfil().externo ? 'fiscal' : 'torre', param: null };
     render();
     clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
+    if (H.chatIniciar) H.chatIniciar();
   }
 
   function sair(msg) {
@@ -275,6 +279,7 @@
     if (H.db && sujo()) { guardarPendente(H.db); msg = (msg ? msg + ' ' : '') + 'Suas alterações não salvas foram guardadas e serão gravadas assim que você entrar.'; }
     clearTimeout(tSalvar); clearTimeout(tRetry); tSalvar = tRetry = null;
     clearInterval(tSync); tSync = null;
+    if (H.chat) { clearInterval(H.chat.tPoll); H.chat.carregado = false; } const ub = document.querySelector('#urgBar'); if (ub) ub.remove();
     H.token = null; H.db = null; H.user = null; base = null; versao = versaoSalva = 0;
     if (msg) setTimeout(() => toast(esc(msg)), 50);
     telaLogin();
@@ -287,7 +292,7 @@
     $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(e.target.value); });
     $('#pinOk').onclick = () => entrar($('#pin').value);
     $('#sair').onclick = async () => { if (sujo()) { clearTimeout(tSalvar); await enviar(); } sair(); };
-    $('#bell').onclick = () => ir('torre');
+    $('#bell').onclick = () => ir(H.perfil().externo ? 'fiscal' : 'torre');
     $('#busca').addEventListener('keydown', e => { if (e.key === 'Enter') { H.estado = { tela: 'ops', param: null }; H.buscaGlobal = e.target.value; render(); } });
     try {
       const s = JSON.parse(sessionStorage.getItem('wg_hub_sessao') || 'null');

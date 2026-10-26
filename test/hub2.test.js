@@ -265,6 +265,64 @@ function bancoReal() {
     ok(semIA, 'sem a chave, responde semIA e o navegador usa a leitura por regras');
   }
 
+  console.log('\n--- 10. Contador, fiscal, chat e Portal Único ---');
+  {
+    const acesso = require('../src/services/acesso.service');
+    const { mesclarDB } = require('../src/services/db-merge.service');
+    const d = W.prepararBanco(bancoReal());
+    d.users.pedro = { nome: 'Pedro', pin: '9', perfilHub: 'contador' };
+    d.hubNotas = [{ _id: 'n1', chave: '1', data: '2026-10-05', tipo: 'entrada', status: 'recebida' }]; d.hubExtratos = [{ _id: 'x1', mes: '2026-10', contaId: 'cc1' }];
+    const lido = acesso.paraLeitura(d, 'pedro');
+    ok(!lido.ops && !lido.fin && !lido.crm && !lido.quotes && lido.hubNotas.length === 1 && lido.hubExtratos.length === 1, 'contador recebe só notas e extratos: nada de operações, financeiro, CRM ou cotações');
+    ok(Object.values(lido.users).every(u => !u.pin), 'contador não recebe o PIN de ninguém');
+    ok(acesso.paraLeitura(d, 'davi') === d, 'demais perfis continuam recebendo o banco como antes');
+    const ataque = { ops: [], fin: [{ _id: 'f1', valor: 0 }], settings: { zerado: true }, users: { samir: { pin: '0' } }, hubNotas: [{ _id: 'n1', chave: '1', status: 'lancada' }], _removidos: { f2: Date.now(), n9: 1, x1: Date.now() } };
+    const filtrado = acesso.paraGravacao(d, ataque, 'pedro');
+    ok(!filtrado.fin && !filtrado.settings && !filtrado.users && !filtrado.ops && filtrado.hubNotas.length === 1, 'o que o contador manda fora de notas/extratos é descartado');
+    ok(!filtrado._removidos.f2 && filtrado._removidos.x1, 'contador não consegue excluir lançamento; só nota ou extrato');
+    const final = mesclarDB(d, filtrado);
+    ok(final.fin.length === d.fin.length && final.users.samir.pin === '1' && final.hubNotas.find(n => n._id === 'n1').status === 'lancada', 'mesmo com o sistema antigo mandando o banco inteiro, nada além das notas muda');
+
+    const xml = '<nfeProc><NFe><infNFe Id="NFe23261058762606000144550010000012341000012345"><ide><natOp>Venda</natOp><serie>1</serie><nNF>1234</nNF><dhEmi>2026-10-05T10:00:00-03:00</dhEmi></ide><emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor X</xNome></emit><dest><CNPJ>58762606000144</CNPJ><xNome>SF Trading</xNome></dest><det><prod><CFOP>5102</CFOP></prod></det><total><ICMSTot><vNF>15430.55</vNF></ICMSTot></total></infNFe></NFe></nfeProc>';
+    const nf = W.lerXmlNFe(xml);
+    ok(nf.chave.length === 44 && nf.numero === '1234' && nf.data === '2026-10-05' && nf.valor === 15430.55 && nf.emitente === 'Fornecedor X', 'XML de NF-e lido: chave, número, data, emitente e valor');
+    ok(W.classificarNota(nf, { WindGate: '58.762.606/0001-44' }).tipo === 'entrada' && W.classificarNota(nf, { WindGate: '11.222.333/0001-81' }).tipo === 'saida', 'entrada ou saída decidida pelo CNPJ do grupo');
+    const fiscal = require('../src/services/fiscal.service');
+    ok(fiscal.semRepetidas([{ chave: nf.chave }], [{ chave: nf.chave }, { chave: 'outra' }]).length === 1, 'nota repetida (mesma chave) não entra duas vezes');
+    process.env.FOCUS_NFE_TOKEN = 'tk';
+    const lf = await fiscal.buscarRecebidasFocus('58.762.606/0001-44', null, async (url, o) => { ok(/nfes_recebidas\?cnpj=58762606000144/.test(url) && /^Basic /.test(o.headers.Authorization), 'Focus consultada pelo CNPJ com o token no servidor'); return { ok: true, json: async () => [{ chave_nfe: nf.chave, numero: '1234', nome_emitente: 'Fornecedor X', documento_emitente: '11222333000181', valor_total: '15430.55', data_emissao: '2026-10-05T10:00:00' }] }; });
+    delete process.env.FOCUS_NFE_TOKEN;
+    ok(lf.length === 1 && lf[0].valor === 15430.55 && lf[0].data === '2026-10-05', 'notas recebidas da SEFAZ (via Focus) viram notas do sistema');
+
+    d.hubPainel._fiscal = { contas: [{ id: 'cc1', empresa: 'WindGate', banco: 'Itaú', nome: '1234-5' }] };
+    d.hubNotas.push({ _id: 'n2', data: '2026-11-03', tipo: 'saida', status: 'conferida', valor: 100 });
+    const fe = W.fechamentoTrimestre(d, '2026-T4', '2026-12-15');
+    ok(fe.notas.length === 2 && fe.pend.length === 1 && fe.faltaExtrato.length === 1 && fe.faltaExtrato[0].mes === '2026-11' && !fe.pronto, 'fechamento do 4º tri: 1 nota a conferir e o extrato de novembro faltando');
+    const ofx = W.lerOFX('<OFX><BANKACCTFROM><BANKID>341<ACCTID>12345</BANKACCTFROM><BANKTRANLIST><DTSTART>20261001<DTEND>20261031<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261002<TRNAMT>-80000.00<FITID>a1<MEMO>PIX FABRICA</STMTTRN><STMTTRN><DTPOSTED>20261005<TRNAMT>1500.00<FITID>a2<MEMO>OUTRO</STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>12000.50</LEDGERBAL></OFX>');
+    ok(ofx.transacoes.length === 2 && ofx.saldo === 12000.5 && ofx.inicio === '2026-10-01', 'extrato OFX lido: movimentos, período e saldo');
+    const conc = W.conciliar(d, ofx.transacoes, 'WindGate');
+    ok(conc[0].lancId === 'f3' && !conc[1].lancId, 'conciliação: pagamento de R$ 80 mil bate com o lançamento; o outro fica para lançar');
+
+    const chat = require('../src/services/chat-store.service');
+    ok(chat.podeVerCanal(d, 'pedro', 'contabilidade', []) && !chat.podeVerCanal(d, 'pedro', 'geral', []) && !chat.podeVerCanal(d, 'pedro', 'op:OP20', []), 'contador só vê o canal de contabilidade');
+    d.users.ivina = { nome: 'Ívina' }; d.users.matheus = { nome: 'Matheus' };
+    ok(!chat.podeVerCanal(d, 'ivina', 'financeiro', []) && chat.podeVerCanal(d, 'davi', 'financeiro', []), 'canal financeiro só para quem tem acesso ao financeiro');
+    ok(chat.podeVerCanal(d, 'davi', chat.dmId('davi', 'samir'), []) && !chat.podeVerCanal(d, 'ivina', chat.dmId('davi', 'samir'), []), 'conversa direta só entre as duas pessoas');
+    const m = chat.novaMensagem(d, 'samir', { canal: 'geral', texto: 'Reunião amanhã @davi e @Ivina', aviso: true, urgente: true });
+    ok(m.de === 'samir' && m.menciona.includes('davi') && m.menciona.includes('ivina') && m.aviso && m.urgente, 'mensagem: autor vem do login, menções reconhecidas, aviso e urgente');
+    ok(!chat.novaMensagem(d, 'ivina', { canal: 'geral', texto: 'x', aviso: true }).aviso, 'só Samir e Davi publicam aviso com "li e entendi"');
+
+    const pu = require('../src/services/portal-unico.service');
+    pu._reset(); let chamadas = [];
+    const req = async (url, o) => { chamadas.push([url, o.headers]); if (/autenticar/.test(url)) return { status: 200, headers: { 'set-token': 'TK', 'x-csrf-token': 'CS' }, corpo: '' };
+      return { status: 200, headers: { 'x-csrf-token': 'CS2' }, corpo: JSON.stringify({ identificacao: { numero: '26BR0001' }, situacaoDuimp: 'DESEMBARACADA', resultadoAnaliseRisco: { canal: 'VERDE' } }) }; };
+    const r1 = await pu.consultarDuimp('26BR0001', '1', req);
+    ok(chamadas[0][1]['Role-Type'] === 'IMPEXP' && chamadas[1][1].Authorization === 'TK' && chamadas[1][1]['X-CSRF-Token'] === 'CS', 'Portal Único: autentica com o perfil IMPEXP e usa os tokens nas consultas');
+    ok(r1.situacao === 'DESEMBARACADA' && r1.canal === 'VERDE', 'situação e canal da DUIMP extraídos da resposta');
+    await pu.consultarDuimp('26BR0002', '1', req);
+    ok(chamadas.filter(c => /autenticar/.test(c[0])).length === 1, 'token reaproveitado: não autentica de novo a cada consulta (regra dos 60 s)');
+  }
+
   try { fs.unlinkSync(TMP); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
   process.exit(falhou ? 1 : 0);

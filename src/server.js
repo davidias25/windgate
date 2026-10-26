@@ -63,15 +63,18 @@ const bancoPronto = dbStore.carregar(DB_FILE_PATH)
 app.use('/api/cotacoes', cotacoesRoutes);
 
 // Rotas do Banco Central Sincronizado (Multi-usuário)
+const acesso = require('./services/acesso.service');
 app.get('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;
-  return res.json({ success: true, db: memoryDB || null });
+  // Perfil restrito (contador) recebe só o que é dele: o filtro é aqui, não na tela.
+  return res.json({ success: true, db: memoryDB ? acesso.paraLeitura(memoryDB, req.usuario && req.usuario.k) : null });
 });
 
 app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
   try {
     await bancoPronto;
-    const newDB = req.body;
+    let newDB = req.body;
+    if (newDB && typeof newDB === 'object' && memoryDB) newDB = acesso.paraGravacao(memoryDB, newDB, req.usuario && req.usuario.k);
     if (!newDB || typeof newDB !== 'object') {
       return res.status(400).json({ success: false, message: 'Dados de banco de dados inválidos.' });
     }
@@ -558,6 +561,131 @@ app.post('/api/ia/pedido', auth.exigirTokenSeAtiva, async (req, res) => {
   } catch (e) {
     res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message });
   }
+});
+
+/* Grava uma parte do banco vinda do próprio servidor (integrações), pelo mesmo
+   caminho seguro das gravações dos navegadores: mescla registro a registro. */
+async function gravarParcial(parcial) {
+  await bancoPronto;
+  if (!memoryDB) throw new Error('Banco central indisponível.');
+  memoryDB = mesclarDB(memoryDB, parcial);
+  return dbStore.salvar(memoryDB, DB_FILE_PATH);
+}
+const podeOperar = req => { const k = req.usuario && req.usuario.k; return k === '(sem-auth)' || ['diretoria', 'operacoes'].includes(acesso.perfil(memoryDB, k)); };
+
+/* ---------- Chat WindGate ---------- */
+const chat = require('./services/chat-store.service');
+const quemChat = req => (req.usuario && req.usuario.k !== '(sem-auth)') ? req.usuario.k : String(req.get('x-hub-usuario') || '');
+app.get('/api/chat', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req); if (!k || !memoryDB) return res.status(400).json({ success: false, message: 'Usuário não identificado.' });
+  const d = await chat.carregar();
+  res.json({ success: true, agora: new Date().toISOString(), canais: chat.canaisVisiveis(memoryDB, k, d), mensagens: chat.mensagensVisiveis(memoryDB, k, d, req.query.desde || '') });
+});
+app.post('/api/chat/mensagem', auth.exigirTokenSeAtiva, async (req, res) => {
+  try {
+    await bancoPronto; const k = quemChat(req); const d = await chat.carregar();
+    if (!chat.podeVerCanal(memoryDB, k, String((req.body || {}).canal || ''), d.canais)) return res.status(403).json({ success: false, message: 'Você não participa deste canal.' });
+    const m = chat.novaMensagem(memoryDB, k, req.body || {}); d.mensagens.push(m); await chat.salvar(d);
+    res.json({ success: true, mensagem: m });
+  } catch (e) { res.status(400).json({ success: false, message: e.message }); }
+});
+app.post('/api/chat/lido', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req); const d = await chat.carregar(); const { canal } = req.body || {}; const agora = new Date().toISOString(); let n = 0;
+  d.mensagens.forEach(m => { if (m.canal === canal && !(m.lidos || {})[k] && chat.podeVerCanal(memoryDB, k, canal, d.canais)) { m.lidos = Object.assign({}, m.lidos, { [k]: agora }); m.atualizadoEm = agora; n++; } });
+  if (n) await chat.salvar(d); res.json({ success: true, marcadas: n });
+});
+app.post('/api/chat/confirmar', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req); const d = await chat.carregar(); const m = d.mensagens.find(x => x.id === (req.body || {}).id);
+  if (!m || !chat.podeVerCanal(memoryDB, k, m.canal, d.canais)) return res.status(404).json({ success: false, message: 'Mensagem não encontrada.' });
+  const agora = new Date().toISOString(); m.confirmacoes = Object.assign({}, m.confirmacoes, { [k]: agora }); m.lidos = Object.assign({}, m.lidos, { [k]: agora }); m.atualizadoEm = agora;
+  await chat.salvar(d); res.json({ success: true, mensagem: m });
+});
+app.post('/api/chat/apagar', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req); const d = await chat.carregar(); const m = d.mensagens.find(x => x.id === (req.body || {}).id);
+  if (!m || (m.de !== k && acesso.perfil(memoryDB, k) !== 'diretoria')) return res.status(403).json({ success: false, message: 'Só quem escreveu (ou a diretoria) remove a mensagem.' });
+  m.apagadoEm = new Date().toISOString(); m.apagadoPor = k; m.atualizadoEm = m.apagadoEm; m.textoOriginal = m.textoOriginal || m.texto; m.texto = '';
+  await chat.salvar(d); res.json({ success: true });
+});
+app.post('/api/chat/canal', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req);
+  if (!['diretoria', 'operacoes'].includes(acesso.perfil(memoryDB, k)) && k) return res.status(403).json({ success: false, message: 'Só Samir ou Davi criam canais.' });
+  const nome = String((req.body || {}).nome || '').trim().toLowerCase().replace(/[^a-z0-9à-ú-]+/g, '-').slice(0, 30);
+  if (!nome) return res.status(400).json({ success: false, message: 'Dê um nome ao canal.' });
+  const d = await chat.carregar(); const id = 'c-' + nome;
+  if (chat.CANAIS_PADRAO.concat(d.canais).some(c => c.id === id || c.nome === nome)) return res.status(400).json({ success: false, message: 'Já existe um canal com esse nome.' });
+  d.canais.push({ id, nome, desc: String(req.body.desc || '').slice(0, 120), membros: Array.isArray(req.body.membros) ? req.body.membros : [], criadoPor: k, em: new Date().toISOString() });
+  await chat.salvar(d); res.json({ success: true });
+});
+
+/* ---------- Fiscal: notas que chegam sozinhas ---------- */
+const fiscal = require('./services/fiscal.service');
+/* Porta de entrada do e-mail de notas: o serviço de e-mail (Cloudflare, Postmark,
+   Mailgun…) posta aqui os anexos. Protegido por token próprio, não pelo login. */
+app.post('/api/fiscal/entrada', async (req, res) => {
+  const tk = process.env.FISCAL_WEBHOOK_TOKEN;
+  if (!tk || req.get('x-webhook-token') !== tk) return res.status(401).json({ success: false, message: 'Token inválido.' });
+  try {
+    const b = req.body || {}; const cnpjs = (((memoryDB || {}).hubPainel || {})._fiscal || {}).cnpjs || {};
+    const novas = (b.anexos || []).map(a => {
+      const txt = Buffer.from(String(a.base64 || ''), 'base64').toString('utf8');
+      const nf = /\.xml$/i.test(a.nome || '') ? fiscal.lerXmlNFe(txt) : null;
+      return nf ? fiscal.novaNota(Object.assign(nf, fiscal.classificar(nf, cnpjs), { obs: `e-mail de ${b.de || '?'}: ${b.assunto || ''}`.slice(0, 200) }), 'email')
+        : fiscal.novaNota({ tipo: 'outra', arquivo: a.nome || 'anexo', obs: `e-mail de ${b.de || '?'}: ${b.assunto || ''} · anexo sem XML: conferir`.slice(0, 200), status: 'conferir' }, 'email');
+    });
+    const entram = fiscal.semRepetidas((memoryDB && memoryDB.hubNotas) || [], novas);
+    if (entram.length) await gravarParcial({ hubNotas: entram });
+    res.json({ success: true, recebidas: novas.length, novas: entram.length });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+app.post('/api/fiscal/sefaz', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  if (!fiscal.focusAtivo()) return res.json({ success: false, semIntegracao: true, message: 'Falta a conta da Focus NFe (FOCUS_NFE_TOKEN no Render).' });
+  try {
+    const cnpjs = ((memoryDB.hubPainel || {})._fiscal || {}).cnpjs || {};
+    let novas = [];
+    for (const [empresa, cnpj] of Object.entries(cnpjs)) {
+      if (!cnpj) continue;
+      const lista = await fiscal.buscarRecebidasFocus(cnpj);
+      novas = novas.concat(lista.map(n => fiscal.novaNota(Object.assign(n, { tipo: 'entrada', empresa }), 'sefaz')));
+    }
+    const entram = fiscal.semRepetidas(memoryDB.hubNotas || [], novas);
+    if (entram.length) await gravarParcial({ hubNotas: entram });
+    res.json({ success: true, consultadas: novas.length, novas: entram.length });
+  } catch (e) { res.status(502).json({ success: false, message: e.message }); }
+});
+
+/* ---------- Portal Único: situação das DUIMPs ---------- */
+const portalUnico = require('./services/portal-unico.service');
+app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  if (!portalUnico.configurado()) return res.json({ success: false, semIntegracao: true, message: 'Falta o certificado A1 no servidor (PORTAL_UNICO_CERT_ARQUIVO e PORTAL_UNICO_CERT_SENHA).' });
+  const alvo = (memoryDB.ops || []).filter(o => o && o.duimp && !['entregue', 'concluida'].includes(o.status));
+  const atualizadas = [], erros = [];
+  for (const o of alvo.slice(0, 40)) {
+    try { const r = await portalUnico.consultarDuimp(o.duimp, o.duimpVersao || '1'); atualizadas.push(Object.assign({}, o, { duimpSituacao: { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, atualizadoEm: r.atualizadoEm } })); }
+    catch (e) { erros.push({ op: o.id, erro: e.message }); if (/60 s/.test(e.message)) break; }
+  }
+  if (atualizadas.length) await gravarParcial({ ops: atualizadas });
+  res.json({ success: true, consultadas: alvo.length, atualizadas: atualizadas.length, erros });
+});
+
+/* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
+app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto;
+  const tem = n => !!process.env[n];
+  res.json({ success: true, integracoes: {
+    banco: { ok: tem('WINDGATE_DB_SECRET') && dbStore.remotaAtiva(), detalhe: 'banco cifrado na nuvem e histórico de versões' },
+    ia: { ok: tem('ANTHROPIC_API_KEY'), detalhe: 'API do Claude: pedidos, comprovantes, invoices' },
+    tracking: { ok: tem('SHIPSGO_API_KEY'), detalhe: 'ShipsGo: posição por contêiner' },
+    portalUnico: { ok: portalUnico.configurado(), detalhe: `certificado A1 · ambiente ${portalUnico.cfg().ambiente}` },
+    nfe: { ok: tem('FOCUS_NFE_TOKEN'), detalhe: `Focus NFe · ${process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'produção' : 'homologação'}` },
+    emailNotas: { ok: tem('FISCAL_WEBHOOK_TOKEN'), detalhe: 'e-mail de notas encaminhando para o sistema' },
+    boletos: { ok: tem('ASAAS_API_KEY'), detalhe: 'Asaas: boleto e Pix' }
+  } });
+});
+app.post('/api/ia/teste', auth.exigirTokenSeAtiva, async (req, res) => {
+  try { const r = await ia.testar(); res.json({ success: true, resposta: r, modelo: ia.MODELO() }); }
+  catch (e) { res.json({ success: false, semIA: !!e.semIA, message: e.message }); }
 });
 
 app.get('/api/health', async (req, res) => {

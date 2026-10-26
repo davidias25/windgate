@@ -92,6 +92,31 @@
     };
   }
 
+
+  /* ================= INTEGRAÇÕES ================= */
+  const INTEG = [
+    ['banco', 'Banco de dados e backups', 'Banco cifrado na nuvem, histórico por hora e por dia.', 'Davi · Render', 'WINDGATE_DB_SECRET, SUPABASE_URL, SUPABASE_KEY (service_role)', 'já pago (Render/Supabase)'],
+    ['ia', 'IA (API do Claude)', 'Lê pedidos e prints, comprovantes, invoices e packing lists.', 'Samir cria a chave no Console · Davi salva no Render', 'ANTHROPIC_API_KEY', 'por uso: créditos do Console (US$ 100 disponíveis)'],
+    ['tracking', 'Tracking por contêiner (ShipsGo)', 'Posição real e ETA atualizado sozinho, alerta de atraso.', 'Samir pega a chave na ShipsGo · Davi salva no Render', 'SHIPSGO_API_KEY', '≈ US$ 2 por contêiner'],
+    ['portalUnico', 'Portal Único Siscomex (DUIMP)', 'Situação, canal e desembaraço da DUIMP sem abrir o portal.', 'Davi sobe o certificado A1 como Secret File e a senha', 'PORTAL_UNICO_CERT_ARQUIVO, PORTAL_UNICO_CERT_SENHA, PORTAL_UNICO_AMBIENTE', 'R$ 0'],
+    ['nfe', 'NF-e e notas recebidas (Focus NFe)', 'Emite NF-e da DUIMP e baixa sozinha toda NF-e emitida contra o CNPJ.', 'Samir cria a conta · Davi salva o token', 'FOCUS_NFE_TOKEN, FOCUS_NFE_AMBIENTE', 'plano a partir de R$ 119,90/mês'],
+    ['emailNotas', 'E-mail de notas', 'Nota que chega por e-mail (ou encaminhada do WhatsApp) entra no Fiscal.', 'Davi configura o encaminhamento do e-mail', 'FISCAL_WEBHOOK_TOKEN', 'R$ 0 (Cloudflare Email Routing) ou plano do provedor'],
+    ['boletos', 'Boleto e Pix (Asaas)', 'Gera a cobrança da parcela e dá baixa sozinha quando o cliente paga.', 'Samir resolve o CNPJ na Asaas · Davi salva a chave', 'ASAAS_API_KEY', 'taxa por boleto pago']
+  ];
+  H.telas.integracoes = function (el) {
+    el.innerHTML = '<p class="empty">Consultando o servidor…</p>';
+    H.api('/api/integracoes').then(r => r.json()).then(j => {
+      const st = (j && j.integracoes) || {};
+      const ok = INTEG.filter(([k]) => st[k] && st[k].ok).length;
+      el.innerHTML = `<div class="head"><div><h1>Integrações</h1><p class="sub">${ok} de ${INTEG.length} ligadas. As chaves ficam só no servidor (Render): nunca aparecem aqui nem devem ser mandadas por chat ou e-mail.</p></div></div>
+        <div class="box"><div class="tw"><table><thead><tr><th>Integração</th><th>Para quê</th><th>Situação</th><th>Quem faz</th><th>Variáveis no Render</th><th>Custo</th><th></th></tr></thead><tbody>
+        ${INTEG.map(([k, t, para, quem, vars, custo]) => { const s = st[k] || {}; return `<tr><td><b>${esc(t)}</b>${s.detalhe ? `<br><small class="note">${esc(s.detalhe)}</small>` : ''}</td><td>${esc(para)}</td><td><span class="pill ${s.ok ? 'ok' : 'warn'}">${s.ok ? 'ligada' : 'falta configurar'}</span></td><td>${esc(quem)}</td><td class="mono" style="font-size:11.5px">${esc(vars)}</td><td>${esc(custo)}</td>
+          <td class="num">${k === 'ia' ? '<button class="btn sm" id="tIA">Testar</button>' : k === 'portalUnico' && s.ok ? '<button class="btn sm" id="tPU">Atualizar DUIMPs</button>' : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+      const tia = el.querySelector('#tIA'); if (tia) tia.onclick = async () => { tia.disabled = true; tia.textContent = 'Testando…'; const r = await H.api('/api/ia/teste', { method: 'POST' }); const x = await r.json().catch(() => ({})); tia.disabled = false; tia.textContent = 'Testar'; H.toast(x.success ? `IA respondeu: “${esc(x.resposta)}” (modelo ${esc(x.modelo)}). Tudo certo.` : esc(x.message || 'Falhou')); };
+      const tpu = el.querySelector('#tPU'); if (tpu) tpu.onclick = async () => { const r = await H.api('/api/portal-unico/duimps', { method: 'POST' }); const x = await r.json().catch(() => ({})); H.toast(x.success ? `${x.atualizadas} DUIMP(s) atualizada(s)${x.erros && x.erros.length ? ', ' + x.erros.length + ' com erro' : ''}.` : esc(x.message || 'Falhou')); };
+    }).catch(() => { el.innerHTML = '<div class="banner">Não consegui consultar o servidor.</div>'; });
+  };
+
   /* ================= MÓDULOS EM IMPLANTAÇÃO ================= */
   const IMPL = {
     cambio: { t: 'Câmbio & Hedge', faz: ['PTAX do dia puxada do Banco Central', 'Exposição em dólar por processo (invoice × % já pago)', 'Contratos de câmbio e swift ligados à operação e ao GED', 'Opções (call) com strike, prêmio e vencimento', 'Variação cambial contra a cotação, por operação'],
