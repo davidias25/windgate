@@ -159,6 +159,47 @@ function bancoReal() {
     ok(!f2.fin.some(l => l._id === 'f4') && f2.fin.length === final.fin.length - 1, 'exclusão parcial remove só o registro excluído');
   }
 
+  console.log('\n--- 7. Torre por função e permissões ---');
+  {
+    const { mesclarDB } = require('../src/services/db-merge.service');
+    const d = W.prepararBanco(bancoReal());
+    d.users.ivina = { nome: 'Ívina', pin: '3' }; d.users.matheus = { nome: 'Matheus', pin: '4' };
+    const caps = k => W.perfilDe(d, k).caps;
+    ok(W.perfilDe(d, 'samir').id === 'diretoria' && caps('samir').includes('fin.autorizar') && caps('samir').includes('equipe.ver'), 'Samir: diretoria, autoriza pagamentos e vê a equipe');
+    ok(W.perfilDe(d, 'davi').id === 'operacoes' && W.pode(d, 'davi', 'fin.ver') && W.pode(d, 'davi', 'fin.excluir') && !W.pode(d, 'davi', 'fin.autorizar'), 'Davi: financeiro completo, mas a autorização é do Samir');
+    ok(W.pode(d, 'matheus', 'fin.lancar') && !W.pode(d, 'matheus', 'fin.ver') && !W.pode(d, 'matheus', 'fin.resultado') && !W.pode(d, 'matheus', 'fin.excluir'), 'Matheus: lança e dá baixa, sem DRE, margem ou exclusão');
+    ok(['fin.ver', 'fin.lancar', 'fin.resultado', 'docs.revisar'].every(c => !W.pode(d, 'ivina', c)), 'Ívina: nenhum acesso ao financeiro e não aprova documento');
+    ok(!W.torreDe(d, 'ivina').some(id => ['caixa', 'pagar', 'lancar', 'aprovacoes', 'equipe'].includes(id)), 'torre da Ívina não tem painel financeiro');
+    d.hubPainel.ivina = { paineis: ['caixa', 'recados', 'coletar', 'equipe'] };
+    ok(W.torreDe(d, 'ivina').join() === 'recados,coletar', 'torre salva com painel proibido: o painel some (permissão vale mais que a escolha)');
+    ok(W.torreDe(d, 'matheus').includes('fretes') && W.torreDe(d, 'matheus').includes('lancar') && !W.torreDe(d, 'matheus').includes('caixa'), 'torre do Matheus: frete e lançamentos, sem caixa');
+    d.users.matheus.perfilHub = 'documentos';
+    ok(!W.pode(d, 'matheus', 'fin.lancar'), 'perfil pode ser trocado por pessoa (perfilHub)');
+    delete d.users.matheus.perfilHub;
+
+    d.opStatusHist.push({ _id: 'h1', op: 'OP20', de: 'cotacao', para: 'contrato', em: '2026-10-05T10:00:00Z', por: 'Davi', tipo: 'mudanca' });
+    d.checklists.OP20[1] = { fase: 'Fechamento', titulo: 'PI', status: 'coletado', coletadoPor: 'Ívina', coletadoEm: '2026-10-06' };
+    d.fin.push({ _id: 'fm', tipo: 'Despesa', valor: 10, status: 'Realizado', vencimento: '2026-10-07', liquidadoEm: '2026-10-07', por: 'Matheus', criadoEm: '2026-10-07T09:00:00Z', baixaPor: 'Matheus' });
+    d.agendaTasks.push({ _id: 't1', t: 'Cotar frete', resp: 'Matheus', status: 'feita', doneAt: '2026-10-08' }, { _id: 't2', t: 'Atrasada', resp: 'Matheus', status: 'aberta', prazo: '2026-10-01' });
+    const dm = W.desempenho(d, 'Matheus', '2026-10', '2026-10-24'), di = W.desempenho(d, 'Ívina', '2026-10', '2026-10-24'), dd = W.desempenho(d, 'Davi', '2026-10', '2026-10-24');
+    ok(dm.lanc === 1 && dm.baixas === 1 && dm.feitas === 1 && dm.atrasadas === 1, 'desempenho Matheus: 1 lançamento, 1 baixa, 1 tarefa feita, 1 atrasada');
+    ok(di.coletados === 1 && dd.etapas === 1, 'desempenho: documento coletado conta para a Ívina, etapa avançada para o Davi');
+    ok(W.fechadasNoMes(d, '2026-10').includes('OP20'), 'importação fechada no mês: OP20 entrou em contrato em outubro');
+
+    d.hubRecados.push({ _id: 'r1', texto: 'Fechar frete OP20', para: 'matheus', por: 'Samir', em: '2026-10-20', prio: 'alta', feito: {} },
+      { _id: 'r2', texto: 'Para todos', para: 'todos', por: 'Samir', em: '2026-10-21', feito: { ivina: 'x' } },
+      { _id: 'r3', texto: 'Vencido', para: 'todos', por: 'Samir', em: '2026-10-01', ate: '2026-10-10', feito: {} });
+    ok(W.recadosPara(d, 'matheus', '2026-10-24').map(r => r._id).join() === 'r1,r2', 'recados: o do Matheus (alta) primeiro, o geral depois, o vencido some');
+    ok(W.recadosPara(d, 'ivina', '2026-10-24').length === 0, 'recado marcado como feito some só para quem marcou');
+
+    // Servidor: recados unidos por _id (exclusão vira tombstone) e torre de cada um por chave.
+    const s1 = mesclarDB({ hubRecados: [{ _id: 'a', texto: 'x' }], hubPainel: { samir: { paineis: ['resumo'] } } },
+      { hubRecados: [{ _id: 'b', texto: 'y' }], hubPainel: { davi: { paineis: ['caixa'] } }, _removidos: {} });
+    ok(s1.hubRecados.length === 2 && s1.hubPainel.samir && s1.hubPainel.davi, 'servidor junta recados e torres de pessoas diferentes sem perder nenhum');
+    const s2 = mesclarDB(s1, { hubRecados: [{ _id: 'b', texto: 'y' }], _removidos: { a: Date.now() } });
+    ok(s2.hubRecados.length === 1 && s2.hubRecados[0]._id === 'b', 'recado removido não volta');
+  }
+
   try { fs.unlinkSync(TMP); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
   process.exit(falhou ? 1 : 0);

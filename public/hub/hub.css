@@ -180,3 +180,21 @@ tfoot td{font-weight:700;background:var(--surface-2)}
   .filters input[type=search]{width:100%}
 }
 @media (max-width:520px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)}.kpi:nth-child(2n){border-right:0!important}.fields{grid-template-columns:minmax(0,1fr)}.f.w2{grid-column:auto}.sync span{display:none}}
+
+/* ---------- Torre de Controle por função ---------- */
+.torre{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.torre .tp{margin:0;min-width:0}
+.torre .tp.larga{grid-column:1/-1}
+.torre .kpis{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.torre .kpis .kpi{border-right:1px solid var(--line)}
+.torre .box-h .btns{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.torre .list{padding-top:4px;padding-bottom:4px}
+.recado.alta{border-left:3px solid var(--mag);padding-left:10px!important}
+.meta{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,240px) auto;gap:14px;align-items:center}
+.meta-bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
+.meta-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--mag))}
+table.mini{width:100%;border-collapse:collapse}
+table.mini td{padding:8px 4px;border-bottom:1px solid var(--line);font-size:13px}
+table.mini tr:last-child td{border-bottom:0}
+@media (max-width:1100px){.torre{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:520px){.meta{grid-template-columns:minmax(0,1fr)}}

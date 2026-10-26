@@ -11,12 +11,12 @@
  */
 
 // Coleções em lista, unidas por `_id`
-const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist'];
+const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados'];
 
 // Objetos indexados por chave própria (opId, id da cotação, 'YYYY-MM'…)
 // `notifLidas` é indexado por usuário: mesclar por chave preserva o que cada um
 // já leu, em vez de a gravação de um apagar a do outro.
-const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos'];
+const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel'];
 
 const DIAS_TOMBSTONE = 90;
 

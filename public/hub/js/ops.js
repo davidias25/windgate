@@ -2,54 +2,12 @@
 (function () {
   const H = window.HUB, W = H.W, esc = H.esc;
 
-  /* ================= TORRE DE CONTROLE ================= */
-  let filtroEtapa = null;
-
-  H.telas.torre = function (el) {
-    const db = H.db, hoje = W.hojeISO();
-    const ops = db.ops.filter(o => o && o.id);
-    const ativas = ops.filter(W.ativa);
-    const transito = ativas.filter(o => o.status === 'embarcado');
-    const chegando = ativas.filter(o => { const d = W.diasEntre(hoje, o.eta); return d != null && d >= 0 && d <= 15 && ['embarcado', 'container_enviado_porto'].includes(o.status); });
-    const atrasadas = ativas.filter(o => W.prazoInfo(db, o, hoje).sit === 'atrasado');
-    const travadas = ativas.filter(o => o.status === 'travada');
-    const p = H.podeFin() ? W.painelMes(db, hoje.slice(0, 7), 'todas', hoje) : null;
-    const al = W.alertas(db, hoje);
-
-    const etapas = W.STATUS_OP.filter(s => !W.FINALIZADAS.includes(s.k));
-    const lista = filtroEtapa ? ativas.filter(o => o.status === filtroEtapa) : ativas;
-    lista.sort((a, b) => W.prazoInfo(db, b, hoje).atraso - W.prazoInfo(db, a, hoje).atraso || W.FLUXO.indexOf(b.status) - W.FLUXO.indexOf(a.status));
-
-    el.innerHTML = `
-      <div class="head"><div><h1>Torre de Controle</h1><p class="sub">Tudo o que precisa de atenção hoje, por operação, prazo e dinheiro.</p></div>
-        <div class="btns"><button class="btn" data-a="mapa">Ver no mapa</button><button class="btn pri" data-a="nova">+ Nova operação</button></div></div>
-      <div class="kpis">
-        <button class="kpi" data-f=""><span class="lbl">Operações ativas</span><span class="v">${ativas.length}</span><span class="d">${ops.length - ativas.length} entregues/concluídas</span></button>
-        <button class="kpi" data-f="embarcado"><span class="lbl">Em trânsito</span><span class="v">${transito.length}</span><span class="d">${chegando.length} chegam em 15 dias</span></button>
-        <div class="kpi"><span class="lbl">Fora do prazo</span><span class="v">${atrasadas.length}</span><span class="d ${atrasadas.length ? 'bad' : 'good'}">${atrasadas.length ? atrasadas.map(o => o.id).slice(0, 3).join(', ') : 'tudo no prazo'}</span></div>
-        <button class="kpi" data-f="travada"><span class="lbl">Travadas</span><span class="v">${travadas.length}</span><span class="d ${travadas.length ? 'bad' : ''}">${travadas.length ? 'precisam de decisão' : 'nenhuma'}</span></button>
-        ${p ? `<button class="kpi" data-a="fin"><span class="lbl">A receber no mês</span><span class="v">${W.fmtBRLk(p.receber)}</span><span class="d ${p.vencidoReceber ? 'bad' : ''}">${p.vencidoReceber ? W.fmtBRLk(p.vencidoReceber) + ' vencido' : 'nada vencido'}</span></button>
-        <button class="kpi" data-a="fin"><span class="lbl">A pagar no mês</span><span class="v">${W.fmtBRLk(p.pagar)}</span><span class="d ${p.vencidoPagar ? 'bad' : ''}">${p.vencidoPagar ? W.fmtBRLk(p.vencidoPagar) + ' vencido' : 'nada vencido'}</span></button>`
-        : `<div class="kpi"><span class="lbl">Chegando</span><span class="v">${chegando.length}</span><span class="d">próximos 15 dias</span></div><div class="kpi"><span class="lbl">Alertas</span><span class="v">${al.length}</span><span class="d">ver abaixo</span></div>`}
-      </div>
-      <div class="pipe" aria-label="Operações por etapa">
-        ${etapas.map(s => { const n = ativas.filter(o => o.status === s.k); const late = n.filter(o => W.prazoInfo(db, o, hoje).sit === 'atrasado').length;
-          return `<button class="stage${filtroEtapa === s.k ? ' on' : ''}" data-f="${s.k}"><div class="n" style="color:${s.c}">${n.length}</div><div class="t">${esc(s.l)}</div>${late ? `<span class="late">${late} atras.</span>` : ''}</button>`; }).join('')}
-      </div>
-      <div class="g2 larga">
-        <div class="box"><div class="box-h"><h2>${filtroEtapa ? 'Operações · ' + esc(W.stMeta(filtroEtapa).l) : 'Operações ativas'}</h2>
-          <div class="btns">${filtroEtapa ? '<button class="btn sm" data-f="">Limpar filtro</button>' : ''}<span class="note">${lista.length} na tela · clique para abrir a ficha</span></div></div>
-          ${tabelaOps(lista, { compacta: true })}</div>
-        <div class="box"><div class="box-h"><h2>Alertas</h2><span class="note">gerados pelas regras da casa</span></div>
-          <div class="box-b">${al.length ? al.slice(0, 12).map(a => `<div class="alert ${a.nivel}"><span class="s"></span><div><b>${esc(a.titulo)}</b><small>${esc(a.detalhe || '')}</small></div>${a.op ? `<button class="btn sm" data-op="${esc(a.op)}">Abrir</button>` : a.tela ? `<button class="btn sm" data-a="${a.tela}">Ver</button>` : ''}</div>`).join('') : '<p class="empty">Nenhum alerta. Tudo em dia.</p>'}</div></div>
-      </div>`;
-    ligar(el);
-  };
+  /* A Torre de Controle por função fica em torre.js. */
 
   function tabelaOps(lista, opt) {
     const db = H.db;
     if (!lista.length) return '<p class="empty">Nenhuma operação aqui.</p>';
-    const comFin = H.podeFin() && !(opt && opt.compacta);
+    const comFin = H.pode('fin.resultado') && !(opt && opt.compacta);
     const res = comFin ? Object.fromEntries(W.resultadoPorOp(db, 'todas').map(r => [r.op, r])) : {};
     return `<div class="tw"><table><thead><tr><th>Operação</th><th>Cliente · produto</th><th>Etapa</th><th>Prazo da etapa</th><th>ETA</th>${opt && opt.compacta ? '' : '<th>Navio</th>'}<th class="num">Docs</th>${comFin ? '<th class="num">A receber</th><th class="num">Resultado</th>' : ''}<th>Resp.</th></tr></thead><tbody>
       ${lista.map(o => { const pct = W.checklistPct(db, o.id); const r = res[o.id];
@@ -63,12 +21,8 @@
 
   function ligar(el) {
     el.querySelectorAll('[data-op]').forEach(x => x.addEventListener('click', e => { e.stopPropagation(); H.ir('ficha', x.dataset.op); }));
-    el.querySelectorAll('[data-f]').forEach(x => x.addEventListener('click', () => { filtroEtapa = x.dataset.f || null; H.render(); }));
-    el.querySelectorAll('[data-a]').forEach(x => x.addEventListener('click', () => {
-      const a = x.dataset.a; if (a === 'nova') novaOperacao(); else H.ir(a);
-    }));
+    el.querySelectorAll('[data-a]').forEach(x => x.addEventListener('click', () => { const a = x.dataset.a; if (a === 'nova') novaOperacao(); else H.ir(a); }));
   }
-  H.ligarOps = ligar;
 
   /* ================= LISTA DE OPERAÇÕES (ativas + histórico) ================= */
   let modoLista = 'ativas';
@@ -101,9 +55,9 @@
     if (!o) { el.innerHTML = `<div class="banner">Operação ${esc(id)} não encontrada.</div>`; return; }
     const idx = W.FLUXO.indexOf(o.status);
     const pct = W.checklistPct(db, o.id);
-    const r = H.podeFin() ? W.resultadoPorOp(db, 'todas').find(x => x.op === o.id) : null;
+    const r = H.pode('fin.resultado') ? W.resultadoPorOp(db, 'todas').find(x => x.op === o.id) : null;
     const abas = [['resumo', 'Resumo'], ['etapas', 'Etapas & histórico'], ['logistica', 'Logística & contêineres'], ['docs', `Documentos${pct != null ? ' · ' + pct + '%' : ''}`]];
-    if (H.podeFin()) abas.push(['fin', 'Financeiro da operação']);
+    if (H.pode('fin.lancar')) abas.push(['fin', H.pode('fin.ver') ? 'Financeiro da operação' : 'Lançamentos da operação']);
 
     el.innerHTML = `
       <div class="head"><div><span class="lbl"><a href="#ops" data-voltar>Operações</a> · ${esc(o.id)}</span><h1>${esc(o.id)} · ${esc(o.cliente || '')}</h1>
@@ -204,7 +158,7 @@
       <div class="box"><div class="box-h"><h2>Checklist documental</h2><span class="note">${Array.isArray(chk) ? chk.length + ' itens' : 'sem checklist'}</span></div>
         ${Array.isArray(chk) && chk.length ? `<div class="tw"><table><thead><tr><th>Fase</th><th>Documento</th><th>Situação</th><th>Por</th></tr></thead><tbody>
         ${chk.map((it, i) => `<tr><td class="note">${esc(it.fase)}</td><td>${esc(it.titulo)}${it.link ? ` · <a href="${esc(it.link)}" target="_blank" rel="noopener">abrir</a>` : ''}</td>
-          <td><select class="inp" data-chk="${i}">${CHK.map(([k, l]) => `<option value="${k}" ${it.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+          <td><select class="inp" data-chk="${i}">${CHK.filter(([k]) => H.pode('docs.revisar') || !['revisado', 'aprovado'].includes(k) || it.status === k).map(([k, l]) => `<option value="${k}" ${it.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
           <td class="note">${esc([it.coletadoPor, it.revisadoPor].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="empty">Esta operação ainda não tem checklist.</p>'}</div>
       <div class="box"><div class="box-h"><h2>Arquivos da operação</h2><span class="note">${docs.length}</span></div><div class="box-b list">
@@ -214,18 +168,20 @@
       const lista = H.db.checklists[o.id], ref = chk[+s.dataset.chk];
       const it = Array.isArray(lista) && (lista[+s.dataset.chk] && lista[+s.dataset.chk].titulo === ref.titulo ? lista[+s.dataset.chk] : lista.find(x => x && x.titulo === ref.titulo && x.fase === ref.fase));
       if (!it) { H.toast('Este item mudou em outra tela. Atualizei a lista.'); H.render(); return; }
-      const eu = H.nomeUsuario(H.userKey), v = s.value;
+      const eu = H.nomeUsuario(H.userKey), v = s.value, agora = W.hojeISO();
+      if (['revisado', 'aprovado'].includes(v) && !H.pode('docs.revisar')) { H.toast('Revisar e aprovar documentos é do Davi ou do Samir. Marque como <b>Coletado</b>.'); H.render(); return; }
       // Dupla análise, igual ao sistema atual: quem aprova não pode ser quem coletou.
       if (v === 'aprovado') {
         const rev = it.revisadoPor || eu;
         if (!it.coletadoPor) { H.toast('Para aprovar, o item precisa ter <b>coletado por</b> preenchido (dupla análise).'); H.render(); return; }
         if (it.coletadoPor === rev) { H.toast('Quem revisa não pode ser quem coletou.'); H.render(); return; }
+        if (!it.revisadoPor) it.revisadoEm = agora;
         it.revisadoPor = rev;
       }
-      if (v === 'coletado' && !it.coletadoPor) it.coletadoPor = eu;
+      if (v === 'coletado' && !it.coletadoPor) { it.coletadoPor = eu; it.coletadoEm = agora; }
       if (v === 'revisado' && !it.revisadoPor) {
         if (it.coletadoPor === eu) { H.toast('Quem revisa não pode ser quem coletou.'); H.render(); return; }
-        it.revisadoPor = eu;
+        it.revisadoPor = eu; it.revisadoEm = agora;
       }
       it.status = v;
       if (it.link) espelharDoc(o.id, it);
@@ -273,6 +229,7 @@
     ['Desembaraço', 'DI / DUIMP registrada'], ['Desembaraço', 'ICMS-AL pago (1,6%)'], ['Desembaraço', 'NF de entrada / nacionalização'],
     ['Entrega', 'NF de saída / venda'], ['Entrega', 'GNRE DIFAL (se aplicável)'], ['Entrega', 'CT-e transporte terrestre'], ['Entrega', 'Comprovante de entrega assinado']];
 
+  H.novaOperacao = () => novaOperacao();
   function novaOperacao() {
     const nums = H.db.ops.map(o => parseInt(String(o.id).replace(/\D/g, ''), 10)).filter(n => isFinite(n));
     const prox = 'OP' + ((nums.length ? Math.max(...nums) : 0) + 1);

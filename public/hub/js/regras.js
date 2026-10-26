@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -40,7 +40,7 @@
   function prepararBanco(db) {
     if (!db || typeof db !== 'object') db = {};
     COLECOES_SYNC.forEach(k => { if (!Array.isArray(db[k])) db[k] = []; });
-    ['checklists', 'quotes', 'gestao', 'agentes', 'notifLidas', 'portos', 'users'].forEach(k => {
+    ['checklists', 'quotes', 'gestao', 'agentes', 'notifLidas', 'portos', 'users', 'hubPainel'].forEach(k => {
       if (!db[k] || typeof db[k] !== 'object' || Array.isArray(db[k])) db[k] = {};
     });
     if (!db.settings || typeof db.settings !== 'object') db.settings = {};
@@ -83,7 +83,7 @@
   /* Gravação parcial: o Hub só envia o que ELE mudou desde a última leitura.
      Assim uma aba aberta há tempo não devolve ao servidor cópias velhas de
      registros que outra pessoa alterou nesse meio-tempo. */
-  const OBJETOS_SYNC = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos'];
+  const OBJETOS_SYNC = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel'];
   function fotografarConteudo(db) {
     const base = { col: {}, obj: {} };
     COLECOES_SYNC.forEach(k => { const m = new Map(); (db[k] || []).forEach(r => { if (r && r._id) m.set(r._id, JSON.stringify(r)); }); base.col[k] = m; });
@@ -336,6 +336,86 @@
     return out.sort((a, b) => ordem[a.nivel] - ordem[b.nivel]);
   }
 
+
+  /* ---------- Perfis e permissões (Torre por função) ---------- */
+  /* Cada pessoa tem um perfil; o perfil define o que ela pode ver e fazer.
+     fin.ver = painel, DRE, contas e resultado · fin.lancar = registrar e dar baixa
+     fin.excluir · fin.autorizar = autorizar pagamento · fin.resultado = margem por operação
+     equipe.ver = desempenho da equipe · recado.outros = fixar recado na torre de outra pessoa
+     torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês */
+  const PERFIS = {
+    diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar'],
+      torre: ['resumo', 'aprovacoes', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
+    operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar'],
+      torre: ['resumo', 'revisar', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
+    frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
+      caps: ['fin.lancar'],
+      torre: ['resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
+    documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
+      caps: [],
+      torre: ['resumo', 'coletar', 'clientes', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
+  };
+  const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos' };
+  function perfilDe(db, k) {
+    const u = (db && db.users && db.users[k]) || {};
+    const id = (u.perfilHub && PERFIS[u.perfilHub]) ? u.perfilHub : PERFIL_PADRAO[k] || (u.fin ? 'operacoes' : 'documentos');
+    return Object.assign({ id }, PERFIS[id]);
+  }
+  const pode = (db, k, cap) => perfilDe(db, k).caps.includes(cap);
+
+  /* Painéis da torre: quem pode ter cada um (cap exigida). */
+  const PAINEIS = {
+    resumo: { t: 'Números do dia' }, etapas: { t: 'Operações por etapa' }, operacoes: { t: 'Operações ativas' },
+    alertas: { t: 'Alertas' }, recados: { t: 'Recados e prioridades' }, tarefas: { t: 'Minhas tarefas' },
+    coletar: { t: 'Documentos a coletar' }, revisar: { t: 'Documentos aguardando revisão', cap: 'docs.revisar' },
+    clientes: { t: 'Clientes a atualizar' }, fretes: { t: 'Frete e embarque' }, transito: { t: 'Em trânsito e chegadas' },
+    lancar: { t: 'A lançar e conferir', cap: 'fin.lancar' }, pagar: { t: 'Pagamentos da semana', cap: 'fin.ver' },
+    caixa: { t: 'Caixa: a receber e a pagar', cap: 'fin.ver' }, aprovacoes: { t: 'Aguardando sua aprovação', cap: 'fin.autorizar' },
+    equipe: { t: 'Desempenho da equipe', cap: 'equipe.ver' }
+  };
+  function paineisPermitidos(db, k) { return Object.keys(PAINEIS).filter(id => !PAINEIS[id].cap || pode(db, k, PAINEIS[id].cap)); }
+  /** Torre salva da pessoa (se houver), sempre limitada ao que o perfil permite. */
+  function torreDe(db, k) {
+    const ok = new Set(paineisPermitidos(db, k));
+    const salva = db && db.hubPainel && db.hubPainel[k] && Array.isArray(db.hubPainel[k].paineis) ? db.hubPainel[k].paineis : null;
+    return (salva || perfilDe(db, k).torre).filter(id => ok.has(id));
+  }
+
+  /* Desempenho do mês por pessoa (nome curto, como o sistema grava). */
+  function desempenho(db, nome, mes, hoje) {
+    const h = hoje || hojeISO(), m = mes || h.slice(0, 7);
+    const no = d => String(d || '').slice(0, 7) === m;
+    const etapas = (db.opStatusHist || []).filter(x => x && x.por === nome && no(x.em) && x.tipo !== 'correcao').length;
+    let coletados = 0, revisados = 0;
+    Object.values(db.checklists || {}).forEach(l => (Array.isArray(l) ? l : []).forEach(it => {
+      if (!it) return;
+      if (it.coletadoPor === nome && (it.coletadoEm ? no(it.coletadoEm) : false)) coletados++;
+      if (it.revisadoPor === nome && (it.revisadoEm ? no(it.revisadoEm) : false)) revisados++;
+    }));
+    const lanc = (db.fin || []).filter(l => l && l.por === nome && no(l.criadoEm || l.data)).length;
+    const baixas = (db.fin || []).filter(l => l && l.baixaPor === nome && no(l.liquidadoEm)).length;
+    const tarefas = (db.agendaTasks || []).filter(t => t && t.resp === nome);
+    const feitas = tarefas.filter(t => t.status === 'feita' && no(t.doneAt)).length;
+    const atrasadas = tarefas.filter(t => t.status !== 'feita' && t.prazo && t.prazo < h).length;
+    const opsResp = (db.ops || []).filter(o => o && ativa(o) && String(o.resp || '').split(/[\s/,]+/).includes(nome));
+    const opsAtrasadas = opsResp.filter(o => prazoInfo(db, o, h).sit === 'atrasado').length;
+    return { nome, etapas, coletados, revisados, lanc, baixas, feitas, atrasadas, ops: opsResp.length, opsAtrasadas };
+  }
+  /** Importações fechadas no mês: operações que entraram em Contrato (ou além) neste mês. */
+  function fechadasNoMes(db, mes) {
+    const ids = new Set();
+    (db.opStatusHist || []).forEach(x => { if (x && String(x.em || '').slice(0, 7) === mes && x.para === 'contrato') ids.add(x.op); });
+    (db.ops || []).forEach(o => { if (o && String(o.criadaEm || '').slice(0, 7) === mes && o.status && !['cotacao', 'travada'].includes(o.status)) ids.add(o.id); });
+    return [...ids];
+  }
+  function recadosPara(db, k, hoje) {
+    const h = hoje || hojeISO();
+    return (db.hubRecados || []).filter(r => r && (r.para === 'todos' || r.para === k) && !(r.feito && r.feito[k]) && (!r.ate || r.ate >= h))
+      .sort((a, b) => (b.prio === 'alta') - (a.prio === 'alta') || String(b.em).localeCompare(String(a.em)));
+  }
+
   /* ---------- Formatação ---------- */
   const fmtBRL = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const fmtBRLk = v => { const n = +v || 0; return Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil' : fmtBRL(n); };
@@ -344,6 +424,7 @@
   return {
     COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
+    PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
     STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,
     novaSerie, realizar, mesSoma, vencDoMes, alertas, fmtBRL, fmtBRLk, dataBR

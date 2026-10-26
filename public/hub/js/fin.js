@@ -94,7 +94,7 @@
 
   /* ================= LANÇAMENTOS ================= */
   H.telas.lanc = function (el) {
-    if (!H.podeFin()) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
+    if (!H.pode('fin.lancar')) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
     const db = H.db;
     const q = F.q.trim().toLowerCase();
     const lista = db.fin.filter(l => l && (F.empresa === 'todas' || (l.empresa || 'WindGate') === F.empresa)
@@ -104,7 +104,7 @@
     const ops = [...new Set(db.fin.map(l => l && l.op).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
     const ent = lista.filter(W.ehReceita).reduce((s, l) => s + (+l.valor || 0), 0), sai = lista.filter(l => !W.ehReceita(l)).reduce((s, l) => s + (+l.valor || 0), 0);
     el.innerHTML = `
-      <div class="head"><div><h1>Lançamentos</h1><p class="sub">${q ? 'Busca em todos os meses' : 'Vencimentos de ' + mesExt(F.mes)} · entradas ${W.fmtBRL(ent)} · saídas ${W.fmtBRL(sai)}</p></div>${filtrosTopo()}</div>
+      <div class="head"><div><h1>Lançamentos</h1><p class="sub">${q ? 'Busca em todos os meses' : 'Vencimentos de ' + mesExt(F.mes)}${H.pode('fin.ver') ? ` · entradas ${W.fmtBRL(ent)} · saídas ${W.fmtBRL(sai)}` : ''}</p></div>${filtrosTopo()}</div>
       <div class="box"><div class="filters">
         <input type="search" id="lq" placeholder="Buscar em todos os meses: descrição, operação, valor…" value="${esc(F.q)}">
         <select id="lt" class="inp"><option value="">Receitas e despesas</option><option ${F.tipo === 'Receita' ? 'selected' : ''}>Receita</option><option ${F.tipo === 'Despesa' ? 'selected' : ''}>Despesa</option></select>
@@ -200,8 +200,15 @@
       <div class="f w2"><label class="lbl" for="ecp">Link do comprovante</label><input id="ecp" type="url" value="${esc(d.comp || '')}"></div>
       ${novo ? `<div class="f w4"><label class="lbl"><input type="checkbox" id="efx" style="width:auto"> Conta fixa mensal (gera 12 meses)</label></div>` : ''}
       ${l && l.recId ? '<p class="note f w4">Lançamento de conta fixa: esta edição muda só este mês (o vencimento continua dentro do mês dele).</p>' : ''}</div>`,
-      `${!novo ? '<button class="btn" id="edel" style="margin-right:auto;color:var(--crit)">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="eok">Salvar</button>`);
+      `${!novo && H.pode('fin.excluir') ? '<button class="btn" id="edel" style="margin-right:auto;color:var(--crit)">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="eok">Salvar</button>`);
+    // Quem só lança não altera o que outra pessoa já baixou: só anexa o comprovante.
+    const restrito = !novo && !H.pode('fin.excluir') && W.realizado(l) && l.por !== H.nomeUsuario(H.userKey);
+    if (restrito) { m.querySelectorAll('input,select').forEach(x => { if (x.id !== 'ecp') x.disabled = true; }); m.querySelector('.box-b').insertAdjacentHTML('afterbegin', '<p class="banner" style="margin-bottom:10px">Lançamento já baixado por outra pessoa: você pode anexar o comprovante. Outras mudanças, peça ao Davi.</p>'); }
     m.querySelector('#eok').onclick = () => {
+      if (restrito) {
+        const atual = H.db.fin.find(x => x && x._id === l._id); if (!atual) { H.fecharModal(); H.render(); return; }
+        atual.comp = m.querySelector('#ecp').value.trim(); H.salvar(); H.fecharModal(); H.toast('Comprovante anexado'); H.render(); return;
+      }
       if (!novo) { l = H.db.fin.find(x => x && x._id === l._id); if (!l) { H.fecharModal(); H.toast('Este lançamento foi removido por outra pessoa. Nada foi gravado.'); H.render(); return; } }
       const valor = +m.querySelector('#ev').value;
       if (!(valor > 0)) { H.toast('Informe um valor maior que zero'); return; }
@@ -217,8 +224,10 @@
         const s = W.novaSerie(H.db, Object.assign({ por: eu }, campos), 12, status === 'Realizado');
         H.salvar(); H.fecharModal(); H.toast(`Conta fixa criada: <b>${s.total} meses</b>`); H.render(); return;
       }
-      if (novo) H.db.fin.unshift(Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '' }, campos));
-      else { if (l.recId) { campos.fixo = true; campos.data = venc; } Object.assign(l, campos); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
+      if (novo) H.db.fin.unshift(Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '', criadoEm: new Date().toISOString() }, campos));
+      else {
+        // Pagamento autorizado que muda de valor, vencimento ou destino volta para autorização.
+        if (l.autorizadoEm && (+l.valor !== +campos.valor || W.vencDe(l) !== campos.vencimento || (l.op || '') !== campos.op)) { campos.autorizadoEm = null; campos.autorizadoPor = null; H.toast('Valor ou vencimento mudou: o pagamento volta para autorização do Samir.'); } if (l.recId) { campos.fixo = true; campos.data = venc; } Object.assign(l, campos); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
       H.salvar(); H.fecharModal(); H.toast(novo ? 'Lançamento registrado' : 'Lançamento atualizado'); H.render();
     };
     const del = m.querySelector('#edel');

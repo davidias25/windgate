@@ -148,24 +148,28 @@
     return `<span class="sem"><span class="bar"><i style="width:${Math.min(100, p.dias / p.alvo * 100)}%;background:${cor}"></i></span><span style="color:${cor};font-weight:600">${p.dias}/${p.alvo} d</span></span>`;
   };
   H.nomeUsuario = k => { const u = (H.db.users || {})[k]; return u ? (u.nome || k).split(' ')[0] : (k || ''); };
-  H.podeFin = () => !!(H.user && H.user.fin);
-  H.aprova = () => !!(H.user && (H.user.aprova || H.userKey === 'samir'));
+  /* Permissões vêm do perfil da pessoa (W.PERFIS): Torre e menus por função. */
+  H.pode = cap => !!(H.db && H.userKey && W.pode(H.db, H.userKey, cap));
+  H.podeFin = () => H.pode('fin.ver');
+  H.aprova = () => H.pode('fin.autorizar');
+  H.perfil = () => W.perfilDe(H.db, H.userKey);
 
   /* ---------------- Navegação ---------------- */
   const MENU = [
     { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos']] },
     { g: 'Comercial', itens: [['L:cotacoes', 'Cotações'], ['L:crm', 'CRM & Clientes'], ['L:sourcing', 'Sourcing China'], ['L:parceiros', 'Fornecedores'], ['L:frete', 'Fretes']] },
-    { g: 'Financeiro', fin: true, itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['resop', 'Resultado por operação']] },
+    { g: 'Financeiro', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['resop', 'Resultado por operação']] },
     { g: 'Gestão', itens: [['L:agenda', 'Agenda'], ['L:gestao', 'Gestão do Mês'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe'], ['L:config', 'Configurações']] }
   ];
 
   function montarMenu() {
     const nav = $('#menu'); nav.innerHTML = '';
     MENU.forEach(sec => {
-      if (sec.fin && !H.podeFin()) return;
+      const itens = sec.itens.filter(([k]) => podeTela(k));
+      if (!itens.length) return;
       const g = document.createElement('div'); g.className = 'grp'; g.textContent = sec.g; nav.appendChild(g);
       const lista = document.createElement('div'); lista.className = 'nav';
-      sec.itens.forEach(([k, l]) => {
+      itens.forEach(([k, l]) => {
         if (k.startsWith('L:')) {
           const a = document.createElement('a'); a.href = '/?aba=' + k.slice(2); a.innerHTML = `${esc(l)} <span class="tag">atual</span>`;
           a.title = 'Ainda no sistema atual — será refeito no Hub 2.0'; lista.appendChild(a);
@@ -178,7 +182,22 @@
     });
   }
 
+  /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar' };
+  const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
+  function podeTela(k) {
+    if (k.startsWith('L:')) {
+      const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
+      if (k === 'L:config') return !!(H.user && (H.user.config || H.userKey === 'samir'));
+      if (k === 'L:agenda') return true;
+      return !Array.isArray(tabs) || tabs.includes(aba);
+    }
+    return !TELA_CAP[k] || H.pode(TELA_CAP[k]);
+  }
+  H.podeTela = podeTela;
+
   function ir(tela, param) {
+    if (!podeTela(tela)) { H.toast('Esta área não faz parte do seu perfil.'); tela = 'torre'; param = null; }
     H.estado = { tela, param: param == null ? null : param };
     try { history.replaceState(null, '', '#' + tela + (param ? '-' + encodeURIComponent(param) : '')); } catch (e) {}
     render(); window.scrollTo(0, 0);
@@ -234,12 +253,12 @@
     if (!H.user) throw new Error('Usuário não encontrado no banco.');
     $('#login').hidden = true; $('#app').hidden = false;
     $('#meNome').textContent = (H.user.nome || H.userKey).split(' ')[0];
-    $('#mePapel').textContent = H.user.papel || '';
+    $('#mePapel').textContent = H.perfil().nome;
     $('#meAv').textContent = (H.user.nome || H.userKey)[0]; $('#meAv').style.background = H.user.cor || 'var(--blue)';
     montarMenu();
     const h = decodeURIComponent((location.hash || '').slice(1));
     if (h) { const i = h.indexOf('-'); H.estado = i > 0 ? { tela: h.slice(0, i), param: h.slice(i + 1) } : { tela: h, param: null }; }
-    if (['fin', 'contas', 'lanc', 'resop'].includes(H.estado.tela) && !H.podeFin()) H.estado = { tela: 'torre', param: null };
+    if (!podeTela(H.estado.tela)) H.estado = { tela: 'torre', param: null };
     render();
     clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
   }

@@ -1880,7 +1880,7 @@ async function uploadFileUniversal(file) {
 }
 
 /* Coleções sincronizadas registro a registro com o banco central. */
-const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmDocs','crmOps','parceiros','opStatusHist'];
+const COLECOES_SYNC = ['ops','docs','fin','finRec','fretes','fornecedores','qindex','agendaTasks','crm','crmDocs','crmOps','parceiros','opStatusHist','hubRecados'];
 
 /* Cada registro precisa de uma identidade estável, senão o servidor não
    consegue distinguir "documento novo de outro usuário" de "documento que
@@ -3358,7 +3358,13 @@ function chkSet(i,k,v){
     if(!it.coletadoPor||!it.revisadoPor){ toast('⚠ Para aprovar: precisa de <b>coletado por</b> e <b>revisado por</b> preenchidos (dupla análise).'); renderChecklist(); return; }
     if(it.coletadoPor===it.revisadoPor){ toast('⚠ Quem revisa não pode ser quem coletou.'); renderChecklist(); return; }
   }
-  it[k]=v; if(it.link) syncChkDoc(op,it); saveDB(); renderChecklist(); updateNotifs();
+  it[k]=v;
+  // Data de quem coletou/revisou: alimenta o desempenho do mês no Hub 2.0.
+  if(k==='coletadoPor') it.coletadoEm = v ? new Date().toISOString().slice(0,10) : '';
+  if(k==='revisadoPor') it.revisadoEm = v ? new Date().toISOString().slice(0,10) : '';
+  if(k==='status' && v==='coletado' && !it.coletadoEm) it.coletadoEm = new Date().toISOString().slice(0,10);
+  if(k==='status' && (v==='revisado'||v==='aprovado') && !it.revisadoEm && it.revisadoPor) it.revisadoEm = new Date().toISOString().slice(0,10);
+  if(it.link) syncChkDoc(op,it); saveDB(); renderChecklist(); updateNotifs();
 }
 function chkDel(i){ const op=$('chkOpSel').value; DB.checklists[op].splice(i,1); saveDB(); renderChecklist(); }
 function chkLink(i){
@@ -3371,7 +3377,7 @@ function chkLink(i){
 function chkLinkSave(i){
   const op=$('chkOpSel').value; const it=DB.checklists[op][i];
   it.link=V('m_chklink').trim();
-  if(it.link && it.status==='pendente'){ it.status='coletado'; if(!it.coletadoPor) it.coletadoPor=USER.nome.split(' ')[0]; }
+  if(it.link && it.status==='pendente'){ it.status='coletado'; if(!it.coletadoPor){ it.coletadoPor=USER.nome.split(' ')[0]; it.coletadoEm=new Date().toISOString().slice(0,10); } }
   syncChkDoc(op,it); saveDB(); closeModal(); renderChecklist(); toast('Documento vinculado ✓');
 }
 function syncChkDoc(op,it){
