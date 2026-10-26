@@ -47,6 +47,7 @@ const { normalizarStatus } = require('./services/op-status.service');
 const { consultarTratamento } = require('./integrations/siscomex.service');
 const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
+const historico = require('./services/historico.service');
 const auth = require('./services/auth.service');
 const pontoStore = require('./services/ponto-store.service');
 
@@ -54,9 +55,22 @@ const pontoStore = require('./services/ponto-store.service');
 // esperam essa carga terminar para não responderem "vazio" durante o boot —
 // responder null aqui faria o navegador achar que o banco foi zerado.
 let memoryDB = null;
+/* Se a nuvem não respondeu no boot, o que está em memória pode ser o arquivo
+   vazio do repositório — e aceitar a cópia de um navegador em cima disso faz
+   a cópia dele VIRAR o banco, apagando o que os outros têm. Nesse estado o
+   servidor recusa gravação até alguém olhar. */
+let bancoIncerto = false;
 const bancoPronto = dbStore.carregar(DB_FILE_PATH)
-  .then(db => { memoryDB = db; })
-  .catch(err => { console.warn('⚠️ Falha ao carregar o banco central:', err.message); });
+  .then(db => {
+    memoryDB = db;
+    bancoIncerto = !db;
+    if (bancoIncerto) console.error('⛔ Banco central não carregou. GRAVAÇÕES RECUSADAS até o boot ser refeito com a nuvem respondendo.');
+  })
+  .catch(err => {
+    console.warn('⚠️ Falha ao carregar o banco central:', err.message);
+    bancoIncerto = true;
+    console.error('⛔ GRAVAÇÕES RECUSADAS: sem saber o estado real, aceitar uma cópia é apagar o resto.');
+  });
 
 // Rotas da API REST
 app.use('/api/cotacoes', cotacoesRoutes);
@@ -73,6 +87,23 @@ app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
     const newDB = req.body;
     if (!newDB || typeof newDB !== 'object') {
       return res.status(400).json({ success: false, message: 'Dados de banco de dados inválidos.' });
+    }
+
+    /* TRAVA — sem saber o estado real, aceitar a cópia de um navegador é deixar
+       que ela VIRE o banco. Recusar é o único caminho que não perde dado. */
+    if (bancoIncerto) {
+      return res.status(503).json({ success: false, bancoIncerto: true,
+        message: 'O servidor não conseguiu carregar o banco central no início. Gravação recusada para não sobrescrever os dados. Reinicie o serviço com a nuvem respondendo.' });
+    }
+
+    /* Gravação que REMOVE registro tira a fotografia ANTES de aplicar: depois
+       já não há estado anterior para guardar. O caso comum não remove nada e
+       nem passa por aqui. */
+    const saindo = historico.perdas(memoryDB, newDB);
+    if (Object.keys(saindo).length) {
+      const resumo = Object.entries(saindo).map(([k, n]) => `${n} em ${k}`).join(', ');
+      console.log(`📸 Fotografia antes de remoção: ${resumo}`);
+      await historico.fotografar(memoryDB, `antes-de-remover (${resumo})`);
     }
     // Guarda a versão anterior antes de sobrescrever — o banco central é a única
     // cópia das operações, então uma gravação ruim não pode ser irreversível.
@@ -95,10 +126,13 @@ app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
     // registros que os outros usuários criaram desde a última sincronização.
     memoryDB = mesclarDB(memoryDB, newDB);
     const persistencia = await dbStore.salvar(memoryDB, DB_FILE_PATH);
+    // Fotografia de rotina: a da hora gira, a do dia fica.
+    const foto = await historico.fotografar(memoryDB, 'gravacao');
     res.json({
       success: true,
       message: 'Banco central sincronizado com sucesso!',
-      persistidoNaNuvem: persistencia.remoto
+      persistidoNaNuvem: persistencia.remoto,
+      historico: foto.ok
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -533,9 +567,13 @@ app.get('/api/health', async (req, res) => {
     // Permite conferir de fora se o banco está sendo guardado fora do disco
     // efêmero do Render — sem isso a perda de dados só aparece no próximo reinício.
     persistencia: dbStore.estado(),
-    registros: memoryDB
-      ? { ops: (memoryDB.ops || []).length, docs: (memoryDB.docs || []).length, fin: (memoryDB.fin || []).length }
-      : null
+    // `bancoIncerto: true` significa gravações recusadas — é o primeiro campo a
+    // olhar quando alguém disser que o sistema "não está salvando".
+    bancoIncerto,
+    historico: historico.estado(),
+    // Contagem de TODAS as coleções em lista: é por ela que se percebe sumiço
+    // sem precisar baixar o banco.
+    registros: memoryDB ? historico.contar(memoryDB) : null
   });
 });
 
