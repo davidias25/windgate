@@ -71,30 +71,5 @@
     if (limites.length) mapa.fitBounds(L.latLngBounds(limites).pad(0.6), { maxZoom: 4 });
   };
 
-  /* ================= DOCUMENTOS ================= */
-  let pastaDoc = null, qDoc = '';
-  H.telas.docs = function (el) {
-    const db = H.db;
-    const porOp = {};
-    db.docs.forEach(d => { if (d) (porOp[d.op || 'Sem operação'] = porOp[d.op || 'Sem operação'] || []).push(d); });
-    const pastas = Object.keys(porOp).sort((a, b) => String(b).localeCompare(String(a), 'pt-BR', { numeric: true }));
-    if (!pastaDoc || !porOp[pastaDoc]) pastaDoc = pastas[0] || null;
-    const q = qDoc.trim().toLowerCase();
-    const lista = q ? db.docs.filter(d => d && [d.nome, d.op, d.grupo, d.cat, d.obs].join(' ').toLowerCase().includes(q)) : (porOp[pastaDoc] || []);
-    el.innerHTML = `
-      <div class="head"><div><h1>Documentos</h1><p class="sub">Uma pasta por operação, com quem enviou e quando. ${db.docs.length} arquivo(s) no total.</p></div></div>
-      <div class="box" style="display:grid;grid-template-columns:220px minmax(0,1fr)">
-        <div style="border-right:1px solid var(--line);padding:10px;max-height:70vh;overflow:auto">
-          <input type="search" class="inp" id="dq" placeholder="Buscar em todos" value="${esc(qDoc)}" style="width:100%;margin-bottom:8px">
-          ${pastas.map(p => `<button class="btn ghost sm" data-p="${esc(p)}" style="display:flex;justify-content:space-between;width:100%;${p === pastaDoc && !q ? 'background:var(--blue-soft)' : ''}"><span>${esc(p)}</span><span class="note">${porOp[p].length}</span></button>`).join('')}
-        </div>
-        <div style="min-width:0">${lista.length ? `<div class="tw"><table><thead><tr><th>Arquivo</th>${q ? '<th>Operação</th>' : ''}<th>Grupo</th><th>Situação</th><th>Enviado</th><th></th></tr></thead><tbody>
-          ${lista.map(d => `<tr><td><b>${esc(d.nome)}</b>${d.obs ? `<br><small class="note">${esc(d.obs)}</small>` : ''}</td>${q ? `<td class="mono">${esc(d.op || '—')}</td>` : ''}<td>${esc(d.grupo || d.cat || '—')}</td>
-            <td>${d.status ? `<span class="pill ${/aprov|ok|confer/i.test(d.status) ? 'ok' : 'info'}">${esc(d.status)}</span>` : '—'}</td><td class="note">${W.dataBR(d.data)} · ${esc(d.por || '')}</td>
-            <td class="num">${d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Nenhum documento.</p>'}</div>
-      </div>`;
-    el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { pastaDoc = b.dataset.p; qDoc = ''; H.render(); });
-    const dq = el.querySelector('#dq');
-    dq.addEventListener('input', () => { qDoc = dq.value; clearTimeout(dq._t); dq._t = setTimeout(() => { H.render(); const n = document.querySelector('#dq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });
-  };
+  /* Documentos (GED) ficam em docs.js. */
 })();

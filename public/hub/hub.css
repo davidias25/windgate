@@ -198,3 +198,78 @@ table.mini td{padding:8px 4px;border-bottom:1px solid var(--line);font-size:13px
 table.mini tr:last-child td{border-bottom:0}
 @media (max-width:1100px){.torre{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:520px){.meta{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- CRM & Funil ---------- */
+.h3{font:600 12px/1.3 var(--fc);text-transform:uppercase;letter-spacing:.06em;color:var(--blue);margin-bottom:8px}
+.f.w3{grid-column:span 3}
+.modal.larga{width:min(1040px,100%)}
+.banner.ok{background:var(--ok-soft)}
+.pill.mag{background:var(--mag-soft);color:var(--mag)}
+.tag.novo{background:var(--mag-soft);color:var(--mag)}
+.kanban{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(205px,1fr);gap:10px;overflow-x:auto;padding:12px}
+.kanban .col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);min-height:240px;display:flex;flex-direction:column;transition:background .15s}
+.kanban .col.fim{opacity:.85}
+.kanban .col.alvo{background:var(--blue-soft);border-color:var(--blue)}
+.kanban .col header{display:flex;align-items:center;gap:6px;padding:10px 10px 2px;font-size:12.5px}
+.kanban .col header .note{margin-left:auto}
+.kanban .dot{width:8px;height:8px;border-radius:50%}
+.col-faz{font-size:11px;color:var(--faint);padding:0 10px 8px;line-height:1.3}
+.col-cards{display:flex;flex-direction:column;gap:8px;padding:0 8px 10px}
+.ncard{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--line-2);border-radius:var(--r);padding:9px 10px;cursor:grab;display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+.ncard:hover,.ncard:focus-visible{border-color:var(--blue);outline:none}
+.ncard.atrasado{border-left-color:var(--crit)}
+.ncard.atencao{border-left-color:var(--warn)}
+.ncard.arrastando{opacity:.4}
+.nc-top{display:flex;justify-content:space-between;gap:6px;align-items:flex-start}
+.nc-t{color:var(--muted)}
+.nc-p{color:var(--ink-2);font-size:12px}
+.nc-p.late{color:var(--crit);font-weight:600}
+.nc-f{display:flex;justify-content:space-between;gap:6px;color:var(--faint);font-size:11.5px}
+.score{display:inline-block;min-width:26px;text-align:center;font:600 11px/18px var(--fm);border-radius:99px;padding:0 6px;background:var(--surface-2);color:var(--muted)}
+.score.quente{background:var(--mag-soft);color:var(--mag)}
+.score.morno{background:var(--warn-soft);color:var(--warn)}
+.score.frio{background:var(--info-soft);color:var(--info)}
+
+/* ---------- Entrada de pedidos ---------- */
+.drop{margin-top:10px;border:1.5px dashed var(--line-2);border-radius:var(--r);padding:18px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer;background:var(--surface-2)}
+.drop.alvo,.drop:focus-visible{border-color:var(--blue);background:var(--blue-soft);outline:none}
+.tipos{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.tipo{text-align:left;border:1.5px solid var(--line);border-radius:var(--r);background:var(--surface);padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.tipo small{color:var(--muted);font-size:12px;line-height:1.35}
+.tipo.on{border-color:var(--mag);background:var(--mag-soft)}
+
+/* ---------- Documentos (GED) ---------- */
+.ged{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
+.ged-l{padding:10px;display:flex;flex-direction:column;gap:2px;max-height:78vh;overflow:auto}
+.ged-l .inp{margin-bottom:8px;width:100%}
+.ged-p{display:flex;justify-content:space-between;align-items:center;gap:8px;border:0;background:none;text-align:left;padding:7px 8px;border-radius:var(--r);font-size:13px}
+.ged-p small{display:block;color:var(--muted);font-size:11.5px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ged-p.on,.ged-p:hover{background:var(--blue-soft)}
+.ged-r{min-width:0}
+.ged-tipos{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.chip{border:1px solid var(--line-2);background:var(--surface);border-radius:99px;padding:3px 10px;font-size:12px;display:inline-flex;gap:6px;align-items:center;color:var(--ink-2)}
+.chip span{color:var(--faint);font-family:var(--fm)}
+.chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.chip.on span{color:#fff}
+button.pill{border:0;cursor:pointer}
+
+/* ---------- Desembolso ---------- */
+.des{overflow:hidden}
+.des-h{background:#0B2A6B;color:#fff;display:flex;justify-content:space-between;gap:16px;padding:18px 20px;flex-wrap:wrap}
+.des-logo{height:44px;width:auto;background:#fff;border-radius:6px;padding:4px 8px}
+.des-r{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
+.des-r small{font-size:10.5px;letter-spacing:.08em;opacity:.75}
+.des-v{font-size:24px;font-weight:700}
+.des-parc{display:flex;flex-direction:column;gap:8px}
+.dp{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:14px;align-items:center;border:1px solid var(--line);background:var(--surface-2);border-radius:99px;padding:9px 16px;font-size:13px}
+.des-tot{display:flex;justify-content:space-between;gap:12px;margin-top:10px;padding:11px 16px;border-radius:99px;background:linear-gradient(90deg,var(--mag),#5B2A86 60%,var(--blue));color:#fff;font-weight:700}
+@media print{body.imprimindo-des *{visibility:hidden}body.imprimindo-des #desDoc,body.imprimindo-des #desDoc *{visibility:visible}body.imprimindo-des #desDoc{position:absolute;inset:0 auto auto 0;width:100%;border:0}}
+
+/* ---------- Produtividade ---------- */
+.pos{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--surface-2);font:600 12px var(--fm)}
+.pos.p1{background:#E8B931;color:#fff}.pos.p2{background:#9AA5B8;color:#fff}.pos.p3{background:#B87333;color:#fff}
+.pos-up{color:var(--ok);font-weight:600}
+@media (max-width:1100px){.ged{grid-template-columns:minmax(0,1fr)}.ged-l{max-height:none}.tipos{grid-template-columns:1fr}.f.w3{grid-column:1/-1}.dp{grid-template-columns:1fr auto;border-radius:12px}}
+
+#pform .list select.inp{min-width:112px}
+#pform .list .row{align-items:center}

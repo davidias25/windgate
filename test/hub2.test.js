@@ -200,6 +200,71 @@ function bancoReal() {
     ok(s2.hubRecados.length === 1 && s2.hubRecados[0]._id === 'b', 'recado removido não volta');
   }
 
+  console.log('\n--- 8. CRM, pedidos, GED, desembolso e produtividade ---');
+  {
+    const { mesclarDB } = require('../src/services/db-merge.service');
+    const d = W.prepararBanco(bancoReal());
+    // Dados do CRM do sistema atual (sem os campos novos) continuam legíveis.
+    d.crm.push({ _id: 'cL1', nome: 'João', empresa: 'Lima Construtora', cnpj: '12.345.678/0001-90', interacoes: [{ data: '2026-10-01', texto: 'ligou', por: 'Samir' }] });
+    d.crmOps.push({ _id: 'n1', clienteId: 'cL1', titulo: 'Escoras', valor: 200000, etapa: 'Proposta enviada', resp: 'Davi', prox: 'Ligar', prazo: '2026-10-20', criadoEm: '2026-10-01', atualizadoEm: '2026-10-10' });
+    ok(W.faseDe(d.crmOps[0]) === 'proposta', 'etapa do sistema atual vira fase do funil novo (Proposta enviada → proposta)');
+    ok(W.slaNegocio(d.crmOps[0], '2026-10-24').sit === 'atrasado', 'próxima ação vencida marca o negócio como parado');
+    const n = d.crmOps[0];
+    W.moverNegocio(n, 'negociacao', 'Davi', '2026-10-24T10:00:00Z');
+    ok(n.fase === 'negociacao' && n.etapa === 'Negociação' && n.proxData === '2026-10-27' && n.prazo === '2026-10-27' && n.atividades.length === 1, 'mudar de fase: rótulo antigo em sincronia, follow-up automático em 3 dias e registro na linha do tempo');
+    const opsAntes = d.ops.length, finAntes = d.fin.length;
+    const r = W.ganharNegocio(d, n, { opId: 'OP30', por: 'Davi', checklist: [['Fechamento', 'Contrato assinado']], parcelas: [{ pct: 30, venc: '2026-11-01' }, { pct: 70, venc: '2026-12-01' }], agora: '2026-10-25T10:00:00Z' });
+    ok(d.ops.length === opsAntes + 1 && r.op.status === 'contrato' && r.op.cliente === 'Lima Construtora' && d.checklists.OP30.length === 1, 'negócio ganho vira operação em Contrato, com checklist');
+    ok(d.fin.length === finAntes + 2 && perto(r.lancs[0].valor, 60000) && perto(r.lancs[1].valor, 140000) && r.lancs.every(l => l.status === 'Previsto' && l.op === 'OP30'), 'ganho lança sinal 30% e saldo 70% como recebimentos previstos');
+    ok(W.faseDe(n) === 'ganho' && n.opId === 'OP30' && W.fechadasNoMes(d, '2026-10').includes('OP30'), 'negócio fica Ganho, ligado à operação, e conta na meta do mês');
+    let erro = ''; try { W.ganharNegocio(d, { _id: 'n2', clienteId: 'cL1' }, { opId: 'OP30' }); } catch (e) { erro = e.message; }
+    ok(/Já existe/.test(erro), 'não cria operação com código repetido');
+    const ind = W.indicadoresCrm(d, '2026-10-26', 90);
+    ok(ind.ganhos === 1 && ind.conversao === 1 && ind.ticket === 200000, 'indicadores: 1 ganho, conversão 100%, ticket R$ 200 mil');
+    ok(W.scoreNegocio(d, { clienteId: 'cL1', valor: 400000, origem: 'Indicação', tipoPedido: 'direta' }).s >= 60, 'score: CNPJ + valor alto + indicação + produto conhecido = quente');
+
+    const lp = W.lerPedidoRegras('Lima Construtora\nBoa noite! Preciso de orçamento para 2.000 escoras de até 3,4 m, espessura de 3 mm.');
+    ok(lp.cliente === 'Lima Construtora' && lp.quantidade === 2000 && /escora/.test(lp.produto), 'pedido lido por regras: cliente, 2.000 unidades, escoras');
+    d.ops.push({ _id: 'oe', id: 'OP5', nome: 'Escoras metálicas', status: 'entregue' });
+    ok(W.jaOperado(d, 'escora metálica').ops.some(o => o.id === 'OP5'), 'produto já importado é reconhecido (cotação direta)');
+    ok(W.tarefasDoPedido('direta', 'escoras', '2026-10-26').map(t => t.resp).join() === 'Ívina,Matheus,Davi' && W.tarefasDoPedido('estudo', 'x', '2026-10-26')[0].resp === 'Samir', 'tarefas: direta vai para Ívina/Matheus/Davi, estudo começa pela proposta comercial');
+
+    ok(W.tipoDoc({ nome: 'Commercial Invoice' }) === 'invoice' && W.tipoDoc({ grupo: 'contratos', cat: 'Contrato de câmbio' }) === 'cambio' && W.tipoDoc({ nome: 'BL Draft' }) === 'bl', 'GED reconhece o tipo dos documentos antigos pelo grupo e pelo nome');
+    const doc = { conferencias: [{ por: 'Davi' }] };
+    ok(W.situacaoDoc({}).k === 'novo' && W.situacaoDoc(doc).k === 'meia' && W.situacaoDoc({ conferencias: [{ por: 'Davi' }, { por: 'Samir' }] }).k === 'ok', 'dupla conferência: 0 → aguardando, 1 → falta 2ª, 2 pessoas → ok');
+    const opE = { id: 'OPE', status: 'embarcado' };
+    d.docs.push({ _id: 'dx', op: 'OPE', nome: 'Proforma.pdf' });
+    const cp = W.completudeDocs(d, opE);
+    ok(cp.faltam.map(t => t.k).sort().join() === 'bl,cambio,invoice,packing' , 'em trânsito, faltam invoice, packing, BL e câmbio (a proforma já está)');
+
+    const dz = W.prepararBanco({ fin: [
+      { _id: 'a', op: 'OPZ', tipo: 'Receita', valor: 30000, status: 'Realizado', vencimento: '2026-10-01' },
+      { _id: 'b', op: 'OPZ', tipo: 'Despesa', valor: 50000, status: 'Previsto', vencimento: '2026-10-05' },
+      { _id: 'c', op: 'OPZ', tipo: 'Receita', valor: 70000, status: 'Previsto', vencimento: '2026-11-01' }] });
+    const des = W.desembolsoOp(dz, 'OPZ', '2026-10-02');
+    ok(des.total === 100000 && des.recebido === 30000 && des.aReceber === 70000 && des.proxima._id === 'c', 'desembolso: total, pago, a pagar e próxima parcela');
+    ok(des.bloqueios.length === 1 && perto(des.bloqueios[0].falta, 20000), 'regra de proteção: pagar R$ 50 mil à fábrica com só R$ 30 mil do cliente bloqueia (faltam R$ 20 mil)');
+
+    d.hubErros.push({ _id: 'e1', data: '2026-10-08', pessoa: 'Matheus', texto: 'x', pontos: 2 });
+    const pm = W.produtividade(d, 'Matheus', 'frete', '2026-10', '2026-10-26');
+    ok(pm.partes.qualidade === 28 && pm.total >= 0 && pm.total <= 100, 'produtividade: erro de 2 pontos desconta da qualidade (30 → 28), nota entre 0 e 100');
+    const m1 = mesclarDB({ hubPedidos: [{ _id: 'p1' }], hubErros: [{ _id: 'e1' }] }, { hubPedidos: [{ _id: 'p2' }], hubErros: [] , _removidos: {} });
+    ok(m1.hubPedidos.length === 2 && m1.hubErros.length === 1, 'servidor une pedidos e erros de usuários diferentes sem perder nenhum');
+  }
+
+  console.log('\n--- 9. Leitura por IA (simulada, sem chamar a API) ---');
+  {
+    const ia = require('../src/services/ia.service');
+    process.env.ANTHROPIC_API_KEY = 'teste';
+    const falso = async (url, o) => { const b = JSON.parse(o.body); ok(o.headers['x-api-key'] === 'teste' && b.messages[0].content.some(c => c.type === 'image'), 'IA recebe o print como imagem e a chave só no servidor');
+      return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'Segue: {"cliente":"Lima Construtora","produto":"Escora metálica","quantidade":2000,"unidade":"un","especificacao":"até 3,4 m, chapa 3 mm","ncm_sugerido":"7308.40.00","duvidas":["destino"]}' }] }) }; };
+    const pd = await ia.lerPedido({ texto: 'oi', imagem: 'data:image/png;base64,AAAA' }, falso);
+    ok(pd.cliente === 'Lima Construtora' && pd.quantidade === 2000 && pd.ncm === '73084000' && pd.duvidas[0] === 'destino', 'resposta da IA vira pedido estruturado (NCM só dígitos)');
+    delete process.env.ANTHROPIC_API_KEY;
+    let semIA = false; try { await ia.lerPedido({ texto: 'x' }); } catch (e) { semIA = !!e.semIA; }
+    ok(semIA, 'sem a chave, responde semIA e o navegador usa a leitura por regras');
+  }
+
   try { fs.unlinkSync(TMP); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
   process.exit(falhou ? 1 : 0);

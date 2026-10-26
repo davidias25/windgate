@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -345,17 +345,17 @@
      torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês */
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar'],
-      torre: ['resumo', 'aprovacoes', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver'],
+      torre: ['resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar'],
-      torre: ['resumo', 'revisar', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver'],
+      torre: ['resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
       caps: ['fin.lancar'],
       torre: ['resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
     documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
-      caps: [],
-      torre: ['resumo', 'coletar', 'clientes', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
+      caps: ['crm.ver', 'pedidos.ver'],
+      torre: ['resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
   };
   const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos' };
   function perfilDe(db, k) {
@@ -373,7 +373,8 @@
     clientes: { t: 'Clientes a atualizar' }, fretes: { t: 'Frete e embarque' }, transito: { t: 'Em trânsito e chegadas' },
     lancar: { t: 'A lançar e conferir', cap: 'fin.lancar' }, pagar: { t: 'Pagamentos da semana', cap: 'fin.ver' },
     caixa: { t: 'Caixa: a receber e a pagar', cap: 'fin.ver' }, aprovacoes: { t: 'Aguardando sua aprovação', cap: 'fin.autorizar' },
-    equipe: { t: 'Desempenho da equipe', cap: 'equipe.ver' }
+    equipe: { t: 'Desempenho da equipe', cap: 'equipe.ver' },
+    vendas: { t: 'Vendas: minhas próximas ações', cap: 'crm.ver' }
   };
   function paineisPermitidos(db, k) { return Object.keys(PAINEIS).filter(id => !PAINEIS[id].cap || pode(db, k, PAINEIS[id].cap)); }
   /** Torre salva da pessoa (se houver), sempre limitada ao que o perfil permite. */
@@ -416,6 +417,316 @@
       .sort((a, b) => (b.prio === 'alta') - (a.prio === 'alta') || String(b.em).localeCompare(String(a.em)));
   }
 
+
+  /* ---------- CRM & Funil ---------- */
+  /* Fases do funil B2B de importação. `legado` é o rótulo que o sistema atual
+     entende (crmOps.etapa), mantido em sincronia enquanto os dois convivem. */
+  const CRM_FASES = [
+    { k: 'lead', l: 'Lead', legado: 'Novo contato', prob: 0.10, sla: 1, c: '#5B6B8C', faz: 'Responder em até 24 h e entender o produto' },
+    { k: 'qualificacao', l: 'Qualificação', legado: 'Novo contato', prob: 0.20, sla: 2, c: '#0E7C8C', faz: 'Confirmar CNPJ, contribuinte, volume, prazo e destino' },
+    { k: 'cotacao', l: 'Estudo / Cotação', legado: 'Cotando', prob: 0.35, sla: 4, c: '#B7791F', faz: 'Preço FOB das fábricas, frete e custo de nacionalização' },
+    { k: 'proposta', l: 'Proposta enviada', legado: 'Proposta enviada', prob: 0.50, sla: 3, c: '#0046AD', faz: 'Follow-up com o cliente' },
+    { k: 'negociacao', l: 'Negociação', legado: 'Negociação', prob: 0.70, sla: 5, c: '#CE0058', faz: 'Ajustar condições e fechar o contrato' },
+    { k: 'ganho', l: 'Ganho', legado: 'Fechado', prob: 1, sla: null, c: '#0F8A5F' },
+    { k: 'perdido', l: 'Perdido', legado: 'Perdido', prob: 0, sla: null, c: '#8A94AD' }
+  ];
+  const CRM_ABERTAS = ['lead', 'qualificacao', 'cotacao', 'proposta', 'negociacao'];
+  const CRM_ORIGENS = ['WhatsApp', 'Instagram', 'Indicação', 'Cliente da casa', 'Site', 'Feira / evento', 'Prospecção ativa', 'Outro'];
+  const CRM_MOTIVOS_PERDA = ['Preço', 'Prazo de entrega', 'Fechou com concorrente', 'Desistiu da compra', 'Sem retorno do cliente', 'Não qualificado (sem CNPJ / volume)', 'Produto inviável', 'Outro'];
+  const CRM_ATIVIDADES = ['WhatsApp', 'Ligação', 'E-mail', 'Reunião', 'Nota'];
+  const DE_LEGADO = { 'Novo contato': 'lead', 'Cotando': 'cotacao', 'Proposta enviada': 'proposta', 'Negociação': 'negociacao', 'Fechado': 'ganho', 'Perdido': 'perdido' };
+  const faseMeta = k => CRM_FASES.find(f => f.k === k) || CRM_FASES[0];
+  /** Fase do negócio: o campo novo `fase`, ou a etapa do sistema atual traduzida. */
+  const faseDe = n => (n && CRM_FASES.some(f => f.k === n.fase)) ? n.fase : (DE_LEGADO[n && n.etapa] || 'lead');
+  const negocioAberto = n => CRM_ABERTAS.includes(faseDe(n));
+  const nomeCliente = c => c ? (c.empresa || c.nome || '') : '';
+
+  /** Último movimento: atividade, mudança de fase ou edição. */
+  function ultimoMovimento(n) {
+    const ts = [n.faseEm, n.atualizadoEm, n.criadoEm].concat((n.atividades || []).map(a => a && a.em)).filter(Boolean).map(String).sort();
+    return ts.length ? ts[ts.length - 1] : '';
+  }
+  function diasParado(n, hoje) { const u = ultimoMovimento(n); return u ? Math.max(0, diasEntre(soData(u), hoje || hojeISO())) : 0; }
+  /** Situação do SLA da fase: ok, atencao (venceu hoje) ou atrasado. */
+  function slaNegocio(n, hoje) {
+    const f = faseMeta(faseDe(n)); if (!f.sla || !negocioAberto(n)) return { sit: 'ok', dias: 0, sla: null };
+    const h = hoje || hojeISO();
+    const px = n.proxData || n.prazo;
+    if (px && px < h) return { sit: 'atrasado', dias: diasEntre(px, h), sla: f.sla, motivo: 'próxima ação vencida' };
+    const d = diasParado(n, h);
+    // Com próxima ação marcada para frente, o negócio está agendado, não parado.
+    if (px && px > h) return { sit: 'ok', dias: d, sla: f.sla, motivo: '' };
+    if (px && px === h) return { sit: 'atencao', dias: d, sla: f.sla, motivo: 'próxima ação é hoje' };
+    return { sit: d > f.sla ? 'atrasado' : d === f.sla ? 'atencao' : 'ok', dias: d, sla: f.sla, motivo: d > f.sla ? `parado há ${d} dia(s)` : '' };
+  }
+  /** Score 0–100 do lead: quanto mais completo e quente, maior. */
+  function scoreNegocio(db, n) {
+    const c = (db.crm || []).find(x => x && x._id === n.clienteId) || {};
+    let s = 0; const motivos = [];
+    const soma = (v, m) => { s += v; motivos.push(m); };
+    if (String(c.cnpj || '').replace(/\D/g, '').length === 14) soma(15, 'CNPJ');
+    if (c.contribuinte === true || c.contribuinte === false) soma(10, 'contribuinte definido');
+    if ((+n.valor || 0) >= 300000) soma(20, 'valor alto'); else if ((+n.valor || 0) >= 80000) soma(12, 'valor médio');
+    if (['Indicação', 'Cliente da casa'].includes(n.origem)) soma(15, n.origem.toLowerCase());
+    if (n.tipoPedido === 'direta') soma(10, 'produto conhecido');
+    if (n.prazoCliente) soma(10, 'prazo definido');
+    if ((db.ops || []).some(o => o && nomeCliente(c) && String(o.cliente || '').toLowerCase().includes(nomeCliente(c).toLowerCase().slice(0, 12)))) soma(10, 'já importou com a gente');
+    const ult = ultimoMovimento(n); if (ult && diasEntre(soData(ult), hojeISO()) <= 3) soma(10, 'contato recente');
+    s = Math.min(100, s);
+    return { s, nivel: s >= 60 ? 'quente' : s >= 35 ? 'morno' : 'frio', motivos };
+  }
+  /** Indicadores do funil para o painel do CRM. */
+  function indicadoresCrm(db, hoje, dias) {
+    const h = hoje || hojeISO(), ini = (() => { const d = new Date(h + 'T12:00:00'); d.setDate(d.getDate() - (dias || 90)); return d.toISOString().slice(0, 10); })();
+    const ns = (db.crmOps || []).filter(Boolean);
+    const abertos = ns.filter(negocioAberto);
+    const pipeline = abertos.reduce((a, n) => a + (+n.valor || 0), 0);
+    const previsao = abertos.reduce((a, n) => a + (+n.valor || 0) * faseMeta(faseDe(n)).prob, 0);
+    const fechadosPeriodo = ns.filter(n => ['ganho', 'perdido'].includes(faseDe(n)) && soData(n.fechadoEm || n.atualizadoEm) >= ini);
+    const ganhos = fechadosPeriodo.filter(n => faseDe(n) === 'ganho');
+    const conversao = fechadosPeriodo.length ? ganhos.length / fechadosPeriodo.length : null;
+    const ticket = ganhos.length ? ganhos.reduce((a, n) => a + (+n.valor || 0), 0) / ganhos.length : null;
+    const ciclos = ganhos.map(n => diasEntre(soData(n.criadoEm), soData(n.fechadoEm || n.atualizadoEm))).filter(x => x != null);
+    const ciclo = ciclos.length ? Math.round(ciclos.reduce((a, b) => a + b, 0) / ciclos.length) : null;
+    const parados = abertos.filter(n => slaNegocio(n, h).sit === 'atrasado');
+    const porOrigem = {}, perdas = {};
+    ns.forEach(n => { const o = n.origem || 'Não informado'; porOrigem[o] = porOrigem[o] || { total: 0, ganhos: 0 }; porOrigem[o].total++; if (faseDe(n) === 'ganho') porOrigem[o].ganhos++; });
+    fechadosPeriodo.filter(n => faseDe(n) === 'perdido').forEach(n => { const m = n.motivoPerda || 'Não informado'; perdas[m] = (perdas[m] || 0) + 1; });
+    return { abertos: abertos.length, pipeline, previsao, conversao, ganhos: ganhos.length, fechados: fechadosPeriodo.length, ticket, ciclo, parados, porOrigem, perdas };
+  }
+  /** Muda a fase e aplica as automações: registro na linha do tempo, follow-up automático e rótulo legado. */
+  function moverNegocio(n, fase, por, agora, extra) {
+    const t = agora || new Date().toISOString(), de = faseDe(n), f = faseMeta(fase);
+    if (de === fase) return n;
+    n.fase = fase; n.etapa = f.legado; n.faseEm = t; n.atualizadoEm = t;
+    n.atividades = (n.atividades || []).concat([{ _id: novoId(), tipo: 'Etapa', texto: `${faseMeta(de).l} → ${f.l}${extra && extra.motivo ? ' · ' + extra.motivo : ''}`, por: por || '', em: t, auto: true }]);
+    const somaD = d => { const x = new Date(t); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
+    if (fase === 'proposta') { n.prox = 'Follow-up da proposta com o cliente'; n.proxData = somaD(2); }
+    else if (fase === 'negociacao') { n.prox = 'Retorno sobre as condições negociadas'; n.proxData = somaD(3); }
+    else if (fase === 'cotacao') { n.prox = n.tipoPedido === 'estudo' ? 'Pesquisa de fábricas para o estudo' : 'Preço FOB, frete e custo de nacionalização'; n.proxData = somaD(f.sla); }
+    else if (fase === 'qualificacao') { n.prox = 'Confirmar CNPJ, contribuinte, volume e prazo'; n.proxData = somaD(f.sla); }
+    if (fase === 'ganho' || fase === 'perdido') { n.fechadoEm = t; n.prox = ''; n.proxData = ''; }
+    if (fase === 'perdido') n.motivoPerda = (extra && extra.motivo) || n.motivoPerda || '';
+    n.prazo = n.proxData || '';
+    return n;
+  }
+  /** Negócio ganho vira operação: mesma numeração, checklist padrão e recebimentos previstos (opcional). */
+  function ganharNegocio(db, n, opts) {
+    const o = opts || {}, t = o.agora || new Date().toISOString(), hoje = t.slice(0, 10);
+    const c = (db.crm || []).find(x => x && x._id === n.clienteId) || {};
+    const nums = (db.ops || []).map(x => parseInt(String(x && x.id).replace(/\D/g, ''), 10)).filter(x => isFinite(x));
+    const id = o.opId || ('OP' + ((nums.length ? Math.max(...nums) : 0) + 1));
+    if ((db.ops || []).some(x => x && x.id === id)) throw new Error('Já existe a operação ' + id);
+    const op = { _id: novoId(), id, nome: n.titulo || '', cliente: nomeCliente(c), status: 'contrato', statusEm: t, criadaEm: t, resp: o.resp || n.resp || '', prox: 'Assinar contrato e pagar sinal à fábrica', obs: '', crmNegocioId: n._id, statusPor: o.por || '' };
+    db.ops.unshift(op);
+    db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: 'contrato', em: t, por: o.por || '', tipo: 'mudanca', origem: 'hub2-crm', motivo: 'Negócio ganho no CRM' });
+    if (o.checklist) db.checklists[id] = o.checklist.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '', link: '' }));
+    const lancs = [];
+    if (o.parcelas && +n.valor > 0) {
+      o.parcelas.forEach((p, i) => {
+        const v = Math.round((+n.valor) * p.pct) / 100; if (!(v > 0)) return;
+        const venc = p.venc || hoje;
+        const l = { _id: novoId(), data: venc, vencimento: venc, op: id, tipo: 'Receita', categoria: '', fixo: false, desc: `${p.rot || 'Parcela ' + (i + 1)} — ${nomeCliente(c)}`, valor: v, status: 'Previsto', empresa: o.empresa || 'JeT', liquidadoEm: null, valorPago: null, valorPrevisto: null, comp: '', nf: '', por: o.por || '', criadoEm: t, origem: 'crm' };
+        db.fin.unshift(l); lancs.push(l);
+      });
+    }
+    moverNegocio(n, 'ganho', o.por, t);
+    n.opId = id;
+    return { op, lancs };
+  }
+
+
+  /* ---------- Entrada de pedidos ---------- */
+  const PRECO_ESTUDO = { cheio: 5000, promo1: 3000, promo2: 3500 };
+  const PALAVRAS_VAZIAS = new Set('de da do das dos para com sem uma um uns umas o a os as e em no na nos nas por preciso precisamos quero gostaria orçamento orcamento cotação cotacao boa noite bom dia tarde olá ola oi tudo bem favor até ate unidades unidade peças pecas pçs pcs un und'.split(' '));
+  const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const termos = t => norm(t).split(/[^a-z0-9]+/).filter(w => w.length > 3 && !PALAVRAS_VAZIAS.has(w)).map(w => w.replace(/(oes|aes|ais|eis|s)$/, ''));
+  /** Leitura por regras quando a IA não está ligada: quantidade, produto e especificação básicos. */
+  function lerPedidoRegras(texto) {
+    const t = String(texto || '').replace(/\s+/g, ' ').trim();
+    const linhas = String(texto || '').split(/\n/).map(x => x.trim()).filter(Boolean);
+    let cliente = '';
+    if (linhas.length > 1 && linhas[0].length < 60 && !/\d{2,}/.test(linhas[0])) cliente = linhas[0];
+    const q = /(\d{1,3}(?:[.\s]\d{3})+|\d+(?:,\d+)?)\s*(mil\s+)?(unidades|unid|un|pe[çc]as|p[çc]s|kg|toneladas|t|m²|m2|metros|cont[eê]iner(?:es)?|containers?|caixas)?\s+(?:de\s+)?([a-zà-ú][a-zà-ú\s-]{2,40})/i.exec(t);
+    let quantidade = null, unidade = '', produto = '';
+    if (q) {
+      quantidade = parseFloat(q[1].replace(/[.\s]/g, '').replace(',', '.')) * (q[2] ? 1000 : 1);
+      unidade = (q[3] || 'un').toLowerCase();
+      produto = q[4].split(/\s(?:de até|até|com|de \d|para|,)/i)[0].trim().replace(/\s+(de|do|da|dos|das|com|para|e)$/i, '').trim();
+    }
+    const espec = (t.match(/(\d+(?:,\d+)?\s*(?:m|mm|cm|kg|v|w|kw|pol|")\b[^.;]*)/i) || [])[1] || '';
+    return { cliente, contato: '', telefone: '', produto, quantidade, unidade, especificacao: espec.trim(), ncm: '', prazo: '', destino: '', resumo: t.slice(0, 160), duvidas: [] };
+  }
+  /** Já importamos algo parecido? Compara o produto com operações e negócios anteriores. */
+  function jaOperado(db, produto) {
+    const ts = termos(produto); if (!ts.length) return { ops: [], negocios: [] };
+    const bate = txt => { const tt = termos(txt); return ts.some(a => tt.some(b => b === a || (a.length > 5 && b.startsWith(a.slice(0, 6))))); };
+    return { ops: (db.ops || []).filter(o => o && bate([o.nome, o.obs].join(' '))), negocios: (db.crmOps || []).filter(n => n && W_fase(n) === 'ganho' && bate(n.titulo)) };
+  }
+  function W_fase(n) { return faseDe(n); }
+  /** Tarefas que nascem de um pedido confirmado. */
+  function tarefasDoPedido(tipo, produto, hoje, quem) {
+    const h = hoje || hojeISO(), q = Object.assign({ docs: 'Ívina', frete: 'Matheus', custo: 'Davi', comercial: 'Samir' }, quem || {});
+    const d = n => { const x = new Date(h + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+    if (tipo === 'estudo') return [
+      { resp: q.comercial, t: `Enviar proposta do estudo de importação: ${produto}`, prazo: d(1), prio: 'alta' },
+      { resp: q.docs, t: `Pré-pesquisa de fábricas para ${produto} (após aceite do estudo)`, prazo: d(5), prio: 'media' }];
+    return [
+      { resp: q.docs, t: `Pedir preço FOB às fábricas já usadas: ${produto}`, prazo: d(2), prio: 'alta' },
+      { resp: q.frete, t: `Cotar frete da origem até Pecém para ${produto}`, prazo: d(2), prio: 'media' },
+      { resp: q.custo, t: `Montar custo e margem para aprovação: ${produto}`, prazo: d(4), prio: 'alta' }];
+  }
+
+
+  /* ---------- Documentos (GED) ---------- */
+  const DOC_TIPOS = [
+    { k: 'proforma', l: 'Proforma / Contrato', re: /proforma|\bpi\b|contrato com|sales contract/i, desde: 'contrato', chk: /proforma|contrato assinado/i },
+    { k: 'invoice', l: 'Invoice comercial', re: /invoice|fatura comercial|\bci\b/i, desde: 'preparacao_embarque', chk: /commercial invoice/i },
+    { k: 'packing', l: 'Packing list', re: /packing|\bpl\b|romaneio/i, desde: 'preparacao_embarque', chk: /packing list/i },
+    { k: 'bl', l: 'BL / CE Mercante', re: /\bbl\b|bill of lading|conhecimento|ce mercante|telex/i, desde: 'embarcado', chk: /\bbl\b/i },
+    { k: 'duimp', l: 'DUIMP / extratos', re: /duimp|\bdi\b|extrato|afrmm|desembara/i, desde: 'chegada', chk: /duimp|\bdi\b/i },
+    { k: 'cambio', l: 'Câmbio / swift', re: /c[aâ]mbio|swift|remessa|tt copy/i, desde: 'contrato', chk: /c[aâ]mbio/i, restrito: true },
+    { k: 'nfe', l: 'NF-e', re: /\bnf\b|nf-e|nota fiscal|danfe|nf de/i, desde: 'logistica', chk: /\bnf\b/i },
+    { k: 'seguro', l: 'Seguro', re: /seguro|ap[oó]lice|insurance/i, desde: null, chk: /seguro|ap[oó]lice/i },
+    { k: 'origem', l: 'Certificado de origem', re: /certificado de origem|\bco\b|form e/i, desde: null },
+    { k: 'fotos', l: 'Fotos e inspeção', re: /foto|inspe[cç]|photo|\.jpe?g|\.png/i, desde: null },
+    { k: 'contrato', l: 'Contratos (restrito)', re: /contrato de c[aâ]mbio|contrato com o cliente|aditivo|contrato com o fornecedor/i, desde: null, restrito: true },
+    { k: 'outros', l: 'Outros', re: /.^/, desde: null }
+  ];
+  const docTipoMeta = k => DOC_TIPOS.find(t => t.k === k) || DOC_TIPOS[DOC_TIPOS.length - 1];
+  /** Tipo do documento: o campo novo, ou deduzido do grupo/nome do sistema atual. */
+  function tipoDoc(d) {
+    if (d && DOC_TIPOS.some(t => t.k === d.tipo)) return d.tipo;
+    if (d && d.grupo === 'contratos') return /c[aâ]mbio/i.test([d.cat, d.nome].join(' ')) ? 'cambio' : 'contrato';
+    const txt = [d && d.cat, d && d.nome].join(' ');
+    const t = DOC_TIPOS.find(x => x.k !== 'contrato' && x.k !== 'outros' && x.re.test(txt));
+    return t ? t.k : 'outros';
+  }
+  /** Situação do documento no GED (dupla conferência). */
+  function situacaoDoc(d) {
+    if (!d) return { k: 'pendente', l: 'pendente', c: '' };
+    if (d.substituidoPor) return { k: 'antigo', l: 'versão antiga', c: '' };
+    if (d.rejeitado) return { k: 'rejeitado', l: 'rejeitado' + (d.rejeitado.motivo ? ': ' + d.rejeitado.motivo : ''), c: 'crit' };
+    const conf = [...new Set((d.conferencias || []).map(x => x && x.por).filter(Boolean))];
+    if (conf.length >= 2 || d.status === 'aprovado') return { k: 'ok', l: 'dupla conferência', c: 'ok' };
+    if (conf.length === 1 || d.status === 'revisado') return { k: 'meia', l: 'falta 2ª conferência', c: 'warn' };
+    if (d.rascunho) return { k: 'draft', l: 'aguardando original', c: 'info' };
+    return { k: 'novo', l: 'aguardando conferência', c: 'info' };
+  }
+  /** Tipos obrigatórios pela etapa em que a operação está, e quais faltam. */
+  function completudeDocs(db, o) {
+    const idx = FLUXO.indexOf(o.status);
+    const exigidos = DOC_TIPOS.filter(t => t.desde && idx >= 0 && FLUXO.indexOf(t.desde) >= 0 && idx >= FLUXO.indexOf(t.desde));
+    const tem = new Set((db.docs || []).filter(d => d && d.op === o.id && !d.substituidoPor && !d.removidoEm).map(tipoDoc));
+    const faltam = exigidos.filter(t => !tem.has(t.k));
+    return { exigidos: exigidos.length, faltam, pct: exigidos.length ? Math.round((exigidos.length - faltam.length) / exigidos.length * 100) : null };
+  }
+  function proximaVersao(db, op, tipo, nomeBase) {
+    const base = String(nomeBase || '').toLowerCase().replace(/_?v\d+(\.\w+)?$/, '').replace(/\.\w+$/, '');
+    return 1 + (db.docs || []).filter(d => d && d.op === op && tipoDoc(d) === tipo && String(d.nome || '').toLowerCase().replace(/_?v\d+(\.\w+)?$/, '').replace(/\.\w+$/, '') === base).length;
+  }
+
+
+  /* ---------- Desembolso & Cobrança ---------- */
+  /** Parcelas do cliente (receitas) e saídas da operação, com a regra de proteção:
+      até cada data, o que o cliente paga (previsto ou recebido) cobre o que sai. */
+  function desembolsoOp(db, opId, hoje) {
+    const h = hoje || hojeISO();
+    const ls = (db.fin || []).filter(l => l && l.op === opId && !transferencia(l));
+    const parcelas = ls.filter(ehReceita).sort((a, b) => vencDe(a).localeCompare(vencDe(b)));
+    const saidas = ls.filter(l => !ehReceita(l)).sort((a, b) => vencDe(a).localeCompare(vencDe(b)));
+    const total = parcelas.reduce((a, l) => a + valorDe(l), 0);
+    const recebido = parcelas.filter(realizado).reduce((a, l) => a + valorDe(l), 0);
+    const aReceber = total - recebido;
+    const bloqueios = [];
+    saidas.forEach(sd => {
+      const ate = vencDe(sd);
+      const entra = parcelas.filter(l => vencDe(l) <= ate).reduce((a, l) => a + valorDe(l), 0);
+      const sai = saidas.filter(l => vencDe(l) <= ate).reduce((a, l) => a + valorDe(l), 0);
+      if (!realizado(sd) && sai - entra > 0.005) bloqueios.push({ saida: sd, ate, falta: +(sai - entra).toFixed(2) });
+    });
+    const proxima = parcelas.find(l => !realizado(l)) || null;
+    return { parcelas, saidas, total, recebido, aReceber, proxima, bloqueios, protegido: !bloqueios.length };
+  }
+  /** Todas as cobranças em aberto, com a situação de cada uma. */
+  function cobrancas(db, hoje) {
+    const h = hoje || hojeISO();
+    const bloq = {};
+    [...new Set((db.fin || []).filter(l => l && l.op && l.op !== 'WindGate').map(l => l.op))].forEach(op => { bloq[op] = desembolsoOp(db, op, h).bloqueios; });
+    return (db.fin || []).filter(l => l && ehReceita(l) && !realizado(l) && !transferencia(l) && l.op && l.op !== 'WindGate')
+      .sort((a, b) => vencDe(a).localeCompare(vencDe(b)))
+      .map(l => { const v = vencDe(l), d = diasEntre(h, v);
+        return { l, sit: d < 0 ? `atrasado ${-d} dia(s)` : d === 0 ? 'pagar hoje' : 'a pagar', nivel: d < 0 ? 'crit' : d === 0 ? 'warn' : 'info', protegido: !(bloq[l.op] || []).length }; });
+  }
+
+  /* ---------- Produtividade & ranking ---------- */
+  /** Nota de 0 a 100: prazo (30), qualidade (30), resultado da função (20), evolução (10), cultura (10, dada pelo Samir). */
+  const PILARES = [['prazo', 'Prazo', 30], ['qualidade', 'Qualidade', 30], ['funcao', 'Função', 20], ['evolucao', 'Evolução', 10], ['cultura', 'Cultura', 10]];
+  function mesAnterior(m) { return mesSoma(m, -1); }
+  function metricasFuncao(db, nome, perfilId, mes, h) {
+    const no = d => String(d || '').slice(0, 7) === mes;
+    const r = (a, b) => b ? a / b : null;
+    if (perfilId === 'operacoes') {
+      const baixas = (db.fin || []).filter(l => l && l.baixaPor === nome && !ehReceita(l) && no(l.liquidadoEm));
+      const ops = (db.ops || []).filter(o => o && ativa(o) && String(o.resp || '').split(/[\s/,]+/).includes(nome));
+      const revis = Object.values(db.checklists || {}).reduce((a, l) => a + (Array.isArray(l) ? l.filter(it => it && it.revisadoPor === nome && no(it.revisadoEm)).length : 0), 0);
+      return [['Pagamentos feitos até o vencimento', baixas.filter(l => soData(l.liquidadoEm) <= vencDe(l)).length, baixas.length],
+        ['Operações dentro do prazo da etapa', ops.filter(o => prazoInfo(db, o, h).sit !== 'atrasado').length, ops.length],
+        ['Documentos revisados no mês', revis, null]].map(([l, a, b]) => ({ l, a, b, r: b == null ? (a > 0 ? 1 : null) : r(a, b) }));
+    }
+    if (perfilId === 'frete') {
+      const lanc = (db.fin || []).filter(l => l && l.por === nome && no(l.criadoEm));
+      const rap = lanc.filter(l => { const ref = l.liquidadoEm || l.data; return ref && diasEntre(soData(ref), soData(l.criadoEm)) <= 1; }).length;
+      const tr = (db.ops || []).filter(o => o && ['embarcado', 'container_enviado_porto', 'chegada'].includes(o.status));
+      const fretes = (db.fretes || []).filter(f => f && (f.resp === nome) && no(f.data));
+      return [['Lançamentos em até 24 h', rap, lanc.length], ['Cargas no mar com tracking ou contêiner', tr.filter(o => o.tracking || (o.containers || []).length).length, tr.length],
+        ['Cotações de frete registradas', fretes.length, null]].map(([l, a, b]) => ({ l, a, b, r: b == null ? (a > 0 ? Math.min(1, a / 4) : null) : r(a, b) }));
+    }
+    if (perfilId === 'documentos') {
+      let col = 0, noPrazo = 0;
+      Object.values(db.checklists || {}).forEach(l => (Array.isArray(l) ? l : []).forEach(it => { if (it && it.coletadoPor === nome && no(it.coletadoEm)) { col++; if (!it.prazo || it.coletadoEm <= it.prazo) noPrazo++; } }));
+      const leads = (db.crmOps || []).filter(n => n && (n.atividades || []).some(a => a && a.por === nome && !a.auto && no(a.em))).length;
+      const conf = (db.docs || []).filter(d => d && (d.conferencias || []).some(c => c.por === nome && no(c.em))).length;
+      return [['Documentos coletados no prazo', noPrazo, col], ['Clientes/leads com contato registrado', leads, null], ['Documentos conferidos', conf, null]]
+        .map(([l, a, b]) => ({ l, a, b, r: b == null ? (a > 0 ? Math.min(1, a / 6) : null) : r(a, b) }));
+    }
+    return [];
+  }
+  function notaBase(db, nome, perfilId, mes, h) {
+    const no = d => String(d || '').slice(0, 7) === mes;
+    // Conta a tarefa concluída no mês e a que venceu no mês sem ser feita; a que ainda não venceu não pesa.
+    const tarefas = (db.agendaTasks || []).filter(t => t && t.resp === nome && t.prazo && ((t.status === 'feita' && no(t.doneAt)) || (t.status !== 'feita' && no(t.prazo) && t.prazo < h)));
+    const tNoPrazo = tarefas.filter(t => t.status === 'feita' && t.doneAt && t.doneAt <= t.prazo).length;
+    const etapas = (db.opStatusHist || []).filter(x => x && x.por === nome && no(x.em) && x.de && x.deEm);
+    const eNoPrazo = etapas.filter(x => { const alvo = prazoAlvo(db, x.de); return !alvo || diasEntre(soData(x.deEm), soData(x.em)) <= alvo; }).length;
+    const baseP = tarefas.length + etapas.length;
+    const prazo = baseP ? 30 * (tNoPrazo + eNoPrazo) / baseP : null;
+    const erros = (db.hubErros || []).filter(e => e && e.pessoa === nome && no(e.data));
+    const rejeitados = (db.docs || []).filter(d => d && d.rejeitado && (d.por === nome) && no(d.rejeitado.em)).length;
+    const qualidade = Math.max(0, 30 - erros.reduce((a, e) => a + Math.abs(+e.pontos || 0), 0) - rejeitados);
+    const mf = metricasFuncao(db, nome, perfilId, mes, h).filter(x => x.r != null);
+    const funcao = mf.length ? 20 * mf.reduce((a, x) => a + x.r, 0) / mf.length : null;
+    return { prazo, qualidade, funcao, erros, tarefas: tarefas.length, etapas: etapas.length };
+  }
+  function produtividade(db, nome, perfilId, mes, hoje) {
+    const h = hoje || hojeISO();
+    const b = notaBase(db, nome, perfilId, mes, h), a = notaBase(db, nome, perfilId, mesAnterior(mes), h);
+    // Evolução compara só os pilares medidos nos dois meses, senão a falta de dado vira queda.
+    const comuns = [['prazo', 30], ['qualidade', 30], ['funcao', 20]].filter(([k]) => a[k] != null && b[k] != null);
+    const media = x => { const max = comuns.reduce((p, [, m]) => p + m, 0); return max ? comuns.reduce((p, [k]) => p + x[k], 0) / max : null; };
+    const temHistorico = a.tarefas + a.etapas > 0 || a.funcao != null;
+    const ma = temHistorico ? media(a) : null, mb = media(b);
+    const evolucao = ma == null || mb == null ? 5 : Math.max(0, Math.min(10, 5 + (mb - ma) * 25));
+    const cult = ((((db.hubPainel || {})._produtividade || {}).cultura || {})[mes] || {})[nome];
+    const cultura = cult == null ? null : Math.max(0, Math.min(10, +cult));
+    const partes = { prazo: b.prazo, qualidade: b.qualidade, funcao: b.funcao, evolucao, cultura };
+    const max = PILARES.reduce((p, [k, , m]) => p + (partes[k] != null ? m : 0), 0);
+    const pts = PILARES.reduce((p, [k]) => p + (partes[k] || 0), 0);
+    const total = max ? Math.round(pts / max * 100) : 0;
+    const faixa = b.qualidade < 20 ? 'sem faixa' : total >= 85 ? 'ouro' : total >= 75 ? 'prata' : 'sem faixa';
+    return { nome, partes, total, faixa, erros: b.erros, funcao: metricasFuncao(db, nome, perfilId, mes, h), anterior: ma == null ? null : Math.round(ma * 100) };
+  }
+
   /* ---------- Formatação ---------- */
   const fmtBRL = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const fmtBRLk = v => { const n = +v || 0; return Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil' : fmtBRL(n); };
@@ -424,6 +735,10 @@
   return {
     COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
+    desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
+    DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
+    CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
     STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,

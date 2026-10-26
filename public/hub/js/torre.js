@@ -203,6 +203,20 @@
       return { acoes: `<span class="note">pagamentos até 10 dias e cotações</span>`, corpo: `<div class="box-b list">${linhas.length ? linhas.join('') : vazio('Nada aguardando sua aprovação.')}</div>` };
     },
 
+    vendas(c) {
+      const hoje = c.hoje, amanha = somaDias(hoje, 1);
+      const ns = (c.db.crmOps || []).filter(n => n && W.negocioAberto(n) && (c.perfil.id === 'diretoria' ? true : n.resp === c.nome))
+        .map(n => ({ n, sla: W.slaNegocio(n, hoje), px: n.proxData || n.prazo }))
+        .filter(x => x.sla.sit !== 'ok' || (x.px && x.px <= amanha))
+        .sort((a, b) => (b.sla.sit === 'atrasado') - (a.sla.sit === 'atrasado') || String(a.px || '9').localeCompare(String(b.px || '9')));
+      const novos = (c.db.hubPedidos || []).filter(p => p && p.status === 'novo').length;
+      const cli = id => (c.db.crm || []).find(x => x && x._id === id);
+      return { acoes: `<button class="btn sm" data-ir="pedidos">Pedidos${novos ? ' · ' + novos + ' novo(s)' : ''}</button><button class="btn sm" data-ir="crm">Funil</button>`,
+        corpo: `<div class="box-b list">${ns.length ? ns.slice(0, 8).map(x => `<div class="row"><div><b>${esc(W.nomeCliente(cli(x.n.clienteId)) || x.n.titulo)}</b> · <span class="note">${esc(W.faseMeta(W.faseDe(x.n)).l)}${c.perfil.id === 'diretoria' ? ' · ' + esc(x.n.resp || '') : ''}</span><br>
+          <small class="${x.sla.sit === 'atrasado' ? 'neg' : 'note'}">${esc(x.n.prox || 'Definir próxima ação')}${x.px ? ' · ' + W.dataBR(x.px) : ''}${x.sla.sit === 'atrasado' ? ' · ' + esc(x.sla.motivo) : ''}</small></div><button class="btn sm" data-ir="crm">Abrir</button></div>`).join('') + mais(ns.length, 8)
+          : vazio('Nenhum negócio pedindo ação hoje.')}</div>` };
+    },
+
     equipe(c) {
       const pessoas = Object.keys(c.db.users || {}).filter(k => W.perfilDe(c.db, k).id !== 'diretoria').map(k => ({ k, d: W.desempenho(c.db, H.nomeUsuario(k), c.mes, c.hoje), perfil: W.perfilDe(c.db, k) }));
       const pct = c.meta ? Math.min(100, Math.round(c.fechadas.length / c.meta * 100)) : 0;

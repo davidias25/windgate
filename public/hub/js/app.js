@@ -122,6 +122,7 @@
 
   /* ---------------- UI ---------------- */
   function toast(msg) {
+    document.querySelectorAll('.toast').forEach(x => x.remove());   // um aviso por vez, sem empilhar
     const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 3600);
   }
@@ -155,11 +156,13 @@
   H.perfil = () => W.perfilDe(H.db, H.userKey);
 
   /* ---------------- Navegação ---------------- */
+  /* Mesma arquitetura do protótipo aprovado. L: = ainda no sistema atual · I: = em implantação. */
   const MENU = [
-    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos']] },
-    { g: 'Comercial', itens: [['L:cotacoes', 'Cotações'], ['L:crm', 'CRM & Clientes'], ['L:sourcing', 'Sourcing China'], ['L:parceiros', 'Fornecedores'], ['L:frete', 'Fretes']] },
-    { g: 'Financeiro', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['resop', 'Resultado por operação']] },
-    { g: 'Gestão', itens: [['L:agenda', 'Agenda'], ['L:gestao', 'Gestão do Mês'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe'], ['L:config', 'Configurações']] }
+    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos']] },
+    { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['I:portal', 'Portal do Cliente']] },
+    { g: 'Financeiro & Fiscal', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
+    { g: 'Inteligência', itens: [['L:frete', 'Fretes & Benchmark'], ['L:sourcing', 'Sourcing China'], ['L:parceiros', 'Fornecedores'], ['I:tracking', 'Tracking ao vivo']] },
+    { g: 'Gestão', itens: [['L:agenda', 'Agenda & Tarefas'], ['L:gestao', 'Gestão do Mês'], ['produtividade', 'Produtividade & Ranking'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe & Acessos'], ['L:config', 'Configurações']] }
   ];
 
   function montarMenu() {
@@ -173,6 +176,9 @@
         if (k.startsWith('L:')) {
           const a = document.createElement('a'); a.href = '/?aba=' + k.slice(2); a.innerHTML = `${esc(l)} <span class="tag">atual</span>`;
           a.title = 'Ainda no sistema atual — será refeito no Hub 2.0'; lista.appendChild(a);
+        } else if (k.startsWith('I:')) {
+          const b = document.createElement('button'); b.dataset.t = 'implantacao'; b.dataset.p = k.slice(2); b.innerHTML = `${esc(l)} <span class="tag novo">em breve</span>`;
+          b.onclick = () => ir('implantacao', k.slice(2)); lista.appendChild(b);
         } else {
           const b = document.createElement('button'); b.dataset.t = k; b.textContent = l;
           b.onclick = () => ir(k); lista.appendChild(b);
@@ -183,9 +189,10 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
   const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
   function podeTela(k) {
+    if (k === 'implantacao') return true;
     if (k.startsWith('L:')) {
       const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
       if (k === 'L:config') return !!(H.user && (H.user.config || H.userKey === 'samir'));
@@ -207,7 +214,7 @@
   function render() {
     if (!H.db) return;
     const t = H.estado.tela;
-    document.querySelectorAll('#menu button').forEach(b => b.toggleAttribute('aria-current', b.dataset.t === t || (t === 'ficha' && b.dataset.t === 'ops')));
+    document.querySelectorAll('#menu button').forEach(b => b.toggleAttribute('aria-current', (b.dataset.t === t && (!b.dataset.p || b.dataset.p === H.estado.param)) || (t === 'ficha' && b.dataset.t === 'ops')));
     document.querySelectorAll('#menu button[aria-current]').forEach(b => b.setAttribute('aria-current', 'page'));
     const fn = H.telas[t] || H.telas.torre;
     const alvo = $('#conteudo');

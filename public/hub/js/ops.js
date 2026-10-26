@@ -228,6 +228,7 @@
     ['Trânsito', 'Apólice de seguro'], ['Trânsito', 'Docs enviados ao despachante'], ['Desembaraço', 'Checklist ICMS-AL (exoneração/benefício)'],
     ['Desembaraço', 'DI / DUIMP registrada'], ['Desembaraço', 'ICMS-AL pago (1,6%)'], ['Desembaraço', 'NF de entrada / nacionalização'],
     ['Entrega', 'NF de saída / venda'], ['Entrega', 'GNRE DIFAL (se aplicável)'], ['Entrega', 'CT-e transporte terrestre'], ['Entrega', 'Comprovante de entrega assinado']];
+  H.CHK_MODELO = CHK_MODELO;
 
   H.novaOperacao = () => novaOperacao();
   function novaOperacao() {

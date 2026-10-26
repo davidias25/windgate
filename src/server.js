@@ -546,6 +546,20 @@ app.post('/api/integrations/clickup/tarefa', async (req, res) => {
 });
 
 // Rota de Health Check
+/* Hub 2.0 · Entrada de pedidos: lê o texto ou o print que o cliente mandou.
+   Sem ANTHROPIC_API_KEY responde semIA e o navegador usa a leitura por regras. */
+const ia = require('./services/ia.service');
+app.post('/api/ia/pedido', auth.exigirTokenSeAtiva, async (req, res) => {
+  const { texto, imagem } = req.body || {};
+  if (!texto && !imagem) return res.status(400).json({ success: false, message: 'Envie o texto ou o print do pedido.' });
+  try {
+    const pedido = await ia.lerPedido({ texto, imagem });
+    res.json({ success: true, pedido, modelo: ia.MODELO() });
+  } catch (e) {
+    res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   await bancoPronto;
   res.json({
@@ -556,6 +570,7 @@ app.get('/api/health', async (req, res) => {
     // efêmero do Render — sem isso a perda de dados só aparece no próximo reinício.
     persistencia: dbStore.estado(),
     historico: dbStore.estadoHistorico(),
+    integracoes: { ia: ia.ativa() },
     registros: memoryDB
       ? { ops: (memoryDB.ops || []).length, docs: (memoryDB.docs || []).length, fin: (memoryDB.fin || []).length }
       : null
