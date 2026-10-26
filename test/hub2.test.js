@@ -171,7 +171,7 @@ function bancoReal() {
     ok(['fin.ver', 'fin.lancar', 'fin.resultado', 'docs.revisar'].every(c => !W.pode(d, 'ivina', c)), 'Ívina: nenhum acesso ao financeiro e não aprova documento');
     ok(!W.torreDe(d, 'ivina').some(id => ['caixa', 'pagar', 'lancar', 'aprovacoes', 'equipe'].includes(id)), 'torre da Ívina não tem painel financeiro');
     d.hubPainel.ivina = { paineis: ['caixa', 'recados', 'coletar', 'equipe'] };
-    ok(W.torreDe(d, 'ivina').join() === 'recados,coletar', 'torre salva com painel proibido: o painel some (permissão vale mais que a escolha)');
+    ok(W.torreDe(d, 'ivina').join() === 'excecoes,recados,coletar', 'torre salva com painel proibido: o painel some (permissão vale mais que a escolha); a fila de exceções entra no topo');
     ok(W.torreDe(d, 'matheus').includes('fretes') && W.torreDe(d, 'matheus').includes('lancar') && !W.torreDe(d, 'matheus').includes('caixa'), 'torre do Matheus: frete e lançamentos, sem caixa');
     d.users.matheus.perfilHub = 'documentos';
     ok(!W.pode(d, 'matheus', 'fin.lancar'), 'perfil pode ser trocado por pessoa (perfilHub)');

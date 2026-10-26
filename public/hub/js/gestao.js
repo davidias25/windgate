@@ -103,11 +103,16 @@
   /* ================= INTEGRAÇÕES ================= */
   const INTEG = [
     ['banco', 'Banco de dados e backups', 'Banco cifrado na nuvem, histórico por hora e por dia.', 'Davi · Render', 'WINDGATE_DB_SECRET, SUPABASE_URL, SUPABASE_KEY (service_role)', 'já pago (Render/Supabase)'],
-    ['ia', 'IA (API do Claude)', 'Lê pedidos e prints, comprovantes, invoices e packing lists.', 'Samir cria a chave no Console · Davi salva no Render', 'ANTHROPIC_API_KEY', 'por uso: créditos do Console (US$ 100 disponíveis)'],
-    ['tracking', 'Tracking por contêiner (ShipsGo)', 'Posição real e ETA atualizado sozinho, alerta de atraso.', 'Samir pega a chave na ShipsGo · Davi salva no Render', 'SHIPSGO_API_KEY', '≈ US$ 2 por contêiner'],
+    ['ia', 'IA (API do Claude)', 'Lê pedidos, confere invoice × packing list × BL, busca fábricas e apoia o RH.', 'Samir cria a chave no Console · Davi salva no Render', 'ANTHROPIC_API_KEY', 'por uso: créditos do Console (US$ 100 disponíveis)'],
+    ['tracking', 'Tracking por contêiner (ShipsGo)', 'Cria o rastreio pelo número do contêiner.', 'Samir pega a chave na ShipsGo · Davi salva no Render', 'SHIPSGO_API_KEY', 'créditos por embarque + taxa anual da API'],
+    ['trackingWebhook', 'Avisos da ShipsGo (webhook)', 'ETA e descarga chegam sozinhos; a descarga liga o relógio do free time.', 'Davi cadastra no painel da ShipsGo a URL /api/webhooks/shipsgo/<token>', 'SHIPSGO_WEBHOOK_TOKEN', 'R$ 0'],
+    ['ptax', 'Dólar PTAX (Banco Central)', 'Dólar do dia em Câmbio, Custeio e na ficha da operação.', 'nada: API pública', '—', 'R$ 0'],
+    ['santander', 'Extrato Santander (SF)', 'Extrato do mês pela API oficial; entra na conciliação.', 'Samir faz a adesão no portal de desenvolvedores do Santander · Davi salva credenciais e certificado', 'SANTANDER_CLIENT_ID, SANTANDER_CLIENT_SECRET, SANTANDER_CERT_ARQUIVO, SANTANDER_CERT_SENHA, SANTANDER_CONTA', 'tarifa de API a confirmar com o gerente'],
+    ['itau', 'Extrato Itaú (JeT)', 'Extrato pela API oficial do Itaú; até liberar, OFX ou CAMT.053.', 'Samir pede o client_id ao gerente · Davi salva credenciais e certificado dinâmico', 'ITAU_CLIENT_ID, ITAU_CLIENT_SECRET, ITAU_CERT_ARQUIVO, ITAU_CERT_SENHA, ITAU_EXTRATO_URL', 'tarifa a confirmar com o gerente'],
+    ['mcp', 'Claude consulta o Hub (MCP)', 'Perguntar ao Claude "qual o saldo da OP20?" com os dados do Hub, só leitura.', 'Davi cria um token longo e salva no Render', 'WINDGATE_MCP_TOKEN', 'R$ 0'],
     ['portalUnico', 'Portal Único Siscomex (DUIMP)', 'Situação, canal e desembaraço da DUIMP sem abrir o portal.', 'Davi sobe o certificado A1 como Secret File e a senha', 'PORTAL_UNICO_CERT_ARQUIVO, PORTAL_UNICO_CERT_SENHA, PORTAL_UNICO_AMBIENTE', 'R$ 0'],
-    ['nfe', 'NF-e e notas recebidas (Focus NFe)', 'Emite NF-e da DUIMP e baixa sozinha toda NF-e emitida contra o CNPJ.', 'Samir cria a conta · Davi salva o token', 'FOCUS_NFE_TOKEN, FOCUS_NFE_AMBIENTE', 'plano a partir de R$ 119,90/mês'],
-    ['emailNotas', 'E-mail de notas', 'Nota que chega por e-mail (ou encaminhada do WhatsApp) entra no Fiscal.', 'Davi configura o encaminhamento do e-mail', 'FISCAL_WEBHOOK_TOKEN', 'R$ 0 (Cloudflare Email Routing) ou plano do provedor'],
+    ['nfe', 'NF-e e notas recebidas (Focus NFe)', 'Emite NF-e da DUIMP e baixa sozinha toda NF-e emitida contra o CNPJ.', 'Samir cria a conta (plano para 2 CNPJs) · Davi salva o token', 'FOCUS_NFE_TOKEN, FOCUS_NFE_AMBIENTE', 'Solo R$ 94,90/mês cobre 1 CNPJ; 2 CNPJs pedem outro plano'],
+    ['emailNotas', 'E-mail de notas (IMAP)', 'Nota que chega em notas@windgate.com.br (ou encaminhada do WhatsApp) entra no Fiscal a cada 10 min.', 'Samir cria a caixa · Davi salva o acesso', 'IMAP_HOST, IMAP_PORTA, IMAP_USUARIO, IMAP_SENHA', 'R$ 0 (hospedagem atual)'],
     ['boletos', 'Boleto e Pix (Asaas)', 'Gera a cobrança da parcela e dá baixa sozinha quando o cliente paga.', 'Samir resolve o CNPJ na Asaas · Davi salva a chave', 'ASAAS_API_KEY', 'taxa por boleto pago']
   ];
   H.telas.integracoes = function (el) {

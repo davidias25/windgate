@@ -103,4 +103,29 @@ async function analisarEquipe(dados, fetchImpl) {
   return extrairJSON(resp);
 }
 
-module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, extrairJSON, blocoImagem, MODELO };
+
+/* ---------- Conferência cruzada de documentos (invoice × packing list × BL × proforma) ----------
+   Lê os PDFs/imagens da operação e confronta os campos entre eles. A IA aponta;
+   quem aprova ou rejeita o documento continua sendo a pessoa (dupla conferência). */
+const SISTEMA_DOCS = `Você confere documentos de importação de uma trading brasileira (WindGate). Recebe invoice, packing list, BL e/ou proforma da MESMA operação.
+Responda SOMENTE com JSON: {"documentos":[{"arquivo":"","tipo":"invoice|packing list|BL|proforma|outro","numero":"","data":"","exportador":"","importador":"","consignatario":"","notify":"",
+"incoterm":"","portoEmbarque":"","portoDestino":"","moeda":"","valorTotal":null,"quantidade":null,"unidade":"","pesoBruto":null,"pesoLiquido":null,"volumes":null,"ncm":[""],"containers":[""]}],
+"divergencias":[{"campo":"","entre":["arquivo A","arquivo B"],"valores":["",""],"gravidade":"alta|media|baixa","explicacao":""}],
+"alertas":[""]}
+Regras: compare peso bruto e líquido, quantidade, volumes, valor, moeda, Incoterm, portos, NCM, contêineres e consignatário. Na importação por conta e ordem o consignatário/importador deve ser a importadora (SF Trading ou JeT) e o adquirente deve constar na invoice. Diga quando um campo não aparece. Não invente.`;
+const MIME_OK = /^(application\/pdf|image\/(png|jpe?g|webp|gif))$/i;
+async function conferirDocumentos(arquivos, contexto, fetchImpl) {
+  if (!ativa()) { const e = new Error('Falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  const conteudo = [];
+  (arquivos || []).slice(0, 6).forEach(a => {
+    if (!a || !a.base64 || !MIME_OK.test(a.mime || '')) return;
+    conteudo.push({ type: 'text', text: 'Arquivo: ' + (a.nome || 'documento') });
+    conteudo.push(/pdf/i.test(a.mime) ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.base64 } } : { type: 'image', source: { type: 'base64', media_type: a.mime.toLowerCase().replace('jpg', 'jpeg'), data: a.base64 } });
+  });
+  if (!conteudo.length) throw new Error('Nenhum PDF ou imagem para conferir.');
+  conteudo.push({ type: 'text', text: 'Contexto da operação: ' + JSON.stringify(contexto || {}).slice(0, 2000) });
+  const d = extrairJSON(await chamar(conteudo, SISTEMA_DOCS, fetchImpl, { max_tokens: 4000 }));
+  return { documentos: Array.isArray(d.documentos) ? d.documentos : [], divergencias: Array.isArray(d.divergencias) ? d.divergencias : [], alertas: Array.isArray(d.alertas) ? d.alertas.map(String) : [] };
+}
+
+module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, extrairJSON, blocoImagem, MODELO };

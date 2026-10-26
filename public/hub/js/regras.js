@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -346,20 +346,20 @@
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
       caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
-      torre: ['resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
+      torre: ['excecoes', 'resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
       caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
-      torre: ['resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
+      torre: ['excecoes', 'resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
       caps: ['fin.lancar', 'sourcing.ver'],
-      torre: ['resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
+      torre: ['excecoes', 'resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
     rh: { nome: 'Pessoas & Cultura (RH)', foco: 'Desenvolvimento da equipe, cultura, comunicação interna e ponto',
       caps: ['equipe.ver', 'rh.ver', 'chat.aviso', 'recado.outros', 'cultura.editar', 'reuniao.editar'], torre: ['equipe', 'recados', 'tarefas', 'alertas'], restrito: true },
     contador: { nome: 'Contabilidade (acesso externo)', foco: 'Notas fiscais e extratos do trimestre para a apuração',
       caps: ['fiscal.ver'], torre: [], externo: true },
     documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
       caps: ['crm.ver', 'pedidos.ver', 'sourcing.ver'],
-      torre: ['resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
+      torre: ['excecoes', 'resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
   };
   const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos', pedro: 'contador', oneide: 'rh' };
   function perfilDe(db, k) {
@@ -371,6 +371,7 @@
 
   /* Painéis da torre: quem pode ter cada um (cap exigida). */
   const PAINEIS = {
+    excecoes: { t: 'O que precisa de ação agora' },
     resumo: { t: 'Números do dia' }, etapas: { t: 'Operações por etapa' }, operacoes: { t: 'Operações ativas' },
     alertas: { t: 'Alertas' }, recados: { t: 'Recados e prioridades' }, tarefas: { t: 'Minhas tarefas' },
     coletar: { t: 'Documentos a coletar' }, revisar: { t: 'Documentos aguardando revisão', cap: 'docs.revisar' },
@@ -385,7 +386,9 @@
   function torreDe(db, k) {
     const ok = new Set(paineisPermitidos(db, k));
     const salva = db && db.hubPainel && db.hubPainel[k] && Array.isArray(db.hubPainel[k].paineis) ? db.hubPainel[k].paineis : null;
-    return (salva || perfilDe(db, k).torre).filter(id => ok.has(id));
+    // A fila de exceções entra no topo de toda torre salva antes de ela existir.
+    const lista = salva && !salva.includes('excecoes') && !db.hubPainel[k].semExcecoes ? ['excecoes'].concat(salva) : (salva || perfilDe(db, k).torre);
+    return lista.filter(id => ok.has(id));
   }
 
   /* Desempenho do mês por pessoa (nome curto, como o sistema grava). */

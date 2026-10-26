@@ -342,3 +342,10 @@ span.pos{display:inline-grid;place-items:center;width:24px;height:24px;border-ra
 .cult-c{padding:16px;display:flex;flex-direction:column;gap:6px}
 .cult-n{font:600 12px var(--fm);color:var(--mag)}
 @media (max-width:900px){.cult,.cult-v{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- Comex: custeio, câmbio, contêineres ---------- */
+tr.clic{cursor:pointer}
+tr.clic:hover td{background:var(--surface-2)}
+.dot-n{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.list label.row{cursor:pointer}
+.kpi .v.neg{color:var(--crit)}

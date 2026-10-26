@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>WindGate · Acompanhamento</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#F3F5FA;--s:#fff;--l:#E1E6EF;--ink:#1D2433;--m:#5B6475;--blue:#0046AD;--soft:#E8EFFA;--mag:#CE0058;--ok:#0E8A5F;--f:'IBM Plex Sans',system-ui,sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--f)}
+header{background:var(--s);border-bottom:3px solid var(--mag);padding:14px max(16px,env(safe-area-inset-left))}
+header .w{max-width:880px;margin:0 auto;display:flex;align-items:center;gap:12px;justify-content:space-between}
+header img{height:34px}header span{color:var(--m);font-size:12.5px}
+main{max-width:880px;margin:0 auto;padding:18px 16px 40px}
+h1{font-size:22px;margin:0 0 2px}.sub{color:var(--m);margin:0 0 16px}
+.box{background:var(--s);border:1px solid var(--l);border-radius:10px;margin-bottom:14px;overflow:hidden}
+.box h2{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--blue);margin:0;padding:12px 16px;border-bottom:1px solid var(--l)}
+.bb{padding:14px 16px}
+.steps{display:flex;flex-wrap:wrap;gap:6px}.st{font-size:12px;padding:5px 9px;border-radius:999px;background:var(--bg);color:var(--m)}
+.st.done{background:var(--soft);color:var(--blue)}.st.cur{background:var(--blue);color:#fff;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.k small{display:block;color:var(--m);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}.k b{font-size:16px}
+table{width:100%;border-collapse:collapse}td,th{padding:8px 10px;border-bottom:1px solid var(--l);text-align:left;font-size:13px}th{color:var(--m);font-weight:600;font-size:12px}
+.n{text-align:right;font-variant-numeric:tabular-nums}.mono{font-family:var(--fm)}
+.ok{color:var(--ok);font-weight:600}a{color:var(--blue)}
+textarea,input,select{font:inherit;width:100%;padding:9px 10px;border:1px solid var(--l);border-radius:8px;background:#fff}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+button{font:600 14px var(--f);background:var(--blue);color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
+.msg{padding:8px 0;border-bottom:1px solid var(--l)}.msg small{color:var(--m)}
+.err{background:#FDECEC;color:#9B1C1C;padding:14px 16px;border-radius:10px}
+.foot{color:var(--m);font-size:12px;text-align:center;margin-top:18px}
+@media (max-width:560px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><div class="w"><img src="/hub/logo.webp" alt="WindGate" onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:'WindGate'}))"><span id="tipo">Acompanhamento</span></div></header>
+<main id="c"><p class="sub">Carregando…</p></main>
+<script>
+(function () {
+  const t = new URLSearchParams(location.search).get('t') || '';
+  const c = document.getElementById('c');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
+  const br = d => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—';
+  const brl = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const ROT = { cliente: 'Acompanhamento da importação', fornecedor: 'Supplier portal', despachante: 'Acesso do despachante' };
+  const ACOES = { fornecedor: [['producao-pronta', 'Production ready (date)'], ['embarque-confirmado', 'Shipment confirmed (ETD)'], ['mensagem', 'Message']], despachante: [['duimp-registrada', 'DUIMP registrada (nº)'], ['canal', 'Canal de parametrização'], ['desembaracado', 'Desembaraçado (data)'], ['mensagem', 'Mensagem']], cliente: [['mensagem', 'Mensagem para a WindGate']] };
+  async function carregar() {
+    try {
+      const r = await fetch('/api/portal/dados?t=' + encodeURIComponent(t)); const j = await r.json();
+      if (!j.success) { c.innerHTML = `<div class="err">${esc(j.message || 'Link inválido.')}</div>`; return; }
+      desenhar(j.tipo, j.dados, j.expira);
+    } catch (e) { c.innerHTML = '<div class="err">Não foi possível carregar agora. Tente de novo em instantes.</div>'; }
+  }
+  function desenhar(tipo, d, expira) {
+    const en = tipo === 'fornecedor';
+    document.getElementById('tipo').textContent = ROT[tipo];
+    const idx = d.fluxo.findIndex(f => f.k === d.etapaK);
+    let h = `<h1>${esc(d.op)}${d.nome ? ' · ' + esc(d.nome) : ''}</h1><p class="sub">${en ? 'Status' : 'Etapa atual'}: <b>${esc(d.etapa)}</b>${d.cliente ? ' · ' + esc(d.cliente) : ''}</p>
+      <div class="box"><h2>${en ? 'Progress' : 'Andamento'}</h2><div class="bb"><div class="steps">${d.fluxo.map((f, i) => `<span class="st ${i < idx ? 'done' : i === idx ? 'cur' : ''}">${esc(f.l)}</span>`).join('')}</div></div></div>
+      <div class="box"><h2>${en ? 'Shipment' : 'Embarque'}</h2><div class="bb grid">
+        <div class="k"><small>${en ? 'Port of loading' : 'Origem'}</small><b>${esc(d.origem || '—')}</b></div>${d.destino != null ? `<div class="k"><small>Destino</small><b>${esc(d.destino || '—')}</b></div>` : ''}
+        <div class="k"><small>${en ? 'ETD' : 'Embarque'}</small><b>${br(d.embarque)}</b></div>${!en ? `<div class="k"><small>Chegada prevista</small><b>${br(d.eta)}</b></div>` : ''}
+        ${d.navio ? `<div class="k"><small>${en ? 'Vessel' : 'Navio'}</small><b>${esc(d.navio)}</b></div>` : ''}${d.containers.length ? `<div class="k"><small>${en ? 'Containers' : 'Contêineres'}</small><b class="mono">${d.containers.map(x => esc(x.numero)).join('<br>')}</b></div>` : ''}
+        ${d.duimp ? `<div class="k"><small>DUIMP</small><b class="mono">${esc(d.duimp)}</b></div>` : ''}${d.canal ? `<div class="k"><small>Canal</small><b>${esc(d.canal)}</b></div>` : ''}</div></div>`;
+    if (d.pedido) h += `<div class="box"><h2>Order</h2><div class="bb grid"><div class="k"><small>Product</small><b>${esc(d.pedido.produto)}</b></div><div class="k"><small>Incoterm</small><b>FOB ${esc(d.pedido.portoEmbarque)}</b></div><div class="k"><small>Production ready</small><b>${br(d.pedido.prontidao)}</b></div></div></div>`;
+    if (d.documentos) h += `<div class="box"><h2>Documentos</h2><div class="bb">${d.documentos.length ? `<table><tbody>${d.documentos.map(x => `<tr><td>${esc(x.nome)}${x.status ? ` <small>${esc(x.status)}</small>` : ''}</td><td class="n"><a href="${esc(x.link)}" target="_blank" rel="noopener">abrir</a></td></tr>`).join('')}</tbody></table>` : '<p class="sub">Nenhum documento liberado ainda.</p>'}</div></div>`;
+    if (d.financeiro) { const f = d.financeiro;
+      h += `<div class="box"><h2>Financeiro da operação</h2><div class="bb"><div class="grid" style="margin-bottom:10px"><div class="k"><small>Pago por você</small><b>${brl(f.recebido)}</b></div><div class="k"><small>A pagar</small><b>${brl(f.aReceber)}</b></div>${f.saldoFinal != null ? `<div class="k"><small>Saldo final previsto</small><b>${brl(Math.abs(f.saldoFinal))}</b><small>${esc(f.situacao)}</small></div>` : ''}</div>
+        <table><thead><tr><th>Vencimento</th><th>Parcela</th><th class="n">Valor</th><th></th></tr></thead><tbody>${f.parcelas.map(p => `<tr><td class="mono">${br(p.data)}</td><td>${esc(p.desc)}</td><td class="n">${brl(p.valor)}</td><td>${p.pago ? '<span class="ok">pago</span>' : ''}</td></tr>`).join('')}</tbody></table>
+        ${f.despesas ? `<h3 style="font-size:13px;margin:14px 0 4px">Despesas pagas por sua conta</h3><table><tbody>${f.despesas.filter(x => x.pago).map(p => `<tr><td class="mono">${br(p.data)}</td><td>${esc(p.desc)}</td><td class="n">${brl(p.valor)}</td></tr>`).join('')}</tbody></table>` : ''}</div></div>`; }
+    h += `<div class="box"><h2>${en ? 'Messages' : 'Mensagens'}</h2><div class="bb">${(d.mensagens || []).map(m => `<div class="msg">${esc(m.texto || m.acao.replace(/-/g, ' '))}${m.data ? ' · ' + br(m.data) : ''}<br><small>${esc(m.de)} · ${br(m.em)}</small></div>`).join('')}
+      <div class="row" style="margin-top:10px"><select id="ac">${ACOES[tipo].map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><input id="dt" type="date"></div><textarea id="tx" rows="3" placeholder="${en ? 'Write here' : 'Escreva aqui'}"></textarea><div style="margin-top:10px"><button id="env">${en ? 'Send' : 'Enviar'}</button> <span id="ok" class="ok"></span></div></div></div>
+      <p class="foot">${en ? 'Private link, valid until' : 'Link pessoal, válido até'} ${br(expira)} · WindGate Importação & Comércio</p>`;
+    c.innerHTML = h;
+    document.getElementById('env').onclick = async () => {
+      const b = { acao: document.getElementById('ac').value, data: document.getElementById('dt').value, texto: document.getElementById('tx').value };
+      const r = await fetch('/api/portal/mensagem?t=' + encodeURIComponent(t), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }); const j = await r.json();
+      if (j.success) { document.getElementById('ok').textContent = en ? 'Sent ✓' : 'Enviado ✓'; setTimeout(carregar, 800); } else document.getElementById('ok').textContent = j.message || 'Erro';
+    };
+  }
+  carregar();
+})();
+</script>
+</body>
+</html>

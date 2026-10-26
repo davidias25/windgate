@@ -47,6 +47,15 @@
       const diasAtivos = Object.keys(a.dias || {}).length, ho = ponto && ponto.pessoas ? (ponto.pessoas[k] || {}) : null;
       return { k, nome, perfil, pr, min: a.min, diasAtivos, media: diasAtivos ? a.min / diasAtivos : 0, areas: porArea(a.telas), ho, atrasadas: (db.agendaTasks || []).filter(t => t && t.resp === nome && t.status !== 'feita' && t.prazo && t.prazo < hoje).length,
         ultima1a1: notas.find(n => n.pessoa === nome && n.tipo === '1a1') }; });
+    // Evolução contra o mês anterior: o que melhorou e onde está o maior espaço para crescer.
+    const mesAnt = W.mesSoma(mesRH, -1), fimAnt = W.vencDoMes(mesAnt, 31);
+    pessoas.forEach(p => { const ant = W.produtividade(db, p.nome, p.perfil.id, mesAnt, fimAnt);
+      p.ant = ant; p.delta = ant && ant.total != null ? p.pr.total - ant.total : null;
+      const pct = (pr, k, max) => pr && pr.partes[k] != null ? pr.partes[k] / max : null;
+      p.melhorou = W.PILARES.filter(([k, , mx]) => pct(p.pr, k, mx) != null && pct(ant, k, mx) != null && pct(p.pr, k, mx) - pct(ant, k, mx) >= 0.1).map(([, l]) => l);
+      p.piorou = W.PILARES.filter(([k, , mx]) => pct(p.pr, k, mx) != null && pct(ant, k, mx) != null && pct(ant, k, mx) - pct(p.pr, k, mx) >= 0.1).map(([, l]) => l);
+      const fraco = W.PILARES.filter(([k]) => p.pr.partes[k] != null).map(([k, l, mx]) => ({ l, falta: mx - p.pr.partes[k], pct: p.pr.partes[k] / mx })).sort((x, y) => y.falta - x.falta)[0];
+      p.melhorar = fraco && fraco.pct < 0.8 ? fraco.l : ''; });
     el.innerHTML = `
       <div class="head"><div><h1>RH & Pessoas</h1><p class="sub">Desenvolvimento da equipe a partir do que cada um faz no sistema. Sem salários nem financeiro. Princípio da casa: treinar antes de cobrar.</p></div>
         <div class="btns"><input type="month" id="rmes" class="inp" value="${mesRH}" aria-label="Mês"><button class="btn" data-ir="cultura">Cultura WindGate</button><button class="btn" id="rnota">+ Anotação de 1:1</button><button class="btn pri" id="ria">Análise da IA</button></div></div>
@@ -59,6 +68,8 @@
       ${analise ? `<div class="box"><div class="box-h"><h2>Leitura da IA</h2><span class="note">apoio à conversa, não é avaliação final</span></div><div class="box-b"><p>${esc(analise.equipe || '')}</p><div class="g3" style="margin-top:10px">${(analise.pessoas || []).map(p => `<div class="rp"><b>${esc(p.nome)}</b>
         ${(p.destaques || []).length ? `<p><b>Vai bem:</b> ${esc(p.destaques.join('; '))}</p>` : ''}${(p.atencao || []).length ? `<p><b>Atenção:</b> ${esc(p.atencao.join('; '))}</p>` : ''}${(p.possiveisCausas || []).length ? `<p class="note">Possíveis causas: ${esc(p.possiveisCausas.join('; '))}</p>` : ''}
         ${(p.perguntas1a1 || []).length ? `<p><b>Perguntas para a 1:1:</b></p><ul class="rl">${p.perguntas1a1.map(q => `<li>${esc(q)}</li>`).join('')}</ul>` : ''}${p.acaoSugerida ? `<p><b>Ação:</b> ${esc(p.acaoSugerida)}</p>` : ''}</div>`).join('')}</div></div></div>` : ''}
+      <div class="box"><div class="box-h"><h2>Evolução do mês · ${esc(mesRH.split('-').reverse().join('/'))}</h2><span class="note">comparado com ${esc(mesAnt.split('-').reverse().join('/'))}</span></div><div class="tw"><table><thead><tr><th>Pessoa</th><th class="num">Nota</th><th class="num">Mês anterior</th><th class="num">Variação</th><th>Melhorou</th><th>Caiu</th><th>Maior espaço para crescer</th></tr></thead><tbody>
+        ${pessoas.slice().sort((x, y) => y.pr.total - x.pr.total).map(p => `<tr><td><b>${esc(p.nome)}</b> <span class="note">${esc(p.perfil.nome)}</span></td><td class="num"><b>${p.pr.total}</b></td><td class="num">${p.ant && p.ant.total != null ? p.ant.total : '—'}</td><td class="num" style="color:${p.delta > 0 ? 'var(--ok)' : p.delta < 0 ? 'var(--crit)' : 'inherit'}">${p.delta == null ? '—' : (p.delta > 0 ? '+' : '') + p.delta}</td><td>${esc(p.melhorou.join(', ') || '—')}</td><td>${esc(p.piorou.join(', ') || '—')}</td><td>${esc(p.melhorar || 'equilibrado')}</td></tr>`).join('')}</tbody></table></div></div>
       <div class="g3">${pessoas.map(p => `<div class="box"><div class="box-h"><h2>${esc(p.nome)}</h2><span class="pill ${p.pr.faixa === 'ouro' ? 'warn' : p.pr.faixa === 'prata' ? 'info' : ''}">${p.pr.total} · ${p.pr.faixa}</span></div><div class="box-b">
         <p class="note">${esc(p.perfil.nome)}</p>
         <table class="mini"><tbody>

@@ -14,7 +14,7 @@ function perfil(db, k) { return W.perfilDe(db || {}, k).id; }
 const ehContador = (db, k) => !!k && perfil(db, k) === 'contador';
 
 /* RH vê a equipe e o andamento, nunca dinheiro: sem financeiro, cotações (custos e margens), notas nem extratos. */
-const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos'];
+const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos', 'hubCambio'];
 const ehRH = (db, k) => !!k && perfil(db, k) === 'rh';
 function semPins(users) { const out = {}; Object.entries(users || {}).forEach(([key, u]) => { const c = Object.assign({}, u); delete c.pin; out[key] = c; }); return out; }
 
@@ -30,7 +30,32 @@ function gravacaoRH(atual, recebido, k) {
 }
 
 /** O que o usuário pode ler de GET /api/db. */
-function paraLeitura(db, k) { return semRH(paraLeitura0(db, k), k); }
+function paraLeitura(db, k) { return semRH(semDinheiroDocs(paraLeitura0(db, k), k), k); }
+
+/* Documentação & Atendimento (Ívina) também não vê dinheiro: nem financeiro,
+   nem cotações (custo e margem), nem câmbio, nem o valor dos negócios. Na
+   gravação, o que ela mandar dessas coleções é descartado e o valor dos
+   negócios que ela editar é preservado do que já está no banco. */
+const ehDocs = (db, k) => !!k && k !== '(sem-auth)' && !!(db && db.users && db.users[k]) && perfil(db, k) === 'documentos';
+function semDinheiroDocs(db, k) {
+  if (!db || !ehDocs(db, k)) return db;
+  const out = Object.assign({}, db);
+  SEM_DINHEIRO.forEach(c => { delete out[c]; });
+  out.crmOps = (db.crmOps || []).map(n => { const c = Object.assign({}, n); delete c.valor; return c; });
+  return out;
+}
+function gravacaoDocs(atual, recebido, k) {
+  if (!recebido || !ehDocs(atual, k)) return recebido;
+  const out = Object.assign({}, recebido);
+  SEM_DINHEIRO.forEach(c => { delete out[c]; });
+  if (Array.isArray(recebido.crmOps)) {
+    const m = new Map(((atual && atual.crmOps) || []).filter(n => n && n._id).map(n => [n._id, n]));
+    out.crmOps = recebido.crmOps.map(n => { const a = n && m.get(n._id); return a && a.valor != null && n.valor == null ? Object.assign({}, n, { valor: a.valor }) : n; });
+  }
+  const proibidos = new Set(); SEM_DINHEIRO.forEach(c => { const v = atual && atual[c]; if (Array.isArray(v)) v.forEach(r => r && r._id && proibidos.add(r._id)); });
+  if (recebido._removidos) { out._removidos = {}; Object.entries(recebido._removidos).forEach(([id, ts]) => { if (!proibidos.has(id)) out._removidos[id] = ts; }); }
+  return out;
+}
 function paraLeitura0(db, k) {
   if (db && ehRH(db, k)) {
     const out = Object.assign({}, db, { users: semPins(db.users) });
@@ -53,12 +78,12 @@ function paraLeitura0(db, k) {
 }
 
 /** O que o usuário pode gravar em POST /api/db (o resto é descartado). */
-function paraGravacao(atual, recebido, k) { return gravacaoRH(atual, paraGravacao0(atual, recebido, k), k); }
+function paraGravacao(atual, recebido, k) { return gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k); }
 function paraGravacao0(atual, recebido, k) {
   if (recebido && ehRH(atual, k)) {
     const out = Object.assign({}, recebido);
     SEM_DINHEIRO.concat(['users', 'crmOps', 'settings']).forEach(c => { delete out[c]; });
-    const proibidos = new Set(); SEM_DINHEIRO.forEach(c => ((atual && atual[c]) || []).forEach(r => r && r._id && proibidos.add(r._id)));
+    const proibidos = new Set(); SEM_DINHEIRO.forEach(c => { const v = atual && atual[c]; if (Array.isArray(v)) v.forEach(r => r && r._id && proibidos.add(r._id)); });
     out._removidos = {}; Object.entries(recebido._removidos || {}).forEach(([id, ts]) => { if (!proibidos.has(id)) out._removidos[id] = ts; });
     return out;
   }
@@ -77,4 +102,4 @@ function paraGravacao0(atual, recebido, k) {
   return out;
 }
 
-module.exports = { perfil, ehContador, ehRH, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES };
+module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES };

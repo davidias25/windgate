@@ -241,7 +241,7 @@
     const pessoas = Object.keys(H.db.users || {});
 
     const blocos = ids.map(id => {
-      const fn = P[id]; if (!fn) return '';
+      const fn = P[id] || (H.torreExtra || {})[id]; if (!fn) return '';
       let r; try { r = fn(c); } catch (e) { console.error(e); r = { corpo: `<p class="empty">Não consegui montar este painel.</p>` }; }
       if (r.cru) return `<section class="tp larga" data-p="${id}">${r.cru}</section>`;
       return `<section class="tp box ${r.largo ? 'larga' : ''}" data-p="${id}"><div class="box-h"><h2>${esc(W.PAINEIS[id].t)}</h2><div class="btns">${r.acoes || ''}</div></div>${r.corpo || ''}</section>`;
@@ -260,6 +260,7 @@
     const vc = el.querySelector('#verComo'); if (vc) vc.onchange = () => { verComo = vc.value === H.userKey ? null : vc.value; H.render(); };
     el.querySelectorAll('[data-op]').forEach(x => x.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); H.ir('ficha', x.dataset.op); }));
     el.querySelectorAll('[data-ir]').forEach(x => x.addEventListener('click', () => H.ir(x.dataset.ir)));
+    el.querySelectorAll('[data-irp]').forEach(x => x.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const [t, p] = x.dataset.irp.split('|'); H.ir(t, p || null); }));
     el.querySelectorAll('[data-f]').forEach(x => x.addEventListener('click', () => { filtroEtapa = x.dataset.f || null; H.render(); }));
     const mm = el.querySelector('[data-minhas]'); if (mm) mm.onclick = () => { soMinhas = !soMinhas; H.render(); };
     el.querySelector('[data-nova]').onclick = () => H.novaOperacao();

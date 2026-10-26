@@ -57,6 +57,7 @@
     const pct = W.checklistPct(db, o.id);
     const r = H.pode('fin.resultado') ? W.resultadoPorOp(db, 'todas').find(x => x.op === o.id) : null;
     const abas = [['resumo', 'Resumo'], ['etapas', 'Etapas & histórico'], ['logistica', 'Logística & contêineres'], ['docs', `Documentos${pct != null ? ' · ' + pct + '%' : ''}`]];
+    abas.splice(3, 0, ['comex', 'Comex, custo & câmbio']);
     abas.push(['chat', 'Conversa']);
     if (H.pode('fin.lancar')) abas.push(['fin', H.pode('fin.ver') ? 'Financeiro da operação' : 'Lançamentos da operação']);
 
@@ -78,7 +79,7 @@
     el.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { abaFicha = b.dataset.aba; H.render(); });
     el.querySelector('[data-acao="etapa"]').onclick = () => mudarEtapa(o);
     if (!abas.find(a => a[0] === abaFicha)) abaFicha = 'resumo';
-    ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat })[abaFicha](el.querySelector('#fichaAba'), o);
+    ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat, comex: H.fichaComex })[abaFicha](el.querySelector('#fichaAba'), o);
   };
 
   function campo(o, k, rot, tipo, extra) {
@@ -131,7 +132,7 @@
       <div class="box"><div class="box-h"><h2>Contêineres</h2><button class="btn sm" data-addc>+ Contêiner</button></div>
         ${cont.length ? `<div class="tw"><table><thead><tr><th>Número</th><th>Tipo</th><th>Lacre</th><th></th></tr></thead><tbody>${cont.map((c, i) => `<tr><td class="mono">${esc(c.numero)}</td><td>${esc(c.tipo || '')}</td><td class="mono">${esc(c.lacre || '')}</td><td class="num"><button class="btn ghost sm" data-delc="${i}">Remover</button></td></tr>`).join('')}</tbody></table></div>`
         : '<p class="empty">Nenhum contêiner cadastrado. O número do contêiner é o que liga o tracking automático.</p>'}
-        <p class="box-b note">Tracking automático por contêiner (ShipsGo) entra na próxima etapa; até lá, a posição no mapa é estimada pelo embarque e ETA.</p></div></div>`;
+        <p class="box-b note">Com o contêiner cadastrado, ligue o tracking automático (ShipsGo) e acompanhe o free time na aba Comex, custo & câmbio.</p></div></div>`;
     box.querySelector('[data-salvar]').onclick = () => salvarCampos(box, o);
     box.querySelector('[data-addc]').onclick = () => {
       const m = H.modal('Novo contêiner', `<div class="fields"><div class="f w2"><label class="lbl" for="cn">Número</label><input id="cn" placeholder="MSCU1234567" maxlength="11"></div><div class="f"><label class="lbl" for="ct">Tipo</label><select id="ct"><option>40'HQ</option><option>40'DC</option><option>20'DC</option><option>LCL</option></select></div><div class="f"><label class="lbl" for="cl">Lacre</label><input id="cl"></div></div>`, '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="cok">Adicionar</button>');

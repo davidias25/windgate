@@ -742,6 +742,9 @@ app.post('/api/email/notas', auth.exigirTokenSeAtiva, async (req, res) => {
 });
 if (email.configurado() && process.env.NODE_ENV !== 'test') setInterval(() => lerEmailNotas().catch(e => console.warn('⚠️ E-mail de notas:', e.message)), 10 * 60 * 1000);
 
+/* ---------- Comércio exterior: dólar, rastreio, bancos, portais, MCP ---------- */
+require('./routes/comex.routes')(app, { auth, acesso, gravarParcial, podeOperar, quemChat, ia, pronto: () => bancoPronto, db: () => memoryDB });
+
 /* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
 app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;
@@ -754,6 +757,11 @@ app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
     nfe: { ok: tem('FOCUS_NFE_TOKEN'), detalhe: `Focus NFe · ${process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'produção' : 'homologação'}` },
     emailNotas: { ok: email.configurado() || tem('FISCAL_WEBHOOK_TOKEN'), detalhe: email.configurado() ? 'caixa ' + process.env.IMAP_USUARIO + ' lida a cada 10 min' : 'caixa de notas do domínio windgate.com.br (IMAP)' },
     bancos: { ok: tem('SANTANDER_CLIENT_ID') || tem('ITAU_CLIENT_ID'), detalhe: 'extrato automático Santander/Itaú; hoje por OFX' },
+    santander: { ok: require('./services/bancos.service').configurado('santander'), detalhe: 'API de Saldo e Extrato (SF) · mTLS com certificado A1' },
+    itau: { ok: require('./services/bancos.service').configurado('itau'), detalhe: 'API de Extrato (JeT) · client_id pelo gerente + certificado dinâmico' },
+    trackingWebhook: { ok: tem('SHIPSGO_WEBHOOK_TOKEN'), detalhe: 'ShipsGo avisa o sistema a cada evento (ETA, descarga)' },
+    ptax: { ok: true, detalhe: 'dólar PTAX do Banco Central (público, sem chave)' },
+    mcp: { ok: tem('WINDGATE_MCP_TOKEN'), detalhe: 'Claude consulta o Hub (só leitura) em /mcp' },
     boletos: { ok: tem('ASAAS_API_KEY'), detalhe: 'Asaas: boleto e Pix' }
   } });
 });

@@ -159,10 +159,10 @@
   /* ---------------- Navegação ---------------- */
   /* Mesma arquitetura do protótipo aprovado. L: = ainda no sistema atual · I: = em implantação. */
   const MENU = [
-    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['dashops', 'Desempenho da empresa']] },
-    { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['I:portal', 'Portal do Cliente']] },
-    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
-    { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['L:frete', 'Fretes & Benchmark'], ['I:tracking', 'Tracking ao vivo']] },
+    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['conteineres', 'Contêineres & free time'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['portais', 'Portais externos'], ['dashops', 'Desempenho da empresa']] },
+    { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['contratos', 'Contratos']] },
+    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['I:nfe', 'NF-e (DUIMP)']] },
+    { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['catalogo', 'Catálogo & NCM'], ['L:frete', 'Fretes & Benchmark'], ['compliance', 'Compliance & habilitações']] },
     { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:ponto', 'Ponto']] },
     { g: 'Gestão', itens: [['L:gestao', 'Gestão do Mês (antigo)'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
   ];
@@ -191,13 +191,13 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', 'I:nfe': 'fin.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver' };
   const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
   function podeTela(k) {
     // Acesso externo (contador): só Fiscal e o canal de contabilidade do chat.
     if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat';
     // RH: equipe, cultura e comunicação; nada de operação comercial nem financeiro.
-    if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'torre', 'dashops', 'L:agenda', 'L:ponto', 'L:org'].includes(k);
+    if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'L:ponto'].includes(k);
     if (k === 'implantacao') return true;
     if (k.startsWith('L:')) {
       const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
@@ -210,7 +210,7 @@
   H.podeTela = podeTela;
 
   function ir(tela, param) {
-    if (!podeTela(tela)) { H.toast('Esta área não faz parte do seu perfil.'); tela = H.perfil().externo ? 'fiscal' : 'torre'; param = null; }
+    if (!podeTela(tela)) { H.toast('Esta área não faz parte do seu perfil.'); tela = H.perfil().externo ? 'fiscal' : H.perfil().id === 'rh' ? 'rh' : 'torre'; param = null; }
     H.estado = { tela, param: param == null ? null : param };
     try { history.replaceState(null, '', '#' + tela + (param ? '-' + encodeURIComponent(param) : '')); } catch (e) {}
     render(); window.scrollTo(0, 0);
@@ -271,7 +271,7 @@
     montarMenu();
     const h = decodeURIComponent((location.hash || '').slice(1));
     if (h) { const i = h.indexOf('-'); H.estado = i > 0 ? { tela: h.slice(0, i), param: h.slice(i + 1) } : { tela: h, param: null }; }
-    if (!podeTela(H.estado.tela) || (H.perfil().externo && H.estado.tela === 'torre')) H.estado = { tela: H.perfil().externo ? 'fiscal' : 'torre', param: null };
+    if (!podeTela(H.estado.tela) || (H.perfil().externo && H.estado.tela === 'torre')) H.estado = { tela: H.perfil().externo ? 'fiscal' : H.perfil().id === 'rh' ? 'rh' : 'torre', param: null };
     if (H.perfil().id === 'rh' && (!location.hash || location.hash === '#torre')) H.estado = { tela: 'rh', param: null };
     render();
     clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
@@ -305,7 +305,7 @@
     $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(e.target.value); });
     $('#pinOk').onclick = () => entrar($('#pin').value);
     $('#sair').onclick = async () => { if (sujo()) { clearTimeout(tSalvar); await enviar(); } sair(); };
-    $('#bell').onclick = () => ir(H.perfil().externo ? 'fiscal' : 'torre');
+    $('#bell').onclick = () => ir(H.perfil().externo ? 'fiscal' : H.perfil().id === 'rh' ? 'rh' : 'torre');
     $('#busca').addEventListener('keydown', e => { if (e.key === 'Enter') { H.estado = { tela: 'ops', param: null }; H.buscaGlobal = e.target.value; render(); } });
     try {
       const s = JSON.parse(sessionStorage.getItem('wg_hub_sessao') || 'null');
