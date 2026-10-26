@@ -2403,7 +2403,10 @@ function enterApp(){
   });
   $('userChip').innerHTML=`<div class="avatar" style="background:${USER.cor}">${USER.nome[0]}</div><div><div class="nm">${esc(USER.nome.split(' ')[0])}</div><div class="rl">${esc(USER.papel)}</div></div><button title="Uso de Memória & Banco" onclick="mostrarUsoMemoria()" style="margin-right:6px">💾</button><button title="Sair" onclick="logout()">⏻</button>`;
   montarUFDestino();
-  showTab(USER.tabs[0]);
+  /* Hub 2.0: o menu novo abre módulos ainda não migrados com /?aba=<aba> */
+  let abaInicial = USER.tabs[0];
+  try { const a = new URLSearchParams(location.search).get('aba'); if (a && USER.tabs.includes(a)) abaInicial = a; } catch(e){}
+  showTab(abaInicial);
   renderFotos();
   updateNotifs();
   toast(`Bem-vindo(a), <b>${esc(USER.nome.split(' ')[0])}</b>! 👋`);
