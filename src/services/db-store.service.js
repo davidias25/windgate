@@ -17,6 +17,7 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const { baixarArquivo, enviarArquivo } = require('../integrations/supabase.service');
+const historico = require('./historico.service');
 
 const OBJETO = process.env.WINDGATE_DB_OBJECT || 'sistema/db.enc';
 
@@ -99,9 +100,12 @@ async function salvar(db, caminhoLocal) {
   }
 
   try {
-    await enviarArquivo(OBJETO, cifrar(texto, chave), 'application/octet-stream');
+    const cifrado = cifrar(texto, chave);
+    await enviarArquivo(OBJETO, cifrado, 'application/octet-stream');
     ultimoEstado = { remota: true, ok: true, erro: null, em: new Date().toISOString() };
-    return { remoto: true, erro: null };
+    // Fotografias de histórico: falha aqui nunca derruba a gravação principal.
+    const fotos = await fotografarCifrado(cifrado, historico.fotografiasDaGravacao(new Date(), fotografiasGravadas));
+    return { remoto: true, erro: null, fotografias: fotos };
   } catch (e) {
     console.warn('⚠️ Falha ao gravar o banco no Supabase Storage:', e.message);
     ultimoEstado = { remota: true, ok: false, erro: e.message, em: new Date().toISOString() };
@@ -109,4 +113,45 @@ async function salvar(db, caminhoLocal) {
   }
 }
 
-module.exports = { carregar, salvar, remotaAtiva, estado, OBJETO };
+
+/* ---------- Histórico (Hub 2.0 · Fase 0) ---------- */
+
+const fotografiasGravadas = new Set();
+let ultimaFotografia = { ok: null, erro: null, em: null, caminhos: [] };
+
+async function fotografarCifrado(cifrado, caminhos) {
+  const feitas = [];
+  for (const c of caminhos) {
+    try {
+      await enviarArquivo(c, cifrado, 'application/octet-stream');
+      fotografiasGravadas.add(c);
+      feitas.push(c);
+    } catch (e) {
+      console.warn('⚠️ Falha ao gravar fotografia do histórico', c, e.message);
+      ultimaFotografia = { ok: false, erro: e.message, em: new Date().toISOString(), caminhos: feitas };
+      return feitas;
+    }
+  }
+  ultimaFotografia = { ok: true, erro: null, em: new Date().toISOString(), caminhos: feitas };
+  return feitas;
+}
+
+/** Fotografa um banco já carregado (ex.: antes de aplicar exclusões). */
+async function fotografar(db, caminhos) {
+  const chave = chaveDeCifra();
+  if (!chave || !db) return [];
+  return fotografarCifrado(cifrar(JSON.stringify(db), chave), caminhos);
+}
+
+/** Lê uma fotografia do histórico (uso em manutenção/restauração). */
+async function lerFotografia(caminho) {
+  const chave = chaveDeCifra();
+  if (!chave) throw new Error('WINDGATE_DB_SECRET ausente.');
+  const buffer = await baixarArquivo(caminho);
+  if (!buffer) return null;
+  return JSON.parse(decifrar(buffer, chave));
+}
+
+const estadoHistorico = () => Object.assign({ pasta: historico.PASTA }, ultimaFotografia);
+
+module.exports = { carregar, salvar, remotaAtiva, estado, OBJETO, fotografar, lerFotografia, estadoHistorico, cifrar, decifrar, chaveDeCifra };

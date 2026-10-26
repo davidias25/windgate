@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js && node test/historico.test.js",
+    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js && node test/historico.test.js && node test/hub2.test.js && node test/comex.test.js",
+    "test:comex": "node test/comex.test.js",
     "test:recorrencia": "node test/recorrencia.test.js",
     "verificar:filtros": "node scripts/verificar-filtros.js",
     "verificar:recorrencia": "node scripts/verificar-recorrencia.js",
@@ -17,7 +18,9 @@
     "test:ponto": "node test/ponto.test.js",
     "test:historico": "node test/historico.test.js",
     "conferir:migracao": "node scripts/conferir-migracao.js",
-    "historico": "node scripts/historico.js"
+    "historico": "node scripts/historico.js",
+    "copiar:teste": "node scripts/copiar-para-teste.js",
+    "test:hub2": "node test/hub2.test.js"
   },
   "keywords": [
     "windgate",
@@ -36,6 +39,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "googleapis": "^134.0.0",
+    "imapflow": "^1.7.8",
+    "mailparser": "^3.12.4",
     "multer": "^1.4.5-lts.1",
     "xlsx": "^0.18.5"
   },

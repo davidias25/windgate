@@ -11,3 +11,6 @@ backups/
 # propostas geradas para clientes — não versionar
 Proposta_*.pdf
 .diag/
+
+# bundle de entrega do Hub 2.0 — artefato de transporte, não código
+*.bundle

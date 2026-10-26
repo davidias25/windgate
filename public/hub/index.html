@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WindGate Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="hub.css">
+</head>
+<body>
+<section id="login">
+  <div class="lg-box">
+    <img src="logo.webp" alt="WindGate · Good winds open doors" width="280" height="81">
+    <p class="lg-sub">Sistema de gestão de comércio exterior</p>
+    <div class="lg-users" id="lgUsers"></div>
+    <div class="lg-pin" id="lgPin" hidden>
+      <p><b id="lgNome"></b>, digite seu PIN</p>
+      <div class="btns" style="justify-content:center;margin-top:10px"><input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="PIN"><button class="btn blue" id="pinOk">Entrar</button></div>
+      <p class="lg-err" id="lgErr" role="alert"></p>
+    </div>
+  </div>
+</section>
+
+<div id="app" hidden>
+  <aside class="side" aria-label="Menu">
+    <div class="brand"><img src="logo.webp" alt="WindGate" width="172" height="50"></div>
+    <nav id="menu"></nav>
+    <div class="me"><span class="av" id="meAv">?</span><div><b id="meNome"></b><small id="mePapel"></small></div><button id="sair" title="Sair" aria-label="Sair">⏻</button></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <label class="search"><span aria-hidden="true">⌕</span><input id="busca" type="search" placeholder="Buscar operação, cliente, navio… (Enter)" aria-label="Buscar"></label>
+      <span class="sync" id="sync"><i></i><span>Carregando…</span></span>
+      <button class="bellb" id="bell" aria-label="Alertas">Alertas <em id="nAlertas" hidden>0</em></button>
+    </header>
+    <main class="content" id="conteudo"></main>
+  </div>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="js/regras.js"></script>
+<script src="js/comex.js"></script>
+<script src="js/app.js"></script>
+<script src="js/ops.js"></script>
+<script src="js/torre.js"></script>
+<script src="js/fin.js"></script>
+<script src="js/mapa.js"></script>
+<script src="js/crm.js"></script>
+<script src="js/pedidos.js"></script>
+<script src="js/docs.js"></script>
+<script src="js/gestao.js"></script>
+<script src="js/fiscal.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/dash.js"></script>
+<script src="js/reuniao.js"></script>
+<script src="js/rh.js"></script>
+<script src="js/sourcing.js"></script>
+<script src="js/comex-telas.js"></script>
+</body>
+</html>
