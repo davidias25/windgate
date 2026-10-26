@@ -13,7 +13,7 @@ Ramo: `hub-2.0`. Nada aqui altera a estrutura dos dados: o banco continua o mesm
 | 1 · Layout | Tema claro com as cores da logo, menu lateral por área, logo nova no sistema atual. Funções de dados, cálculos e PDFs intocados. |
 | 2 · Hub 2.0 (`/hub`) | Sistema NOVO, no padrão GTM das tradings, lendo e gravando o MESMO banco: Torre de Controle (indicadores, funil por etapa com atraso, grade de operações, alertas), Operações + histórico, Ficha da operação (etapas com linha do tempo, logística e contêineres, documentos/checklist, financeiro da operação), Mapa & Tracking, Documentos por operação, Financeiro (painel do mês, DRE gerencial, fluxo 8 semanas, contas a pagar/receber com autorização do Samir, lançamentos, resultado por operação). Sem ClickUp. Módulos ainda não refeitos (Cotações, CRM, Sourcing, Fretes, Agenda, Gestão do Mês, Ponto, Equipe, Config) abrem no sistema atual pelo próprio menu. |
 
-Testes: `npm test` → 699 verificações (19 em `test/historico.test.js`, 28 em `test/hub2.test.js`: ida e volta sem perda, gravação concorrente com o sistema atual, exclusão, contas do financeiro conferidas à mão).
+Testes: `npm test` → 707 verificações (19 em `test/historico.test.js`, 36 em `test/hub2.test.js`: ida e volta sem perda, gravação concorrente com o sistema atual, exclusão, gravação parcial que não reverte o que outra pessoa mudou, contas do financeiro conferidas à mão).
 
 Os dois sistemas convivem: `/` continua sendo o sistema atual e `/hub` o novo. Quando a equipe aprovar, `/` passa a abrir o Hub 2.0.
 

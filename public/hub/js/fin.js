@@ -158,7 +158,7 @@
     el.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => editarLanc(achar(b.dataset.ed)));
     el.querySelectorAll('[data-baixa]').forEach(b => b.onclick = () => darBaixa(achar(b.dataset.baixa)));
     el.querySelectorAll('[data-aut]').forEach(b => b.onclick = () => {
-      const l = achar(b.dataset.aut); if (!l) return;
+      const l = achar(b.dataset.aut); if (!l) return H.render();
       l.autorizadoEm = new Date().toISOString(); l.autorizadoPor = H.nomeUsuario(H.userKey);
       H.salvar(); H.toast('Pagamento autorizado'); H.render();
     });
@@ -175,6 +175,8 @@
       ${!rec && !l.autorizadoEm ? '<p class="banner" style="margin-top:12px">Este pagamento ainda não foi autorizado pelo Samir.</p>' : ''}`,
       `<button class="btn" data-x>Cancelar</button><button class="btn blue" id="bok">Confirmar ${rec ? 'recebimento' : 'pagamento'}</button>`);
     m.querySelector('#bok').onclick = () => {
+      l = H.db.fin.find(x => x && x._id === l._id);
+      if (!l) { H.fecharModal(); H.toast('Este lançamento foi removido por outra pessoa. Nada foi gravado.'); H.render(); return; }
       W.realizar(l, +m.querySelector('#bv').value, m.querySelector('#bd').value);
       const c = m.querySelector('#bc').value.trim(); if (c) l.comp = c;
       l.baixaPor = H.nomeUsuario(H.userKey);
@@ -197,12 +199,16 @@
       <div class="f w2"><label class="lbl" for="es">Situação</label><select id="es"><option ${sel(d.status, 'Previsto')}>Previsto</option><option ${sel(d.status, 'Realizado')}>Realizado</option></select></div>
       <div class="f w2"><label class="lbl" for="ecp">Link do comprovante</label><input id="ecp" type="url" value="${esc(d.comp || '')}"></div>
       ${novo ? `<div class="f w4"><label class="lbl"><input type="checkbox" id="efx" style="width:auto"> Conta fixa mensal (gera 12 meses)</label></div>` : ''}
-      ${l && l.recId ? '<p class="note f w4">Lançamento de conta fixa: esta edição muda só este mês.</p>' : ''}</div>`,
+      ${l && l.recId ? '<p class="note f w4">Lançamento de conta fixa: esta edição muda só este mês (o vencimento continua dentro do mês dele).</p>' : ''}</div>`,
       `${!novo ? '<button class="btn" id="edel" style="margin-right:auto;color:var(--crit)">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="eok">Salvar</button>`);
     m.querySelector('#eok').onclick = () => {
+      if (!novo) { l = H.db.fin.find(x => x && x._id === l._id); if (!l) { H.fecharModal(); H.toast('Este lançamento foi removido por outra pessoa. Nada foi gravado.'); H.render(); return; } }
       const valor = +m.querySelector('#ev').value;
       if (!(valor > 0)) { H.toast('Informe um valor maior que zero'); return; }
-      const venc = m.querySelector('#ed').value || W.hojeISO(), status = m.querySelector('#es').value;
+      let venc = m.querySelector('#ed').value || W.hojeISO();
+      // Conta fixa: a ocorrência fica no próprio mês (só o dia muda), igual ao sistema atual.
+      if (l && l.recId && l.mesRef) venc = W.vencDoMes(l.mesRef, venc.slice(8, 10));
+      const status = m.querySelector('#es').value;
       const campos = { tipo: m.querySelector('#et').value, valor, vencimento: venc, data: (l && l.data) || venc, empresa: m.querySelector('#ee').value,
         op: m.querySelector('#eo').value || 'WindGate', categoria: m.querySelector('#ec').value, desc: m.querySelector('#ex').value.trim(), status,
         comp: m.querySelector('#ecp').value.trim(), liquidadoEm: status === 'Realizado' ? ((l && l.liquidadoEm) || venc) : null };
@@ -212,13 +218,13 @@
         H.salvar(); H.fecharModal(); H.toast(`Conta fixa criada: <b>${s.total} meses</b>`); H.render(); return;
       }
       if (novo) H.db.fin.unshift(Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '' }, campos));
-      else { if (l.recId) { campos.fixo = true; delete campos.data; } Object.assign(l, campos); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
+      else { if (l.recId) { campos.fixo = true; campos.data = venc; } Object.assign(l, campos); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
       H.salvar(); H.fecharModal(); H.toast(novo ? 'Lançamento registrado' : 'Lançamento atualizado'); H.render();
     };
     const del = m.querySelector('#edel');
     if (del) del.onclick = () => {
       if (del.dataset.ok !== '1') { del.dataset.ok = '1'; del.textContent = 'Clique de novo para excluir'; return; }
-      H.db.fin = H.db.fin.filter(x => x !== l);
+      H.db.fin = H.db.fin.filter(x => !(x && x._id === l._id));
       H.salvar(); H.fecharModal(); H.toast('Lançamento excluído (dá para recuperar pelo histórico do banco)'); H.render();
     };
   }

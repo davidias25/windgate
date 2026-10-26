@@ -130,6 +130,35 @@ function bancoReal() {
   ok(al.some(a => a.op === 'OP20' && /chega em 6/.test(a.titulo)), 'alerta de chegada em 6 dias');
   ok(al.some(a => /pagamento\(s\) vencido/.test(a.titulo)), 'alerta de pagamento vencido');
 
+  console.log('\n--- 6. Gravação parcial: só sobe o que o Hub mudou ---');
+  {
+    const { mesclarDB } = require('../src/services/db-merge.service');
+    const servidor = W.prepararBanco(bancoReal());
+    const hub = W.prepararBanco(JSON.parse(JSON.stringify(servidor)));
+    const base = W.fotografarConteudo(hub);
+    ok(W.diferencas(hub, base).n === 0, 'sem alteração local: nada a enviar');
+    // Enquanto o Hub está aberto, o sistema atual muda a OP20 e o PIN do Davi.
+    servidor.ops.find(o => o.id === 'OP20').prox = 'mudado no sistema atual';
+    servidor.users.davi.pin = '9999';
+    servidor.checklists.OP20[1].status = 'aprovado';
+    // O Hub dá baixa em f2 e mexe só no checklist de outra operação.
+    W.realizar(hub.fin.find(l => l._id === 'f2'), 50000, '2026-10-24');
+    hub.checklists.OP99 = [{ fase: 'Fechamento', titulo: 'Contrato', status: 'pendente' }];
+    const { corpo, n } = W.diferencas(hub, base);
+    ok(n === 2 && corpo.fin.length === 1 && corpo.fin[0]._id === 'f2' && !corpo.ops && !corpo.users && Object.keys(corpo.checklists).join() === 'OP99', 'envia só o lançamento baixado e o checklist novo');
+    const final = mesclarDB(servidor, JSON.parse(JSON.stringify(corpo)));
+    ok(final.ops.find(o => o.id === 'OP20').prox === 'mudado no sistema atual', 'alteração do sistema atual na operação não é revertida');
+    ok(final.users.davi.pin === '9999' && final.checklists.OP20[1].status === 'aprovado', 'PIN e checklist alterados por outro usuário continuam');
+    ok(final.fin.find(l => l._id === 'f2').status === 'Realizado' && Array.isArray(final.checklists.OP99), 'baixa e checklist do Hub gravados');
+    ok(final.fin.length === servidor.fin.length && final.ops.length === servidor.ops.length && final.docs.length === servidor.docs.length, 'nenhum registro sumiu na gravação parcial');
+    W.absorver(base, corpo);
+    ok(W.diferencas(hub, base).n === 0, 'depois de confirmado pelo servidor, nada fica pendente');
+    hub.fin = hub.fin.filter(l => l._id !== 'f4');
+    W.registrarRemocoes(hub, W.fotografarIds(servidor));
+    const c2 = W.diferencas(hub, base).corpo, f2 = mesclarDB(final, JSON.parse(JSON.stringify(c2)));
+    ok(!f2.fin.some(l => l._id === 'f4') && f2.fin.length === final.fin.length - 1, 'exclusão parcial remove só o registro excluído');
+  }
+
   try { fs.unlinkSync(TMP); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
   process.exit(falhou ? 1 : 0);

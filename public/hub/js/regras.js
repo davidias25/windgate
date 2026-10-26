@@ -80,6 +80,36 @@
     return prepararBanco(out);
   }
 
+  /* Gravação parcial: o Hub só envia o que ELE mudou desde a última leitura.
+     Assim uma aba aberta há tempo não devolve ao servidor cópias velhas de
+     registros que outra pessoa alterou nesse meio-tempo. */
+  const OBJETOS_SYNC = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos'];
+  function fotografarConteudo(db) {
+    const base = { col: {}, obj: {} };
+    COLECOES_SYNC.forEach(k => { const m = new Map(); (db[k] || []).forEach(r => { if (r && r._id) m.set(r._id, JSON.stringify(r)); }); base.col[k] = m; });
+    OBJETOS_SYNC.forEach(k => { const m = new Map(); const o = db[k]; if (o && typeof o === 'object') Object.keys(o).forEach(c => m.set(c, JSON.stringify(o[c]))); base.obj[k] = m; });
+    return base;
+  }
+  function diferencas(db, base) {
+    const out = { _removidos: Object.assign({}, db._removidos) }; let n = 0;
+    COLECOES_SYNC.forEach(k => {
+      const m = base.col[k] || new Map();
+      const mud = (db[k] || []).filter(r => r && r._id && m.get(r._id) !== JSON.stringify(r));
+      if (mud.length) { out[k] = mud; n += mud.length; }
+    });
+    OBJETOS_SYNC.forEach(k => {
+      const m = base.obj[k] || new Map(), o = db[k]; if (!o || typeof o !== 'object') return;
+      const parte = {};
+      Object.keys(o).forEach(c => { if (m.get(c) !== JSON.stringify(o[c])) { parte[c] = o[c]; n++; } });
+      if (Object.keys(parte).length) out[k] = parte;
+    });
+    return { corpo: out, n };
+  }
+  function absorver(base, corpo) {
+    COLECOES_SYNC.forEach(k => (corpo[k] || []).forEach(r => (base.col[k] = base.col[k] || new Map()).set(r._id, JSON.stringify(r))));
+    OBJETOS_SYNC.forEach(k => { const p = corpo[k]; if (p) Object.keys(p).forEach(c => (base.obj[k] = base.obj[k] || new Map()).set(c, JSON.stringify(p[c]))); });
+  }
+
   /* ---------- Operações ---------- */
 
   const STATUS_OP = [
@@ -312,7 +342,8 @@
   const dataBR = iso => ehISO(iso) ? soData(iso).split('-').reverse().join('/') : '—';
 
   return {
-    COLECOES_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
+    COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
+    fotografarConteudo, diferencas, absorver,
     STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,
     novaSerie, realizar, mesSoma, vencDoMes, alertas, fmtBRL, fmtBRLk, dataBR

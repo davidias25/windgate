@@ -33,47 +33,92 @@
     if (!j.success || !j.db) throw new Error('Banco central indisponível. Nada foi alterado — tente de novo em instantes.');
     H.db = W.prepararBanco(j.db);
     H.conhecidos = W.fotografarIds(H.db);
+    base = W.fotografarConteudo(H.db);
     setSync('', 'Sincronizado');
   }
 
-  let tSalvar = null, salvando = false, pendente = false;
-  /** Grava o banco inteiro; o servidor mescla registro a registro. */
+  /* Gravação: versao conta cada alteração local; versaoSalva é a última que o
+     servidor confirmou. Enquanto versao > versaoSalva há alteração não salva
+     e a sincronização NÃO substitui nada local. Só sobe o que mudou. */
+  let base = null, versao = 0, versaoSalva = 0, salvando = false, tSalvar = null, tRetry = null;
+  const sujo = () => versao > versaoSalva;
+  H.temPendencia = sujo;
+
   H.salvar = function () {
+    if (!H.db) return;
     H.conhecidos = W.registrarRemocoes(H.db, H.conhecidos);
+    versao++;
     setSync('busy', 'Salvando…');
     clearTimeout(tSalvar);
-    tSalvar = setTimeout(async () => {
-      if (salvando) { pendente = true; return; }
-      salvando = true;
-      try {
-        const r = await api('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(H.db) });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.success) throw new Error(j.message || 'Falha ao salvar');
-        setSync('', 'Salvo');
-      } catch (e) {
-        setSync('err', 'Não salvou — tentando de novo');
-        toast('Não consegui salvar agora. Nada foi perdido: vou tentar de novo em instantes.');
-        setTimeout(H.salvar, 5000);
-      } finally {
-        salvando = false;
-        if (pendente) { pendente = false; H.salvar(); }
-      }
-    }, 400);
+    tSalvar = setTimeout(enviar, 400);
   };
+
+  async function enviar() {
+    tSalvar = null;
+    if (!H.db || !sujo()) return;
+    if (salvando) return;                       // o finally reenvia
+    salvando = true; clearTimeout(tRetry); tRetry = null;
+    const v = versao;
+    const { corpo } = W.diferencas(H.db, base);
+    let ok = false;
+    try {
+      const r = await api('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.message || 'Falha ao salvar');
+      W.absorver(base, corpo);
+      versaoSalva = Math.max(versaoSalva, v);
+      ok = true;
+      setSync(sujo() ? 'busy' : '', sujo() ? 'Salvando…' : 'Salvo');
+      guardarPendente(null);
+    } catch (e) {
+      if (e.message === '401') return;           // sair() guarda o pendente
+      guardarPendente(H.db);
+      setSync('err', 'Não salvou — tentando de novo');
+      toast('Não consegui salvar agora. A alteração está guardada neste navegador e vou tentar de novo em instantes.');
+      tRetry = setTimeout(enviar, 5000);
+    } finally {
+      salvando = false;
+      if (ok && sujo() && !tSalvar) enviar();
+    }
+  }
+
+  /* Cópia de segurança do que não subiu (queda de rede, sessão expirada). */
+  const CHAVE_PEND = 'wg_hub_pendente';
+  function guardarPendente(db) {
+    try {
+      if (!db) sessionStorage.removeItem(CHAVE_PEND);
+      else sessionStorage.setItem(CHAVE_PEND, JSON.stringify({ corpo: W.diferencas(db, base).corpo, em: Date.now() }));
+    } catch (e) { /* sem espaço: segue só em memória */ }
+  }
+  async function reenviarPendente() {
+    let p = null; try { p = JSON.parse(sessionStorage.getItem(CHAVE_PEND) || 'null'); } catch (e) {}
+    if (!p || !p.corpo) return false;
+    const r = await api('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.corpo) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.success) throw new Error(j.message || 'Não consegui gravar as alterações pendentes.');
+    guardarPendente(null);
+    return true;
+  }
 
   /* Busca o que os outros salvaram, sem perder o que ainda não subiu. */
   async function sincronizar() {
-    if (!H.db || document.querySelector('.modal-bg') || salvando || tSalvar && pendente) return;
+    if (!H.db || document.querySelector('.modal-bg') || salvando || sujo() || tSalvar) return;
+    const v0 = versao;
     try {
       const r = await api('/api/db'); const j = await r.json();
       if (!j.success || !j.db) return;
+      // Alguém mexeu enquanto a resposta vinha: descarta, a próxima rodada pega.
+      if (versao !== v0 || salvando || sujo() || tSalvar || document.querySelector('.modal-bg')) return;
       const antes = JSON.stringify(H.db);
       H.db = W.aplicarSincronizacao(H.db, j.db);
       H.conhecidos = W.fotografarIds(H.db);
-      if (JSON.stringify(H.db) !== antes) render();
+      base = W.fotografarConteudo(H.db);
+      if (JSON.stringify(H.db) !== antes && !editando()) render();
       setSync('', 'Sincronizado');
-    } catch (e) { setSync('err', 'Sem conexão'); }
+    } catch (e) { if (e.message !== '401') setSync('err', 'Sem conexão'); }
   }
+  /* Não redesenha a tela com o cursor dentro de um campo (perderia o que está sendo digitado). */
+  const editando = () => { const a = document.activeElement; return a && a.closest && a.closest('#conteudo') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'search'; };
 
   /* ---------------- UI ---------------- */
   function toast(msg) {
@@ -181,7 +226,9 @@
     } catch (e) { $('#lgErr').textContent = 'Não consegui entrar: ' + e.message; }
   }
 
+  let tSync = null;
   async function iniciar() {
+    if (await reenviarPendente().catch(e => { toast(esc(e.message)); return false; })) toast('Alterações pendentes gravadas.');
     await carregar();
     H.user = (H.db.users || {})[H.userKey];
     if (!H.user) throw new Error('Usuário não encontrado no banco.');
@@ -194,21 +241,26 @@
     if (h) { const i = h.indexOf('-'); H.estado = i > 0 ? { tela: h.slice(0, i), param: h.slice(i + 1) } : { tela: h, param: null }; }
     if (['fin', 'contas', 'lanc', 'resop'].includes(H.estado.tela) && !H.podeFin()) H.estado = { tela: 'torre', param: null };
     render();
-    setInterval(sincronizar, 15000);
+    clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
   }
 
   function sair(msg) {
     try { sessionStorage.removeItem('wg_hub_sessao'); } catch (e) {}
-    H.token = null; H.db = null; H.user = null;
+    if (H.db && sujo()) { guardarPendente(H.db); msg = (msg ? msg + ' ' : '') + 'Suas alterações não salvas foram guardadas e serão gravadas assim que você entrar.'; }
+    clearTimeout(tSalvar); clearTimeout(tRetry); tSalvar = tRetry = null;
+    clearInterval(tSync); tSync = null;
+    H.token = null; H.db = null; H.user = null; base = null; versao = versaoSalva = 0;
     if (msg) setTimeout(() => toast(esc(msg)), 50);
     telaLogin();
   }
   H.sair = sair;
 
+  window.addEventListener('beforeunload', e => { if (H.db && sujo()) { guardarPendente(H.db); e.preventDefault(); e.returnValue = ''; } });
+
   document.addEventListener('DOMContentLoaded', async () => {
     $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(e.target.value); });
     $('#pinOk').onclick = () => entrar($('#pin').value);
-    $('#sair').onclick = () => sair();
+    $('#sair').onclick = async () => { if (sujo()) { clearTimeout(tSalvar); await enviar(); } sair(); };
     $('#bell').onclick = () => ir('torre');
     $('#busca').addEventListener('keydown', e => { if (e.key === 'Enter') { H.estado = { tela: 'ops', param: null }; H.buscaGlobal = e.target.value; render(); } });
     try {

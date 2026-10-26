@@ -132,7 +132,13 @@
     if (tipo === 'area') return `<div class="f${cls}"><label class="lbl" for="c_${k}">${rot}</label><textarea id="c_${k}" data-k="${k}">${esc(v)}</textarea></div>`;
     return `<div class="f${cls}"><label class="lbl" for="c_${k}">${rot}</label><input id="c_${k}" data-k="${k}" type="${tipo || 'text'}" value="${esc(tipo === 'date' ? W.soData(v) : v)}"></div>`;
   }
-  function salvarCampos(box, o) {
+  /* A sincronização troca os objetos do banco a cada 15 s: toda ação busca o
+     registro ATUAL pelo id na hora do clique, nunca usa a cópia da tela. */
+  const opAtual = o => H.db.ops.find(x => x && (o._id ? x._id === o._id : x.id === o.id)) || H.db.ops.find(x => x && x.id === o.id);
+  H.opAtual = opAtual;
+  function salvarCampos(box, o0) {
+    const o = opAtual(o0);
+    if (!o) { H.toast('Esta operação foi removida por outra pessoa. Nada foi gravado.'); H.render(); return; }
     let mudou = false;
     box.querySelectorAll('[data-k]').forEach(i => { const k = i.dataset.k; if ((o[k] == null ? '' : String(o[k])) !== i.value) { o[k] = i.value; mudou = true; } });
     if (mudou) { o.atualizadoEm = new Date().toISOString(); o.atualizadoPor = H.nomeUsuario(H.userKey); H.salvar(); H.toast('Operação salva'); H.render(); }
@@ -175,11 +181,18 @@
       m.querySelector('#cok').onclick = () => {
         const n = m.querySelector('#cn').value.trim().toUpperCase().replace(/\s/g, '');
         if (!/^[A-Z]{4}\d{6,7}$/.test(n)) { H.toast('Número de contêiner no formato ABCU1234567'); return; }
-        o.containers = cont.concat([{ numero: n, tipo: m.querySelector('#ct').value, lacre: m.querySelector('#cl').value.trim() }]);
+        const oa = opAtual(o); if (!oa) { H.fecharModal(); H.render(); return; }
+        const ca = Array.isArray(oa.containers) ? oa.containers : [];
+        if (ca.some(c => c.numero === n)) { H.toast('Este contêiner já está na operação'); return; }
+        oa.containers = ca.concat([{ numero: n, tipo: m.querySelector('#ct').value, lacre: m.querySelector('#cl').value.trim() }]);
         H.salvar(); H.fecharModal(); H.render();
       };
     };
-    box.querySelectorAll('[data-delc]').forEach(b => b.onclick = () => { o.containers = cont.filter((_, i) => i !== +b.dataset.delc); H.salvar(); H.render(); });
+    box.querySelectorAll('[data-delc]').forEach(b => b.onclick = () => {
+      const oa = opAtual(o); if (!oa) return H.render();
+      const alvo = cont[+b.dataset.delc] && cont[+b.dataset.delc].numero;
+      oa.containers = (oa.containers || []).filter(c => c.numero !== alvo); H.salvar(); H.render();
+    });
   }
 
   const CHK = [['pendente', 'Pendente', ''], ['coletado', 'Coletado', 'info'], ['revisado', 'Revisado', 'info'], ['aprovado', 'Aprovado', 'ok'], ['na', 'N/A', '']];
@@ -198,12 +211,35 @@
         ${docs.length ? docs.map(d => `<div class="row"><div><b>${esc(d.nome)}</b><br><small class="note">${esc(d.grupo || d.cat || '')} · ${W.dataBR(d.data)} · ${esc(d.por || '')}</small></div>${d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div>`).join('') : '<p class="empty">Nenhum arquivo.</p>'}
       </div></div></div>`;
     box.querySelectorAll('[data-chk]').forEach(s => s.onchange = () => {
-      const it = chk[+s.dataset.chk]; const eu = H.nomeUsuario(H.userKey);
-      it.status = s.value;
-      if (s.value === 'coletado' && !it.coletadoPor) it.coletadoPor = eu;
-      if ((s.value === 'revisado' || s.value === 'aprovado') && !it.revisadoPor) it.revisadoPor = eu;
-      H.salvar(); H.toast('Checklist atualizado');
+      const lista = H.db.checklists[o.id], ref = chk[+s.dataset.chk];
+      const it = Array.isArray(lista) && (lista[+s.dataset.chk] && lista[+s.dataset.chk].titulo === ref.titulo ? lista[+s.dataset.chk] : lista.find(x => x && x.titulo === ref.titulo && x.fase === ref.fase));
+      if (!it) { H.toast('Este item mudou em outra tela. Atualizei a lista.'); H.render(); return; }
+      const eu = H.nomeUsuario(H.userKey), v = s.value;
+      // Dupla análise, igual ao sistema atual: quem aprova não pode ser quem coletou.
+      if (v === 'aprovado') {
+        const rev = it.revisadoPor || eu;
+        if (!it.coletadoPor) { H.toast('Para aprovar, o item precisa ter <b>coletado por</b> preenchido (dupla análise).'); H.render(); return; }
+        if (it.coletadoPor === rev) { H.toast('Quem revisa não pode ser quem coletou.'); H.render(); return; }
+        it.revisadoPor = rev;
+      }
+      if (v === 'coletado' && !it.coletadoPor) it.coletadoPor = eu;
+      if (v === 'revisado' && !it.revisadoPor) {
+        if (it.coletadoPor === eu) { H.toast('Quem revisa não pode ser quem coletou.'); H.render(); return; }
+        it.revisadoPor = eu;
+      }
+      it.status = v;
+      if (it.link) espelharDoc(o.id, it);
+      H.salvar(); H.toast('Checklist atualizado'); H.render();
     });
+  }
+
+  /* Mesmo espelho do sistema atual (syncChkDoc): o item do checklist com link aparece em Documentos com o mesmo status. */
+  function espelharDoc(op, it) {
+    if (!it.link) return;
+    const map = { coletado: 'recebido', revisado: 'revisado', aprovado: 'aprovado', pendente: 'pendente', na: 'pendente' };
+    const ex = H.db.docs.find(d => d && d.op === op && d.nome === it.titulo);
+    if (ex) { ex.link = it.link; ex.status = map[it.status] || 'recebido'; }
+    else H.db.docs.unshift({ _id: W.novoId(), op, grupo: 'outros', nome: it.titulo, cat: it.titulo, link: it.link, status: map[it.status] || 'recebido', por: it.coletadoPor || H.nomeUsuario(H.userKey), obs: 'via checklist', data: W.hojeISO() });
   }
 
   function abaFin(box, o) {
@@ -220,6 +256,8 @@
       <p class="note" style="margin-top:10px">A mudança fica registrada na linha do tempo, com data e seu nome. O prazo da nova etapa começa a contar hoje.</p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="neok">Confirmar</button>');
     m.querySelector('#neok').onclick = () => {
+      o = opAtual(o);
+      if (!o) { H.fecharModal(); H.toast('Esta operação foi removida por outra pessoa.'); H.render(); return; }
       const novo = m.querySelector('#ne').value; if (novo === o.status) { H.fecharModal(); return; }
       const agora = new Date().toISOString(), eu = H.nomeUsuario(H.userKey);
       H.db.opStatusHist.push({ _id: W.novoId(), op: o.id, de: o.status, para: novo, em: agora, deEm: o.statusEm || '', por: eu, tipo: 'mudanca', origem: 'hub2', motivo: m.querySelector('#nm').value.trim() });
