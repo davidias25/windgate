@@ -64,9 +64,16 @@
         <p class="note box-b">Pilar sem dado no mês fica de fora da conta (“—”) em vez de zerar a nota. Cultura vale quando o Samir lança a nota.</p></div>
       <div class="g3">${rk.filter(r => dir || r.nome === euNome).map(r => `<div class="box"><div class="box-h"><h2>${esc(r.nome)} · métricas da função</h2></div><div class="box-b"><table class="mini"><tbody>
         ${r.funcao.map(f => `<tr><td>${esc(f.l)}</td><td class="num"><b>${f.b == null ? f.a : f.a + ' de ' + f.b}</b></td></tr>`).join('') || '<tr><td class="empty">Sem métricas para este perfil.</td></tr>'}</tbody></table></div></div>`).join('')}</div>
+      <div class="box" id="pTempo"><div class="box-h"><h2>Tempo no sistema</h2><span class="note">minutos com o sistema aberto e em uso</span></div><p class="empty">Carregando…</p></div>
       <div class="box"><div class="box-h"><h2>Erros do mês (descontam da qualidade)</h2></div>
         ${erros.length ? `<div class="tw"><table><thead><tr><th>Data</th><th>Pessoa</th><th>O que aconteceu</th><th>Impacto</th><th class="num">Pontos</th><th>Ação combinada</th></tr></thead><tbody>${erros.filter(e => dir || e.pessoa === euNome).map(e => `<tr><td class="mono">${W.dataBR(e.data).slice(0, 5)}</td><td>${esc(e.pessoa)}</td><td>${esc(e.texto)}</td><td>${esc(e.impacto || '—')}</td><td class="num neg">−${Math.abs(+e.pontos || 0)}</td><td>${esc(e.acao || '—')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Nenhum erro registrado no mês.</p>'}</div>`;
     el.querySelector('#pmes').onchange = e => { mesProd = e.target.value || mesProd; H.render(); };
+    // Tempo ativo por pessoa: cada um vê o seu; diretoria, Davi e RH veem a equipe.
+    if (H.carregarAtividade) { const de = mesProd + '-01', ate = W.vencDoMes(mesProd, 31) < hoje ? W.vencDoMes(mesProd, 31) : hoje;
+      H.carregarAtividade(de, ate).then(atv => { const box = document.querySelector('#pTempo'); if (!box) return;
+        const linhas = Object.entries(atv || {}).map(([k, a]) => { const dias = Object.keys(a.dias || {}).length, areas = H.atividadeArea(a.telas); return { nome: H.nomeUsuario(k), dias, media: dias ? a.min / dias : 0, total: a.min, areas }; }).sort((x, y) => y.media - x.media);
+        box.innerHTML = `<div class="box-h"><h2>Tempo no sistema</h2><span class="note">minutos com o sistema aberto e em uso · ${mesProd.split('-').reverse().join('/')}</span></div>` + (linhas.length ? `<div class="tw"><table><thead><tr><th>Pessoa</th><th class="num">Média por dia</th><th class="num">Dias ativos</th><th>Onde passou o tempo</th></tr></thead><tbody>${linhas.map(l => `<tr><td><b>${esc(l.nome)}</b></td><td class="num">${H.atividadeHM(l.media)}</td><td class="num">${l.dias}</td>
+          <td><div class="areas">${l.areas.slice(0, 4).map(a => `<span style="flex:${Math.max(a.pct, .04)}" title="${esc(a.k)} ${Math.round(a.pct * 100)}%">${esc(a.k)} ${Math.round(a.pct * 100)}%</span>`).join('')}</div></td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Ainda sem registro de uso neste mês.</p>'); }); }
     const pe = el.querySelector('#perro'); if (pe) pe.onclick = () => registrarErro(rk.map(r => r.nome));
     const pc = el.querySelector('#pcult'); if (pc) pc.onclick = () => notasCultura(rk.map(r => r.nome));
   };

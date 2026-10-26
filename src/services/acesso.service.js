@@ -13,8 +13,32 @@ const CONTADOR_COLECOES = ['hubNotas', 'hubExtratos'];
 function perfil(db, k) { return W.perfilDe(db || {}, k).id; }
 const ehContador = (db, k) => !!k && perfil(db, k) === 'contador';
 
+/* RH vê a equipe e o andamento, nunca dinheiro: sem financeiro, cotações (custos e margens), notas nem extratos. */
+const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos'];
+const ehRH = (db, k) => !!k && perfil(db, k) === 'rh';
+function semPins(users) { const out = {}; Object.entries(users || {}).forEach(([key, u]) => { const c = Object.assign({}, u); delete c.pin; out[key] = c; }); return out; }
+
+/* Anotações de RH (1:1, feedback, PDI) só saem para quem tem rh.ver (RH e diretoria).
+   O pulso semanal é anônimo: qualquer um grava o seu, ninguém fora do RH lê. */
+const podeRH = (db, k) => k === '(sem-auth)' || W.pode(db || {}, k, 'rh.ver');
+function semRH(db, k) { if (!db || !Array.isArray(db.hubRH) || podeRH(db, k)) return db; const out = Object.assign({}, db); delete out.hubRH; return out; }
+function gravacaoRH(atual, recebido, k) {
+  if (!recebido || !Array.isArray(recebido.hubRH) || podeRH(atual, k)) return recebido;
+  const out = Object.assign({}, recebido);
+  out.hubRH = recebido.hubRH.filter(r => r && r.tipo === 'pulso' && !((atual && atual.hubRH) || []).some(x => x && x._id === r._id)).map(r => ({ _id: r._id, tipo: 'pulso', semana: r.semana, nota: r.nota, comentario: r.comentario || '', em: r.em }));
+  return out;
+}
+
 /** O que o usuário pode ler de GET /api/db. */
-function paraLeitura(db, k) {
+function paraLeitura(db, k) { return semRH(paraLeitura0(db, k), k); }
+function paraLeitura0(db, k) {
+  if (db && ehRH(db, k)) {
+    const out = Object.assign({}, db, { users: semPins(db.users) });
+    SEM_DINHEIRO.forEach(c => { delete out[c]; });
+    // Lançamentos de valor também não vão nos negócios do CRM.
+    out.crmOps = (db.crmOps || []).map(n => { const c = Object.assign({}, n); delete c.valor; return c; });
+    return out;
+  }
   if (!db || !ehContador(db, k)) return db;
   const users = {};
   Object.entries(db.users || {}).forEach(([key, u]) => {
@@ -29,7 +53,15 @@ function paraLeitura(db, k) {
 }
 
 /** O que o usuário pode gravar em POST /api/db (o resto é descartado). */
-function paraGravacao(atual, recebido, k) {
+function paraGravacao(atual, recebido, k) { return gravacaoRH(atual, paraGravacao0(atual, recebido, k), k); }
+function paraGravacao0(atual, recebido, k) {
+  if (recebido && ehRH(atual, k)) {
+    const out = Object.assign({}, recebido);
+    SEM_DINHEIRO.concat(['users', 'crmOps', 'settings']).forEach(c => { delete out[c]; });
+    const proibidos = new Set(); SEM_DINHEIRO.forEach(c => ((atual && atual[c]) || []).forEach(r => r && r._id && proibidos.add(r._id)));
+    out._removidos = {}; Object.entries(recebido._removidos || {}).forEach(([id, ts]) => { if (!proibidos.has(id)) out._removidos[id] = ts; });
+    return out;
+  }
   if (!recebido || !ehContador(atual, k)) return recebido;
   const out = {};
   const ids = new Set();
@@ -45,4 +77,4 @@ function paraGravacao(atual, recebido, k) {
   return out;
 }
 
-module.exports = { perfil, ehContador, paraLeitura, paraGravacao, CONTADOR_COLECOES };
+module.exports = { perfil, ehContador, ehRH, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES };

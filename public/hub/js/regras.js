@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -345,21 +345,23 @@
      torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês */
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
       torre: ['resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
       torre: ['resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
-      caps: ['fin.lancar'],
+      caps: ['fin.lancar', 'sourcing.ver'],
       torre: ['resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
+    rh: { nome: 'Pessoas & Cultura (RH)', foco: 'Desenvolvimento da equipe, cultura, comunicação interna e ponto',
+      caps: ['equipe.ver', 'rh.ver', 'chat.aviso', 'recado.outros', 'cultura.editar', 'reuniao.editar'], torre: ['equipe', 'recados', 'tarefas', 'alertas'], restrito: true },
     contador: { nome: 'Contabilidade (acesso externo)', foco: 'Notas fiscais e extratos do trimestre para a apuração',
       caps: ['fiscal.ver'], torre: [], externo: true },
     documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
-      caps: ['crm.ver', 'pedidos.ver'],
+      caps: ['crm.ver', 'pedidos.ver', 'sourcing.ver'],
       torre: ['resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }
   };
-  const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos', pedro: 'contador' };
+  const PERFIL_PADRAO = { samir: 'diretoria', davi: 'operacoes', matheus: 'frete', ivina: 'documentos', pedro: 'contador', oneide: 'rh' };
   function perfilDe(db, k) {
     const u = (db && db.users && db.users[k]) || {};
     const id = (u.perfilHub && PERFIS[u.perfilHub]) ? u.perfilHub : PERFIL_PADRAO[k] || (u.fin ? 'operacoes' : 'documentos');
@@ -790,6 +792,112 @@
     return { tipo: 'entrada', empresa: '' };
   }
 
+
+  /* ---------- Reunião semanal · Gestor do Mês ---------- */
+  function semanaDe(iso) {
+    const d = new Date((iso || hojeISO()) + 'T12:00:00'), dow = (d.getDay() + 6) % 7;
+    const seg = new Date(d); seg.setDate(d.getDate() - dow);
+    const f = n => { const x = new Date(seg); x.setDate(seg.getDate() + n); return x.toISOString().slice(0, 10); };
+    return { ini: f(0), sexta: f(4), fim: f(6) };
+  }
+  const ROTACAO_PADRAO = { '2026-09': 'davi', '2026-10': 'davi', '2026-11': 'samir' };
+  function gestorDoMes(db, mes) { const g = (((db.hubPainel || {})._reuniao || {}).gestores || {}); return g[mes] || ROTACAO_PADRAO[mes] || ''; }
+  /** Tudo que a reunião de sexta precisa, calculado do que foi registrado na semana. Sem números financeiros. */
+  function resumoSemana(db, ini, fim, hoje) {
+    const h = hoje || hojeISO(), na = d => { const x = soData(d); return x >= ini && x <= fim; };
+    const ops = (db.ops || []).filter(o => o && o.id), ativas = ops.filter(ativa);
+    const etapas = (db.opStatusHist || []).filter(x => x && na(x.em) && x.para && x.tipo !== 'correcao');
+    const ganhos = (db.crmOps || []).filter(n => n && faseDe(n) === 'ganho' && na(n.fechadoEm || n.faseEm));
+    const novosNeg = (db.crmOps || []).filter(n => n && na(n.criadoEm));
+    const pedidos = (db.hubPedidos || []).filter(p => p && na(p.em));
+    const docsOk = (db.docs || []).filter(d => d && (d.conferencias || []).length >= 2 && na(d.conferencias[d.conferencias.length - 1].em));
+    const tarefas = (db.agendaTasks || []).filter(Boolean);
+    const feitas = tarefas.filter(t => t.status === 'feita' && na(t.doneAt));
+    const proxFim = (() => { const d = new Date(fim + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+    const abertas = tarefas.filter(t => t.status !== 'feita' && (!t.prazo || t.prazo <= proxFim));
+    const atrasadasT = abertas.filter(t => t.prazo && t.prazo < h);
+    const atrasadasOps = ativas.filter(o => prazoInfo(db, o, h).sit === 'atrasado');
+    const travadas = ativas.filter(o => o.status === 'travada');
+    const chegam = ativas.filter(o => { const d = diasEntre(h, o.eta); return d != null && d >= 0 && d <= 14; });
+    const parados = (db.crmOps || []).filter(n => n && negocioAberto(n) && slaNegocio(n, h).sit === 'atrasado');
+    const porEtapa = STATUS_OP.filter(x => !FINALIZADAS.includes(x.k)).map(x => ({ k: x.k, l: x.l, c: x.c, n: ativas.filter(o => o.status === x.k).length }));
+    const pessoas = {};
+    const soma = (nome, campo) => { if (!nome) return; const p = pessoas[nome] = pessoas[nome] || { etapas: 0, tarefas: 0, abertas: 0, atrasadas: 0, docs: 0, negocios: 0 }; p[campo]++; };
+    etapas.forEach(x => soma(x.por, 'etapas')); feitas.forEach(t => soma(t.resp, 'tarefas')); abertas.forEach(t => soma(t.resp, 'abertas')); atrasadasT.forEach(t => soma(t.resp, 'atrasadas'));
+    docsOk.forEach(d => (d.conferencias || []).forEach(c => soma(c.por, 'docs'))); ganhos.forEach(n => soma(n.resp, 'negocios'));
+    const preocupacoes = [];
+    travadas.forEach(o => preocupacoes.push(`${o.id} travada: ${o.prox || o.obs || 'sem próxima ação'}`));
+    atrasadasOps.slice(0, 6).forEach(o => { const p = prazoInfo(db, o, h); preocupacoes.push(`${o.id} em ${stMeta(o.status).l} há ${p.dias} dias (prazo ${p.alvo})`); });
+    if (parados.length) preocupacoes.push(`${parados.length} negócio(s) parado(s) no funil além do prazo da fase`);
+    if (atrasadasT.length) preocupacoes.push(`${atrasadasT.length} tarefa(s) vencida(s) na agenda`);
+    return { ini, fim, etapas, ganhos, novosNeg, pedidos, docsOk, feitas, abertas, atrasadasT, atrasadasOps, travadas, chegam, parados, porEtapa, pessoas, preocupacoes, ativas: ativas.length };
+  }
+
+  /** Divergências da conciliação: no banco e não no sistema, e o contrário. */
+  function divergencias(db, extrato) {
+    if (!extrato || !Array.isArray(extrato.transacoes)) return { semLancamento: [], semBanco: [] };
+    const usados = new Set(extrato.transacoes.map(t => t.lancId).filter(Boolean));
+    const semLancamento = extrato.transacoes.filter(t => !t.lancId && t.decisao !== 'ignorado');
+    const semBanco = (db.fin || []).filter(l => l && realizado(l) && !transferencia(l) && (l.empresa || 'WindGate') === (extrato.empresa || 'WindGate')
+      && mesDe(soData(l.liquidadoEm || vencDe(l))) === extrato.mes && !usados.has(l._id));
+    return { semLancamento, semBanco };
+  }
+
+
+  /* ---------- Saúde financeira (dashboard) ---------- */
+  const mesesAte = (fim, n) => Array.from({ length: n }, (_, i) => mesSoma(fim, i - n + 1));
+  function saudeFinanceira(db, hoje, empresa) {
+    const h = hoje || hojeISO(), mesAt = h.slice(0, 7), emp = empresa || 'todas';
+    const fin = (db.fin || []).filter(l => l && !transferencia(l) && empresaOk(l, emp));
+    const meses = mesesAte(mesAt, 12);
+    const tl = x => x.prev + x.real;
+    const porMes = meses.map(m => { const d = dre(db, m, emp), L = d.linhas; return { mes: m, receita: d.receita, custos: tl(L.custoOps) + tl(L.impostosOps), despesas: tl(L.despesasFixas) + tl(L.impostosGerais), impostos: tl(L.impostosOps) + tl(L.impostosGerais), resultado: d.lucroLiquido, margem: d.receita ? d.lucroBruto / d.receita : null }; });
+    const caixa = fin.filter(realizado).reduce((a, l) => a + (ehReceita(l) ? 1 : -1) * valorDe(l), 0);
+    const abertasR = fin.filter(l => ehReceita(l) && !realizado(l) && !ehEmprestimo(l));
+    const aging = { aVencer: 0, d30: 0, d60: 0, d60mais: 0 };
+    abertasR.forEach(l => { const d = diasEntre(vencDe(l), h); const v = valorDe(l); if (d <= 0) aging.aVencer += v; else if (d <= 30) aging.d30 += v; else if (d <= 60) aging.d60 += v; else aging.d60mais += v; });
+    const totalReceber = abertasR.reduce((a, l) => a + valorDe(l), 0), vencido = aging.d30 + aging.d60 + aging.d60mais;
+    const somaD = n => { const d = new Date(h + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    const pagar = [30, 60, 90].map(n => fin.filter(l => !ehReceita(l) && !realizado(l) && vencDe(l) <= somaD(n)).reduce((a, l) => a + valorDe(l), 0));
+    const receber = [30, 60, 90].map(n => abertasR.filter(l => vencDe(l) <= somaD(n)).reduce((a, l) => a + valorDe(l), 0));
+    const ult3 = mesesAte(mesSoma(mesAt, -1), 3);
+    const fixasMes = ult3.reduce((a, m) => a + fin.filter(l => !ehReceita(l) && (l.fixo || l.recId) && mesDe(vencDe(l)) === m).reduce((x, l) => x + valorDe(l), 0), 0) / 3;
+    const opCli = Object.fromEntries((db.ops || []).filter(Boolean).map(o => [o.id, o.cliente || o.id]));
+    const rec12 = {}; let tot12 = 0;
+    fin.filter(l => ehReceita(l) && daOperacao(l) && meses.includes(mesDe(vencDe(l)))).forEach(l => { const c = opCli[l.op] || l.op; rec12[c] = (rec12[c] || 0) + valorDe(l); tot12 += valorDe(l); });
+    const top = Object.entries(rec12).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([cliente, v]) => ({ cliente, v, pct: tot12 ? v / tot12 : 0 }));
+    const pagos = fin.filter(l => ehReceita(l) && realizado(l) && l.liquidadoEm && meses.includes(mesDe(l.liquidadoEm)));
+    const atrasoMedio = pagos.length ? pagos.reduce((a, l) => a + Math.max(0, diasEntre(vencDe(l), soData(l.liquidadoEm)) || 0), 0) / pagos.length : null;
+    const receita12 = porMes.reduce((a, m) => a + m.receita, 0), impostos12 = porMes.reduce((a, m) => a + m.impostos, 0);
+    return { caixa, porMes, aging, totalReceber, inadimplencia: totalReceber ? vencido / totalReceber : 0, pagar, receber, fixasMes, folego: fixasMes > 0 ? caixa / fixasMes : null,
+      top, concentracaoTop5: top.reduce((a, t) => a + t.pct, 0), atrasoMedio, cargaTributaria: receita12 ? impostos12 / receita12 : null, receita12,
+      resultado12: porMes.reduce((a, m) => a + m.resultado, 0), emprestimos: fin.filter(l => ehEmprestimo(l) && !realizado(l)).reduce((a, l) => a + valorDe(l), 0),
+      projecao: fluxoSemanal(db, h, 13, emp, true) };
+  }
+
+  /* ---------- Desempenho das operações (dashboard) ---------- */
+  function desempenhoOperacoes(db, hoje) {
+    const h = hoje || hojeISO(), meses = mesesAte(h.slice(0, 7), 12);
+    const ops = (db.ops || []).filter(o => o && o.id), hist = (db.opStatusHist || []).filter(x => x && x.op && x.em);
+    const novas = meses.map(m => ops.filter(o => String(o.criadaEm || '').slice(0, 7) === m).length);
+    const entregues = meses.map(m => new Set(hist.filter(x => x.para === 'entregue' && String(x.em).slice(0, 7) === m).map(x => x.op)).size);
+    const etapas = FLUXO.filter(k => !['entregue', 'concluida'].includes(k)).map(k => {
+      const durs = hist.filter(x => x.de === k && x.deEm).map(x => diasEntre(soData(x.deEm), soData(x.em))).filter(d => d != null && d >= 0);
+      const alvo = prazoAlvo(db, k);
+      return { k, l: stMeta(k).l, c: stMeta(k).c, media: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null, n: durs.length, alvo, noPrazo: durs.length && alvo ? durs.filter(d => d <= alvo).length / durs.length : null };
+    });
+    const ativas = ops.filter(ativa);
+    const res = resultadoPorOp(db, 'todas').filter(r => r.receita > 0);
+    return { meses, novas, entregues, etapas, ativas: ativas.length, noPrazoAgora: ativas.length ? ativas.filter(o => prazoInfo(db, o, h).sit !== 'atrasado').length / ativas.length : null,
+      clientes: new Set(ativas.map(o => o.cliente).filter(Boolean)).size, margemMedia: res.length ? res.reduce((a, r) => a + (r.margem || 0), 0) / res.length : null,
+      ticketMedio: res.length ? res.reduce((a, r) => a + r.receita, 0) / res.length : null };
+  }
+
+  /* ---------- Sourcing: nota do fornecedor ---------- */
+  const CHECK_FORNECEDOR = [['fabrica', 'É fábrica (não trading)', 20], ['licenca', 'Licença comercial conferida', 15], ['anos', '3+ anos de mercado', 10], ['auditoria', 'Auditado / verificado na plataforma', 15],
+    ['amostra', 'Amostra aprovada', 15], ['inspecao', 'Inspeção na fábrica (Tainan)', 15], ['referencia', 'Já fornecemos dele ou referência confiável', 10]];
+  function notaFornecedor(f) { const c = (f && f.checks) || {}; return CHECK_FORNECEDOR.reduce((a, [k, , p]) => a + (c[k] ? p : 0), 0); }
+
   /* ---------- Formatação ---------- */
   const fmtBRL = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const fmtBRLk = v => { const n = +v || 0; return Math.abs(n) >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi' : Math.abs(n) >= 1e4 ? 'R$ ' + (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mil' : fmtBRL(n); };
@@ -798,6 +906,7 @@
   return {
     COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
+    semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
     DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,

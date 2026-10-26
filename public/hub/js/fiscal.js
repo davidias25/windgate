@@ -51,7 +51,7 @@
             ${editar() ? `<button class="btn ${f.pronto ? 'pri' : ''}" id="fenv" ${f.entrega ? 'disabled' : ''}>${f.entrega ? 'Enviado ao contador em ' + W.dataBR(f.entrega.em) : 'Enviar trimestre ao contador'}</button>` : ''}
             ${H.perfil().id === 'contador' ? `<button class="btn pri" id="fapu" ${contador && contador.apuradoEm ? 'disabled' : ''}>${contador && contador.apuradoEm ? 'Apuração concluída' : 'Marcar trimestre como apurado'}</button>` : ''}</div></div>
           <div class="box"><div class="box-h"><h2>Extratos bancários</h2></div><div class="box-b list">
-            ${f.extratos.length ? f.extratos.map(e => `<div class="row"><div><b>${esc(e.banco || '')} ${esc(e.contaNome || '')}</b> · ${e.mes.split('-').reverse().join('/')}<br><small class="note">${e.formato || ''}${e.transacoes ? ' · ' + e.transacoes.length + ' movimentos · ' + e.transacoes.filter(t => t.lancId).length + ' conciliados com o Financeiro' : ''}${e.saldo != null ? ' · saldo ' + W.fmtBRL(e.saldo) : ''}</small></div>${e.link ? `<a class="btn ghost sm" href="${esc(e.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div>`).join('') : '<p class="empty">Nenhum extrato neste trimestre.</p>'}</div></div>
+            ${f.extratos.length ? f.extratos.map(e => `<div class="row"><div><b>${esc(e.banco || '')} ${esc(e.contaNome || '')}</b> · ${e.mes.split('-').reverse().join('/')}<br><small class="note">${e.formato || ''}${e.transacoes ? ' · ' + e.transacoes.length + ' movimentos · ' + e.transacoes.filter(t => t.lancId).length + ' conciliados com o Financeiro' : ''}${e.saldo != null ? ' · saldo ' + W.fmtBRL(e.saldo) : ''}</small></div><div class="btns">${e.transacoes && editar() ? (() => { const dv = W.divergencias(H.db, e), n = dv.semLancamento.length + dv.semBanco.length; return `<button class="btn sm ${n ? 'pri' : ''}" data-conc="${esc(e._id)}">${n ? n + ' divergência(s)' : 'Conciliado'}</button>`; })() : ''}${e.link ? `<a class="btn ghost sm" href="${esc(e.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div></div>`).join('') : '<p class="empty">Nenhum extrato neste trimestre.</p>'}</div></div>
           <div class="box"><div class="box-h"><h2>Como as notas chegam</h2></div><div class="box-b list">
             <div class="row"><div><b>SEFAZ, automático</b><br><small class="note">Toda NF-e emitida contra os CNPJs do grupo entra sozinha.</small></div>${editar() ? '<button class="btn sm" id="fsefaz">Buscar agora</button>' : ''}</div>
             <div class="row"><div><b>E-mail de notas</b><br><small class="note">${c.emailNotas ? `Encaminhe para <b>${esc(c.emailNotas)}</b>. Do WhatsApp: abrir o arquivo › compartilhar › e-mail.` : 'Endereço ainda não configurado.'}</small></div></div>
@@ -63,6 +63,7 @@
     el.querySelectorAll('[data-conf]').forEach(b => b.onclick = () => marcar(b.dataset.conf, 'conferida'));
     el.querySelectorAll('[data-lanc]').forEach(b => b.onclick = () => marcar(b.dataset.lanc, 'lancada'));
     el.querySelector('#fcsv').onclick = () => baixarCSV(notas);
+    el.querySelectorAll('[data-conc]').forEach(b => b.onclick = () => conciliar(b.dataset.conc));
     const on = (id, fn) => { const x = el.querySelector(id); if (x) x.onclick = fn; };
     on('#fnota', novaNota); on('#fext', novoExtrato); on('#fcfg', configurar);
     on('#fenv', () => { const e = Object.assign({}, cfg().entregas, { [tri]: { em: new Date().toISOString(), por: eu() } }); H.db.hubPainel._fiscal = Object.assign({}, cfg(), { entregas: e }); H.salvar(); H.toast('Trimestre enviado ao contador. Ele vê tudo no acesso dele.'); H.render(); });
@@ -72,6 +73,35 @@
       H.toast(j.success ? `SEFAZ: ${j.novas} nota(s) nova(s) de ${j.consultadas} consultada(s).` : esc(j.message || 'Não consegui consultar.'));
     });
   };
+
+  /* Conciliação: movimento do banco sem lançamento vira proposta de lançamento
+     (aprovada pelo Samir ou pelo Davi na Torre); lançamento sem movimento no
+     banco fica apontado para conferir. */
+  function conciliar(id) {
+    const e = H.db.hubExtratos.find(x => x && x._id === id); if (!e) return H.render();
+    const dv = W.divergencias(H.db, e);
+    const m = H.modal(`Conciliação · ${e.banco || ''} ${e.mes.split('-').reverse().join('/')}`, `
+      <p class="note" style="margin-bottom:10px">${e.transacoes.filter(t => t.lancId).length} de ${e.transacoes.length} movimentos batem com o Financeiro (mesmo valor, até 3 dias de diferença).</p>
+      <h3 class="h3">No banco, sem lançamento no sistema · ${dv.semLancamento.length}</h3>
+      ${dv.semLancamento.length ? `<div class="tw"><table><thead><tr><th>Data</th><th>Histórico do banco</th><th class="num">Valor</th><th>Operação</th><th></th></tr></thead><tbody>${dv.semLancamento.map((t, i) => `<tr><td class="mono">${W.dataBR(t.data)}</td><td>${esc(t.memo || '')}</td><td class="num ${t.valor < 0 ? 'neg' : 'pos'}">${W.fmtBRL(t.valor)}</td>
+        <td><select class="inp" data-op="${i}"><option value="WindGate">Sem operação</option>${H.db.ops.filter(o => o && o.id).map(o => `<option>${esc(o.id)}</option>`).join('')}</select></td>
+        <td class="num" style="white-space:nowrap"><button class="btn sm blue" data-prop="${i}">Propor lançamento</button><button class="btn ghost sm" data-ign="${i}">Ignorar</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="note">Nenhum.</p>'}
+      <h3 class="h3" style="margin-top:14px">No sistema, sem movimento no banco · ${dv.semBanco.length}</h3>
+      ${dv.semBanco.length ? `<div class="tw"><table><thead><tr><th>Baixa</th><th>Descrição</th><th class="num">Valor</th><th>Por</th></tr></thead><tbody>${dv.semBanco.map(l => `<tr><td class="mono">${W.dataBR(l.liquidadoEm || W.vencDe(l))}</td><td>${esc(l.desc || l.categoria || '—')} <span class="note mono">${esc(l.op || '')}</span></td><td class="num">${W.fmtBRL(l.valor)}</td><td>${esc(l.baixaPor || l.por || '')}</td></tr>`).join('')}</tbody></table></div>
+        <p class="note">Confira a data e o valor da baixa. Pode ser pagamento por outra conta ou baixa lançada errada.</p>` : '<p class="note">Nenhum.</p>'}`,
+      '<button class="btn" data-x>Fechar</button>');
+    m.querySelector('.modal').classList.add('larga');
+    const achar = i => e.transacoes.find(t => t === dv.semLancamento[+i]);
+    m.querySelectorAll('[data-prop]').forEach(b => b.onclick = () => {
+      const t = achar(b.dataset.prop); if (!t) return;
+      const op = m.querySelector(`[data-op="${b.dataset.prop}"]`).value, agora = new Date().toISOString(), lid = W.novoId();
+      H.db.fin.unshift({ _id: lid, data: t.data, vencimento: t.data, liquidadoEm: t.data, op, tipo: t.valor < 0 ? 'Despesa' : 'Receita', categoria: '', fixo: false, desc: (t.memo || 'Movimento do banco').slice(0, 120),
+        valor: Math.abs(t.valor), valorPago: Math.abs(t.valor), valorPrevisto: null, status: 'Realizado', empresa: e.empresa || 'WindGate', comp: '', nf: '', por: eu(), criadoEm: agora, origem: 'conciliacao', aprovacaoPendente: true, extratoId: e._id });
+      t.lancId = lid; t.decisao = 'proposto';
+      H.salvar(); H.toast('Lançamento proposto: aguarda aprovação na Torre do Samir/Davi'); H.fecharModal(); conciliar(id);
+    });
+    m.querySelectorAll('[data-ign]').forEach(b => b.onclick = () => { const t = achar(b.dataset.ign); if (!t) return; t.decisao = 'ignorado'; t.ignoradoPor = eu(); H.salvar(); H.fecharModal(); conciliar(id); });
+  }
 
   function marcar(id, st) {
     const n = H.db.hubNotas.find(x => x && x._id === id); if (!n) return H.render();

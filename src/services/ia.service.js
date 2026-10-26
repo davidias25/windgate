@@ -24,12 +24,12 @@ function blocoImagem(imagem) {
   return { type: 'image', source: { type: 'base64', media_type: m[1].toLowerCase().replace('jpg', 'jpeg'), data: m[3] } };
 }
 
-async function chamar(conteudo, sistema, fetchImpl) {
+async function chamar(conteudo, sistema, fetchImpl, extra) {
   const f = fetchImpl || fetch;
   const r = await f('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: MODELO(), max_tokens: 1200, system: sistema, messages: [{ role: 'user', content: conteudo }] })
+    body: JSON.stringify(Object.assign({ model: MODELO(), max_tokens: 1200, system: sistema, messages: [{ role: 'user', content: conteudo }] }, extra || {}))
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j.error && j.error.message) || `IA indisponível (${r.status})`);
@@ -66,4 +66,41 @@ async function testar(fetchImpl) {
   return (await chamar([{ type: 'text', text: 'Responda apenas: OK' }], 'Responda em uma palavra.', fetchImpl)).trim().slice(0, 40);
 }
 
-module.exports = { ativa, testar, lerPedido, extrairJSON, blocoImagem, MODELO };
+
+/* ---------- Sourcing: busca de fornecedores na web ----------
+   Alibaba, Made-in-China e Global Sources não oferecem API de busca para
+   compradores. A busca é feita pela ferramenta de pesquisa na web da própria
+   API do Claude (US$ 10 por 1.000 pesquisas + tokens), com a resposta em
+   dados estruturados. Regra da casa: preço FOB no porto mais próximo da
+   fábrica e nenhuma marca concorrente no pedido de cotação. */
+const SISTEMA_SOURCING = `Você é o comprador de uma trading de importação brasileira (WindGate, Fortaleza) e procura FÁBRICAS na China (ou Vietnã/Índia quando fizer sentido).
+Pesquise em alibaba.com, made-in-china.com, globalsources.com, 1688.com e nos sites próprios de fabricantes. Prefira fabricantes (não traders), com anos de mercado e sinais de verificação.
+Responda SOMENTE com JSON: {"fornecedores":[{"nome":"","plataforma":"alibaba|made-in-china|global-sources|1688|site próprio|outro","link":"","cidade":"","provincia":"",
+"tipo":"fábrica|trading|não sabe","produtos":"","moq":"","precoIndicativo":"faixa em USD por unidade, só se aparecer","anos":"","sinais":["verificado","trade assurance","auditoria", ...],
+"portoProximo":"porto marítimo mais próximo da fábrica","observacoes":""}],
+"rfq_en":"pedido de cotação em inglês, curto e profissional: preço FOB no porto mais próximo da fábrica, MOQ, prazo de produção, especificações técnicas, embalagem, certificações; NUNCA cite marcas concorrentes, descreva só por características técnicas",
+"dicas":["o que conferir antes de fechar"]}
+Até 8 fornecedores, só com link real encontrado na pesquisa. Não invente dados: deixe vazio.`;
+async function buscarFornecedores({ produto, especificacao, quantidade, destino }, fetchImpl) {
+  if (!ativa()) { const e = new Error('Falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  const pedido = `Produto: ${produto}\nEspecificação: ${especificacao || '-'}\nQuantidade: ${quantidade || '-'}\nDestino: ${destino || 'Porto do Pecém, Ceará, Brasil'}`;
+  const resp = await chamar([{ type: 'text', text: pedido }], SISTEMA_SOURCING, fetchImpl,
+    { max_tokens: 4000, tools: [{ type: process.env.WINDGATE_IA_WEBSEARCH || 'web_search_20250305', name: 'web_search', max_uses: +(process.env.WINDGATE_IA_BUSCAS || 6) }] });
+  const d = extrairJSON(resp);
+  return { fornecedores: (Array.isArray(d.fornecedores) ? d.fornecedores : []).filter(f => f && f.nome && /^https?:\/\//.test(f.link || '')).slice(0, 8), rfq: String(d.rfq_en || ''), dicas: Array.isArray(d.dicas) ? d.dicas.map(String).slice(0, 6) : [] };
+}
+
+/* ---------- RH: leitura da equipe para a coordenadora ----------
+   Recebe só indicadores agregados (sem financeiro nem salário) e as anotações
+   das conversas individuais. Devolve pontos fortes, alertas e perguntas para
+   a próxima conversa. Não é avaliação final: é apoio à conversa. */
+const SISTEMA_RH = `Você apoia a coordenação de RH de uma trading pequena (WindGate). Recebe indicadores do mês por pessoa e anotações de conversas individuais.
+Responda SOMENTE com JSON: {"equipe":"2 a 3 frases sobre o momento do time","pessoas":[{"nome":"","destaques":[""],"atencao":[""],"possiveisCausas":[""],"perguntas1a1":[""],"acaoSugerida":""}]}
+Regras: baseie-se só nos dados enviados; diga quando o dado é pouco para concluir; tom respeitoso e construtivo; foque em desenvolvimento (treinar antes de cobrar); nada de diagnóstico de saúde ou vida pessoal.`;
+async function analisarEquipe(dados, fetchImpl) {
+  if (!ativa()) { const e = new Error('Falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  const resp = await chamar([{ type: 'text', text: JSON.stringify(dados).slice(0, 30000) }], SISTEMA_RH, fetchImpl, { max_tokens: 3000 });
+  return extrairJSON(resp);
+}
+
+module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, extrairJSON, blocoImagem, MODELO };

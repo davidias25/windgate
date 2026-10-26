@@ -198,9 +198,11 @@
     },
 
     aprovacoes(c) {
-      const linhas = c.aAutorizar.slice(0, 8).map(l => `<div class="row"><div><b>${W.fmtBRL(l.valor)}</b> · ${esc(l.desc || l.categoria || '—')} <span class="note mono">${esc(l.op || '')}</span><br><small class="note">vence ${W.dataBR(W.vencDe(l))}${l.por ? ' · lançado por ' + esc(l.por) : ''}</small></div><button class="btn sm blue" data-aut="${esc(l._id)}">Autorizar</button></div>`)
+      const pend = (c.db.fin || []).filter(l => l && l.aprovacaoPendente);
+      const linhas = pend.slice(0, 8).map(l => `<div class="row"><div><b>${W.fmtBRL(l.valor)}</b> · ${esc(l.desc || '—')} <span class="note mono">${esc(l.op || '')}</span><br><small class="note">${l.tipo === 'Receita' ? 'entrada' : 'saída'} de ${W.dataBR(l.liquidadoEm)} no extrato · proposto por ${esc(l.por || '')}</small></div><div class="btns"><button class="btn sm blue" data-aprovl="${esc(l._id)}">Aprovar</button><button class="btn ghost sm" data-rejl="${esc(l._id)}">Rejeitar</button></div></div>`)
+        .concat(c.aAutorizar.slice(0, 8).map(l => `<div class="row"><div><b>${W.fmtBRL(l.valor)}</b> · ${esc(l.desc || l.categoria || '—')} <span class="note mono">${esc(l.op || '')}</span><br><small class="note">vence ${W.dataBR(W.vencDe(l))}${l.por ? ' · lançado por ' + esc(l.por) : ''}</small></div><button class="btn sm blue" data-aut="${esc(l._id)}">Autorizar</button></div>`))
         .concat(c.cotacoesAprovar.slice(0, 6).map(q => `<div class="row"><div><b>Cotação ${esc(q.label || q.id || '')}</b><br><small class="note">${esc(q.cliente || '')} · de ${esc(q.criadoPor || '—')}</small></div><a class="btn sm" href="/?aba=cotacoes">Revisar</a></div>`));
-      return { acoes: `<span class="note">pagamentos até 10 dias e cotações</span>`, corpo: `<div class="box-b list">${linhas.length ? linhas.join('') : vazio('Nada aguardando sua aprovação.')}</div>` };
+      return { acoes: `<span class="note">lançamentos do extrato, pagamentos até 10 dias e cotações</span>`, corpo: `<div class="box-b list">${linhas.length ? linhas.join('') : vazio('Nada aguardando sua aprovação.')}</div>` };
     },
 
     vendas(c) {
@@ -284,6 +286,10 @@
     el.querySelectorAll('[data-aut],[data-baixa],[data-ed]').length && H.ligarLanc && H.ligarLanc(el);
     const nl = el.querySelector('[data-novolanc]'); if (nl) nl.onclick = () => H.editarLanc(null);
     const mt = el.querySelector('[data-meta]'); if (mt) mt.onclick = () => editarMeta(c);
+    el.querySelectorAll('[data-aprovl]').forEach(b => b.onclick = () => { const l = db.fin.find(x => x && x._id === b.dataset.aprovl); if (!l) return H.render(); delete l.aprovacaoPendente; l.aprovadoPor = H.nomeUsuario(H.userKey); l.aprovadoEm = new Date().toISOString(); H.salvar(); H.toast('Lançamento aprovado'); H.render(); });
+    el.querySelectorAll('[data-rejl]').forEach(b => b.onclick = () => {
+      const id = b.dataset.rejl; (db.hubExtratos || []).forEach(e => (e.transacoes || []).forEach(t => { if (t.lancId === id) { t.lancId = null; t.decisao = 'rejeitado'; } }));
+      db.fin = db.fin.filter(x => !(x && x._id === id)); H.salvar(); H.toast('Lançamento rejeitado: o movimento volta para a conciliação'); H.render(); });
   }
 
   function mensagemCliente(o, tipo, c) {

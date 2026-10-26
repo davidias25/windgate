@@ -187,6 +187,26 @@ const PONTO_TIPOS = ['entrada', 'almoco', 'volta', 'saida', 'outro', 'ajuste'];
 const PONTO_JANELA_MS = 60 * 1000;   // clique duplicado
 
 /* Bater ponto. O usuário vem do TOKEN — mandar outro no corpo não adianta. */
+/* Home office do mês: dia com entrada fora do raio do escritório. Ao atingir o
+   limite da pessoa (padrão Matheus 6, Ívina 4; editável no RH), o Samir e o RH
+   recebem um recado de prioridade alta na Torre. Avisa uma vez por mês. */
+const LIMITES_HO = { matheus: 6, ivina: 4 };
+function homeOfficeDoMes(registros, usuario, mes) {
+  return new Set(registros.filter(r => r.usuario === usuario && r.tipo === 'entrada' && r.dentroDoRaio === false && String(r.data).slice(0, 7) === mes).map(r => r.data)).size;
+}
+async function avisarLimiteHomeOffice(dados, reg) {
+  if (reg.tipo !== 'entrada' || reg.dentroDoRaio !== false || !memoryDB) return;
+  const limites = Object.assign({}, LIMITES_HO, ((memoryDB.hubPainel || {})._rh || {}).limitesHO);
+  const lim = +limites[reg.usuario]; if (!lim) return;
+  const mes = reg.data.slice(0, 7), n = homeOfficeDoMes(dados.registros, reg.usuario, mes);
+  if (n < lim) return;
+  const id = `ho-${reg.usuario}-${mes}`;
+  if ((memoryDB.hubRecados || []).some(r => r && r._id === id)) return;
+  const nome = ((memoryDB.users || {})[reg.usuario] || {}).nome || reg.usuario;
+  const texto = `${nome.split(' ')[0]} atingiu ${n} de ${lim} dias de home office em ${mes.split('-').reverse().join('/')}.`;
+  await gravarParcial({ hubRecados: ['samir', 'oneide'].map(p => ({ _id: id + '-' + p, texto, para: p, prio: 'alta', por: 'Sistema · Ponto', em: new Date().toISOString(), feito: {} })).concat([{ _id: id, texto, para: 'ninguem', em: new Date().toISOString(), feito: {} }]) });
+}
+
 app.post('/api/ponto', auth.exigirToken, async (req, res) => {
   try {
     const dados = await pontoStore.carregar();
@@ -233,6 +253,7 @@ app.post('/api/ponto', auth.exigirToken, async (req, res) => {
 
     dados.registros.push(reg);
     await pontoStore.salvar(dados);
+    avisarLimiteHomeOffice(dados, reg).catch(e => console.warn('⚠️ Aviso de home office:', e.message));
 
     /* A resposta devolve SÓ a confirmação do horário. Quem não é diretoria não
        recebe localização nem histórico — nem o próprio. */
@@ -274,7 +295,9 @@ app.post('/api/ponto/ciencia', auth.exigirToken, async (req, res) => {
 
 /* ---------- daqui para baixo, SÓ a diretoria ---------- */
 
-app.get('/api/ponto', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+/* RH (Oneide) acompanha o ponto da equipe junto com a diretoria; só a diretoria muda a configuração. */
+const exigirDiretoriaOuRH = (req, res, next) => (req.usuario && acesso.perfil(memoryDB, req.usuario.k) === 'rh') ? next() : auth.exigirDiretoria(req, res, next);
+app.get('/api/ponto', auth.exigirToken, exigirDiretoriaOuRH, async (req, res) => {
   const dados = await pontoStore.carregar();
   const { de, ate, usuario } = req.query || {};
   const lista = dados.registros.filter(r =>
@@ -283,7 +306,7 @@ app.get('/api/ponto', auth.exigirToken, auth.exigirDiretoria, async (req, res) =
 });
 
 /* Resumo por pessoa e por dia: primeira entrada, última saída e horas. */
-app.get('/api/ponto/resumo', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+app.get('/api/ponto/resumo', auth.exigirToken, exigirDiretoriaOuRH, async (req, res) => {
   const dados = await pontoStore.carregar();
   const { de, ate, usuario } = req.query || {};
   const lista = dados.registros.filter(r =>
@@ -291,7 +314,7 @@ app.get('/api/ponto/resumo', auth.exigirToken, auth.exigirDiretoria, async (req,
   res.json({ success: true, dias: resumirPonto(lista) });
 });
 
-app.get('/api/ponto/export.csv', auth.exigirToken, auth.exigirDiretoria, async (req, res) => {
+app.get('/api/ponto/export.csv', auth.exigirToken, exigirDiretoriaOuRH, async (req, res) => {
   const dados = await pontoStore.carregar();
   const { de, ate, usuario } = req.query || {};
   const lista = dados.registros.filter(r =>
@@ -669,6 +692,56 @@ app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) =
   res.json({ success: true, consultadas: alvo.length, atualizadas: atualizadas.length, erros });
 });
 
+/* ---------- Tempo ativo no sistema ---------- */
+const atividade = require('./services/atividade-store.service');
+app.post('/api/atividade', auth.exigirTokenSeAtiva, async (req, res) => {
+  const k = quemChat(req); if (!k) return res.status(400).json({ success: false });
+  const contou = await atividade.registrar(k, (req.body || {}).tela);
+  res.json({ success: true, contou });
+});
+app.get('/api/atividade', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const k = quemChat(req), p = acesso.perfil(memoryDB, k);
+  const hoje = atividade.agoraSP().dia, de = String(req.query.de || hoje).slice(0, 10), ate = String(req.query.ate || hoje).slice(0, 10);
+  // Cada um vê o próprio tempo; diretoria, operações (líder) e RH veem todos.
+  const todos = ['diretoria', 'operacoes', 'rh'].includes(p) || k === '(sem-auth)';
+  res.json({ success: true, de, ate, pessoas: await atividade.resumo(de, ate, todos ? null : [k]) });
+});
+
+/* ---------- Sourcing com IA (pesquisa na web) ---------- */
+app.post('/api/ia/sourcing', auth.exigirTokenSeAtiva, async (req, res) => {
+  const b = req.body || {}; if (!b.produto) return res.status(400).json({ success: false, message: 'Informe o produto.' });
+  try { res.json(Object.assign({ success: true }, await ia.buscarFornecedores(b))); }
+  catch (e) { res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message }); }
+});
+/* ---------- RH: leitura da equipe pela IA ---------- */
+app.post('/api/ia/rh', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto; const p = acesso.perfil(memoryDB, quemChat(req));
+  if (!['diretoria', 'rh'].includes(p) && quemChat(req) !== '(sem-auth)') return res.status(403).json({ success: false, message: 'Só RH e diretoria.' });
+  try { res.json({ success: true, analise: await ia.analisarEquipe((req.body || {}).dados || {}) }); }
+  catch (e) { res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message }); }
+});
+
+/* ---------- E-mail de notas (IMAP da hospedagem windgate.com.br) ---------- */
+const email = require('./services/email.service');
+async function lerEmailNotas() {
+  if (!email.configurado() || !memoryDB) return { lidas: 0, novas: 0 };
+  const cnpjs = ((memoryDB.hubPainel || {})._fiscal || {}).cnpjs || {};
+  const salvarAnexo = async (nome, conteudo, tipo) => {
+    const tmp = path.join(require('os').tmpdir(), Date.now() + '-' + nome.replace(/[^\w.-]/g, '_'));
+    fs.writeFileSync(tmp, conteudo); try { const r = await uploadParaSupabase(tmp, nome, tipo); return (r && r.publicUrl) || ''; } finally { fs.unlink(tmp, () => {}); }
+  };
+  const r = await email.lerCaixa({ cnpjs, novaNota: fiscal.novaNota, salvarAnexo });
+  const entram = fiscal.semRepetidas(memoryDB.hubNotas || [], r.notas);
+  if (entram.length) await gravarParcial({ hubNotas: entram });
+  return { lidas: r.lidas, novas: entram.length };
+}
+app.post('/api/email/notas', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  if (!email.configurado()) return res.json({ success: false, semIntegracao: true, message: 'Falta configurar o e-mail de notas (IMAP_HOST, IMAP_USUARIO, IMAP_SENHA no Render).' });
+  try { res.json(Object.assign({ success: true }, await lerEmailNotas())); } catch (e) { res.status(502).json({ success: false, message: 'E-mail: ' + e.message }); }
+});
+if (email.configurado() && process.env.NODE_ENV !== 'test') setInterval(() => lerEmailNotas().catch(e => console.warn('⚠️ E-mail de notas:', e.message)), 10 * 60 * 1000);
+
 /* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
 app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;
@@ -679,7 +752,8 @@ app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
     tracking: { ok: tem('SHIPSGO_API_KEY'), detalhe: 'ShipsGo: posição por contêiner' },
     portalUnico: { ok: portalUnico.configurado(), detalhe: `certificado A1 · ambiente ${portalUnico.cfg().ambiente}` },
     nfe: { ok: tem('FOCUS_NFE_TOKEN'), detalhe: `Focus NFe · ${process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'produção' : 'homologação'}` },
-    emailNotas: { ok: tem('FISCAL_WEBHOOK_TOKEN'), detalhe: 'e-mail de notas encaminhando para o sistema' },
+    emailNotas: { ok: email.configurado() || tem('FISCAL_WEBHOOK_TOKEN'), detalhe: email.configurado() ? 'caixa ' + process.env.IMAP_USUARIO + ' lida a cada 10 min' : 'caixa de notas do domínio windgate.com.br (IMAP)' },
+    bancos: { ok: tem('SANTANDER_CLIENT_ID') || tem('ITAU_CLIENT_ID'), detalhe: 'extrato automático Santander/Itaú; hoje por OFX' },
     boletos: { ok: tem('ASAAS_API_KEY'), detalhe: 'Asaas: boleto e Pix' }
   } });
 });

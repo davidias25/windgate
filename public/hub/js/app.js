@@ -159,11 +159,12 @@
   /* ---------------- Navegação ---------------- */
   /* Mesma arquitetura do protótipo aprovado. L: = ainda no sistema atual · I: = em implantação. */
   const MENU = [
-    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos']] },
+    { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['dashops', 'Desempenho da empresa']] },
     { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['I:portal', 'Portal do Cliente']] },
-    { g: 'Financeiro & Fiscal', itens: [['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
-    { g: 'Inteligência', itens: [['L:frete', 'Fretes & Benchmark'], ['L:sourcing', 'Sourcing China'], ['L:parceiros', 'Fornecedores'], ['I:tracking', 'Tracking ao vivo']] },
-    { g: 'Gestão', itens: [['chat', 'Chat WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:gestao', 'Gestão do Mês'], ['produtividade', 'Produtividade & Ranking'], ['L:ponto', 'Ponto'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
+    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['desembolso', 'Desembolso & Cobrança'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['I:cambio', 'Câmbio & Hedge'], ['I:nfe', 'NF-e (DUIMP)']] },
+    { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['L:frete', 'Fretes & Benchmark'], ['I:tracking', 'Tracking ao vivo']] },
+    { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:ponto', 'Ponto']] },
+    { g: 'Gestão', itens: [['L:gestao', 'Gestão do Mês (antigo)'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
   ];
 
   function montarMenu() {
@@ -190,11 +191,13 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', 'I:cambio': 'fin.ver', 'I:nfe': 'fin.ver' };
   const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
   function podeTela(k) {
     // Acesso externo (contador): só Fiscal e o canal de contabilidade do chat.
     if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat';
+    // RH: equipe, cultura e comunicação; nada de operação comercial nem financeiro.
+    if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'torre', 'dashops', 'L:agenda', 'L:ponto', 'L:org'].includes(k);
     if (k === 'implantacao') return true;
     if (k.startsWith('L:')) {
       const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
@@ -269,6 +272,7 @@
     const h = decodeURIComponent((location.hash || '').slice(1));
     if (h) { const i = h.indexOf('-'); H.estado = i > 0 ? { tela: h.slice(0, i), param: h.slice(i + 1) } : { tela: h, param: null }; }
     if (!podeTela(H.estado.tela) || (H.perfil().externo && H.estado.tela === 'torre')) H.estado = { tela: H.perfil().externo ? 'fiscal' : 'torre', param: null };
+    if (H.perfil().id === 'rh' && (!location.hash || location.hash === '#torre')) H.estado = { tela: 'rh', param: null };
     render();
     clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
     if (H.chatIniciar) H.chatIniciar();
@@ -287,6 +291,15 @@
   H.sair = sair;
 
   window.addEventListener('beforeunload', e => { if (H.db && sujo()) { guardarPendente(H.db); e.preventDefault(); e.returnValue = ''; } });
+
+  /* Tempo ativo no sistema: só conta minuto em que a aba está na frente e houve
+     uso nos últimos 2 minutos. Guarda a área, nunca o que foi digitado. */
+  let ultimoUso = Date.now();
+  ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { ultimoUso = Date.now(); }, { passive: true }));
+  setInterval(() => {
+    if (!H.db || !H.userKey || document.visibilityState !== 'visible' || Date.now() - ultimoUso > 120000) return;
+    api('/api/atividade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tela: H.estado.tela === 'implantacao' ? 'implantacao' : H.estado.tela }) }).catch(() => {});
+  }, 60000);
 
   document.addEventListener('DOMContentLoaded', async () => {
     $('#pin').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(e.target.value); });

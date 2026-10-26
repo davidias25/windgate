@@ -275,7 +275,7 @@ function bancoReal() {
     const lido = acesso.paraLeitura(d, 'pedro');
     ok(!lido.ops && !lido.fin && !lido.crm && !lido.quotes && lido.hubNotas.length === 1 && lido.hubExtratos.length === 1, 'contador recebe só notas e extratos: nada de operações, financeiro, CRM ou cotações');
     ok(Object.values(lido.users).every(u => !u.pin), 'contador não recebe o PIN de ninguém');
-    ok(acesso.paraLeitura(d, 'davi') === d, 'demais perfis continuam recebendo o banco como antes');
+    { const ld = acesso.paraLeitura(d, 'davi'); ok(Object.keys(d).filter(c => c !== 'hubRH').every(c => ld[c] === d[c]) && !('hubRH' in ld), 'demais perfis continuam recebendo o banco como antes (só as anotações de RH ficam de fora)'); }
     const ataque = { ops: [], fin: [{ _id: 'f1', valor: 0 }], settings: { zerado: true }, users: { samir: { pin: '0' } }, hubNotas: [{ _id: 'n1', chave: '1', status: 'lancada' }], _removidos: { f2: Date.now(), n9: 1, x1: Date.now() } };
     const filtrado = acesso.paraGravacao(d, ataque, 'pedro');
     ok(!filtrado.fin && !filtrado.settings && !filtrado.users && !filtrado.ops && filtrado.hubNotas.length === 1, 'o que o contador manda fora de notas/extratos é descartado');
@@ -321,6 +321,84 @@ function bancoReal() {
     ok(r1.situacao === 'DESEMBARACADA' && r1.canal === 'VERDE', 'situação e canal da DUIMP extraídos da resposta');
     await pu.consultarDuimp('26BR0002', '1', req);
     ok(chamadas.filter(c => /autenticar/.test(c[0])).length === 1, 'token reaproveitado: não autentica de novo a cada consulta (regra dos 60 s)');
+  }
+
+  {
+    console.log('\nHub 2.0 — dashboards, reunião, RH, sourcing, e-mail, atividade:');
+    const db = {
+      users: { samir: { nome: 'Samir', perfilHub: 'diretoria' }, davi: { nome: 'Davi', perfilHub: 'operacoes' }, ivina: { nome: 'Ívina', perfilHub: 'documentos' }, oneide: { nome: 'Oneide', perfilHub: 'rh' } },
+      ops: [{ _id: 'o1', id: 'OP30', cliente: 'Custódio', status: 'producao', criadaEm: '2026-10-02' }],
+      opStatusHist: [{ _id: 'h1', op: 'OP30', de: 'cotacao', deEm: '2026-10-02', para: 'producao', em: '2026-10-07' }],
+      fin: [
+        { _id: 'a1', tipo: 'Receita', valor: 100000, status: 'Realizado', vencimento: '2026-10-05', liquidadoEm: '2026-10-05', empresa: 'WindGate', op: 'OP30' },
+        { _id: 'a2', tipo: 'Despesa', valor: 60000, status: 'Realizado', vencimento: '2026-10-06', liquidadoEm: '2026-10-06', empresa: 'WindGate', op: 'OP30' },
+        { _id: 'a3', tipo: 'Receita', valor: 40000, status: 'Previsto', vencimento: '2026-09-10', empresa: 'WindGate', op: 'OP30', cliente: 'Custódio' },
+        { _id: 'a4', tipo: 'Receita', valor: 25000, status: 'Previsto', vencimento: '2026-11-10', empresa: 'WindGate', op: 'OP30', cliente: 'Custódio' },
+        { _id: 'a5', tipo: 'Despesa', valor: 8000, status: 'Previsto', vencimento: '2026-11-05', empresa: 'WindGate', op: 'WindGate' }
+      ],
+      hubRH: [{ _id: 'n1', tipo: '1a1', pessoa: 'ivina', texto: 'conversa reservada' }],
+      quotes: [{ _id: 'q1', valor: 1 }], crmOps: [{ _id: 'c1', nome: 'Neg', valor: 999 }]
+    };
+    const hoje = '2026-10-26';
+    const sf = W.saudeFinanceira(db, hoje);
+    ok(perto(sf.caixa, 40000), 'saúde financeira: caixa = recebido 100 mil − pago 60 mil');
+    ok(perto(sf.totalReceber, 65000) && perto(sf.aging.d60, 40000) && perto(sf.aging.aVencer, 25000), 'aging: 40 mil vencidos há 46 dias, 25 mil a vencer');
+    ok(sf.porMes.length === 12 && sf.porMes[11].mes === '2026-10', 'série de 12 meses terminando no mês atual');
+    ok(perto(sf.porMes[11].receita, 100000) && perto(sf.porMes[11].custos, 60000) && sf.porMes.every(m => isFinite(m.resultado) && isFinite(m.custos)), 'DRE do mês no gráfico: receita 100 mil, custos 60 mil, nenhum valor vazio');
+    ok(perto(sf.pagar[0], 8000) && perto(sf.receber[0], 65000), 'próximos 30 dias: pagar 8 mil; receber 65 mil (inclui o vencido)');
+    const dop = W.desempenhoOperacoes(db, hoje);
+    const cot = dop.etapas.find(e => e.k === 'cotacao');
+    ok(dop.novas[11] === 1 && cot && cot.media === 5 && cot.n === 1, 'desempenho: 1 operação nova no mês; cotação levou 5 dias');
+    ok(W.notaFornecedor({ checks: { fabrica: 1, licenca: 1, amostra: 1 } }) === 50 && W.notaFornecedor({}) === 0, 'nota do fornecedor soma os pesos dos itens conferidos (fábrica 20 + licença 15 + amostra 15)');
+    const ext = { empresa: 'WindGate', mes: '2026-10', transacoes: [{ id: 't1', valor: 100000, lancId: 'a1' }, { id: 't2', valor: -1200 }, { id: 't3', valor: -50, decisao: 'ignorado' }] };
+    const dv = W.divergencias(db, ext);
+    ok(dv.semLancamento.length === 1 && dv.semLancamento[0].id === 't2', 'conciliação: movimento do banco sem lançamento aparece; o ignorado não');
+    ok(dv.semBanco.length === 1 && dv.semBanco[0]._id === 'a2', 'conciliação: pagamento no sistema que não está no extrato aparece');
+    ok(W.semanaDe('2026-10-28').ini === '2026-10-26' && W.semanaDe('2026-10-28').sexta === '2026-10-30', 'semana da reunião: segunda a sexta');
+    ok(W.gestorDoMes(db, '2026-11') === 'samir' && W.gestorDoMes({ hubPainel: { _reuniao: { gestores: { '2026-11': 'davi' } } } }, '2026-11') === 'davi', 'Gestor do Mês: rodízio padrão e escolha gravada');
+
+    const acesso = require('../src/services/acesso.service');
+    const lI = acesso.paraLeitura(db, 'ivina'), lO = acesso.paraLeitura(db, 'oneide'), lS = acesso.paraLeitura(db, 'samir');
+    ok(!lI.hubRH && lO.hubRH && lS.hubRH, 'anotações de RH: Oneide e Samir leem; Ívina não');
+    ok(!lO.fin && !lO.quotes && lO.crmOps[0].valor === undefined && lO.crmOps[0].nome === 'Neg', 'perfil RH não recebe financeiro, cotações nem valor dos negócios');
+    const gI = acesso.paraGravacao(db, { hubRH: [{ _id: 'pulso-x', tipo: 'pulso', nota: 4, autor: 'ivina', semana: '2026-10-26' }, { _id: 'n1', tipo: '1a1', texto: 'alterado' }, { _id: 'n9', tipo: '1a1', texto: 'novo' }] }, 'ivina');
+    ok(gI.hubRH.length === 1 && gI.hubRH[0].nota === 4 && gI.hubRH[0].autor === undefined, 'quem não é RH só grava o próprio pulso, anônimo; não mexe em anotações');
+    const gO = acesso.paraGravacao(db, { fin: [{ _id: 'zz', valor: 1 }], hubRH: [{ _id: 'n9', tipo: '1a1' }] }, 'oneide');
+    ok(!gO.fin && gO.hubRH.length === 1, 'RH grava anotações, mas nunca o financeiro');
+
+    process.env.WINDGATE_ATIVIDADE_FILE = TMP + '.atv';
+    const atv = require('../src/services/atividade-store.service'); atv._reset();
+    const t0 = new Date('2026-10-26T13:00:10Z');
+    const r1 = await atv.registrar('davi', 'crm', t0), r2 = await atv.registrar('davi', 'crm', new Date('2026-10-26T13:00:50Z'));
+    await atv.registrar('davi', 'fin', new Date('2026-10-26T13:01:05Z')); await atv.registrar('ivina', 'docs', t0);
+    const rs = await atv.resumo('2026-10-26', '2026-10-26');
+    ok(r1 && !r2 && rs.davi.min === 2 && rs.davi.telas.crm === 1 && rs.davi.telas.fin === 1, 'tempo no sistema: cada minuto conta uma vez, separado por área');
+    ok(rs.davi.dias['2026-10-26'].ini === '10:00', 'horário em Brasília');
+    const so = await atv.resumo('2026-10-01', '2026-10-31', ['ivina']);
+    ok(Object.keys(so).join() === 'ivina', 'quem não é líder vê só o próprio tempo');
+    try { fs.unlinkSync(TMP + '.atv'); } catch (e) {}
+
+    const email = require('../src/services/email.service');
+    const xml = '<nfeProc><NFe><infNFe Id="NFe23261012345678000199550010000012341000012345"><ide><nNF>1234</nNF><serie>1</serie><dhEmi>2026-10-20T10:00:00-03:00</dhEmi><tpNF>1</tpNF></ide><emit><CNPJ>12345678000199</CNPJ><xNome>Fornecedor</xNome></emit><dest><CNPJ>11111111000111</CNPJ><xNome>WindGate</xNome></dest><total><ICMSTot><vNF>1500.00</vNF></ICMSTot></total></infNFe></NFe></nfeProc>';
+    const criadas = [];
+    const nn = await email.notasDaMensagem({ from: { text: 'forn@x.com' }, subject: 'NF 1234', attachments: [{ filename: 'nf.xml', contentType: 'text/xml', content: Buffer.from(xml) }, { filename: 'danfe.pdf', content: Buffer.from('%PDF') }] }, ['11111111000111'], (n, origem) => { const r = Object.assign({ _id: 'x' + criadas.length, origem }, n); criadas.push(r); return r; });
+    ok(nn.length === 1 && nn[0].origem === 'email' && /forn@x.com/.test(nn[0].obs), 'e-mail com XML + PDF da mesma nota vira uma nota só, com a origem');
+    const so2 = await email.notasDaMensagem({ subject: 's', attachments: [{ filename: 'boleto.pdf', content: Buffer.from('%PDF') }] }, [], n => n);
+    ok(so2.length === 1 && so2[0].status === 'conferir', 'PDF sem XML entra como "conferir"');
+    ok(!email.configurado(), 'sem IMAP configurado, a leitura de e-mail fica desligada');
+
+    const ia = require('../src/services/ia.service');
+    process.env.ANTHROPIC_API_KEY = 'teste';
+    let corpo = null;
+    const fk = resposta => async (url, o) => { corpo = JSON.parse(o.body); return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: resposta }] }) }; };
+    const bf = await ia.buscarFornecedores({ produto: 'betoneira 400L' }, fk('```json\n{"fornecedores":[{"nome":"Fab A","link":"https://a.com"},{"nome":"Sem link","link":""}],"rfq_en":"Please quote FOB","dicas":["peça amostra"]}\n```'));
+    ok(corpo.tools[0].name === 'web_search' && /Pecém/.test(corpo.messages[0].content[0].text), 'sourcing: usa a pesquisa na web e destino padrão Pecém');
+    ok(bf.fornecedores.length === 1 && bf.rfq === 'Please quote FOB', 'sourcing: descarta fornecedor sem link real');
+    const ae = await ia.analisarEquipe({ pessoas: [{ nome: 'Ívina' }] }, fk('{"equipe":"ok","pessoas":[{"nome":"Ívina"}]}'));
+    ok(ae.equipe === 'ok' && !/fin|valor/.test(JSON.stringify(corpo.messages)), 'análise de RH recebe só os indicadores enviados');
+    delete process.env.ANTHROPIC_API_KEY;
+    let semIA = false; try { await ia.analisarEquipe({}, fk('{}')); } catch (e) { semIA = !!e.semIA; }
+    ok(semIA, 'sem a chave no servidor, a IA avisa em vez de falhar');
   }
 
   try { fs.unlinkSync(TMP); } catch (e) {}
