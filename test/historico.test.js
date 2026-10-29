@@ -113,5 +113,9 @@ const ok = (c, m) => { if (c) { passou++; console.log('  ✅ ' + m); } else { fa
   srv.close();
   try { fs.unlinkSync(TMP); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
-  process.exit(falhou ? 1 : 0);
+  /* Sem process.exit: sair à força com conexões fechando derruba o Node 24 no
+     Windows (UV_HANDLE_CLOSING) e corta a sequência do npm test. O código de
+     saída vai em exitCode e o processo termina sozinho. */
+  process.exitCode = falhou ? 1 : 0;
+  setTimeout(() => process.exit(process.exitCode), 3000).unref();
 })().catch(e => { console.error(e); process.exit(1); });

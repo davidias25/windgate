@@ -134,7 +134,7 @@
     },
 
     tarefas(c) {
-      return { acoes: `<a class="btn sm" href="/?aba=agenda">Agenda</a>`,
+      return { acoes: `<a class="btn sm" href="#agenda" onclick="HUB.ir('agenda');return false">Agenda</a>`,
         corpo: `<div class="box-b list">${c.tarefas.length ? c.tarefas.slice(0, 8).map(t => { const atr = t.prazo && t.prazo < c.hoje;
           return `<div class="row"><div><b>${esc(t.t || '')}</b><br><small class="note">${t.prazo ? (atr ? '<span style="color:var(--crit)">venceu ' + W.dataBR(t.prazo) + '</span>' : 'até ' + W.dataBR(t.prazo)) : 'sem prazo'}${t.prio ? ' · ' + esc(t.prio) : ''}${t.por && t.por !== c.nome ? ' · de ' + esc(t.por) : ''}</small></div><button class="btn sm" data-tarefa="${esc(t._id)}">Concluir</button></div>`; }).join('') + mais(c.tarefas.length, 8)
           : vazio('Nenhuma tarefa aberta para você.')}</div>` };
@@ -160,7 +160,7 @@
 
     fretes(c) {
       const neg = (c.db.fretes || []).filter(f => f && f.status === 'Negociando' && (!f.resp || f.resp === c.nome)).length;
-      return { acoes: `<a class="btn sm" href="/?aba=frete">Cotações de frete${neg ? ' · ' + neg + ' negociando' : ''}</a>`,
+      return { acoes: `<a class="btn sm" href="#frete" onclick="HUB.ir('frete');return false">Cotações de frete${neg ? ' · ' + neg + ' negociando' : ''}</a>`,
         corpo: c.preEmbarque.length ? `<div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th>O que falta</th></tr></thead><tbody>${c.preEmbarque.slice(0, 10).map(x => `<tr class="click" data-op="${esc(x.o.id)}"><td>${linhaOp(x.o)}</td><td>${H.pillStatus(x.o.status)}</td><td>${x.falta.map(f => `<span class="pill warn">${esc(f)}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>${mais(c.preEmbarque.length, 10)}`
           : vazio('Frete e embarque em dia para as operações antes do embarque.') };
     },
@@ -201,7 +201,7 @@
       const pend = (c.db.fin || []).filter(l => l && l.aprovacaoPendente);
       const linhas = pend.slice(0, 8).map(l => `<div class="row"><div><b>${W.fmtBRL(l.valor)}</b> · ${esc(l.desc || '—')} <span class="note mono">${esc(l.op || '')}</span><br><small class="note">${l.tipo === 'Receita' ? 'entrada' : 'saída'} de ${W.dataBR(l.liquidadoEm)} no extrato · proposto por ${esc(l.por || '')}</small></div><div class="btns"><button class="btn sm blue" data-aprovl="${esc(l._id)}">Aprovar</button><button class="btn ghost sm" data-rejl="${esc(l._id)}">Rejeitar</button></div></div>`)
         .concat(c.aAutorizar.slice(0, 8).map(l => `<div class="row"><div><b>${W.fmtBRL(l.valor)}</b> · ${esc(l.desc || l.categoria || '—')} <span class="note mono">${esc(l.op || '')}</span><br><small class="note">vence ${W.dataBR(W.vencDe(l))}${l.por ? ' · lançado por ' + esc(l.por) : ''}</small></div><button class="btn sm blue" data-aut="${esc(l._id)}">Autorizar</button></div>`))
-        .concat(c.cotacoesAprovar.slice(0, 6).map(q => `<div class="row"><div><b>Cotação ${esc(q.label || q.id || '')}</b><br><small class="note">${esc(q.cliente || '')} · de ${esc(q.criadoPor || '—')}</small></div><a class="btn sm" href="/?aba=cotacoes">Revisar</a></div>`));
+        .concat(c.cotacoesAprovar.slice(0, 6).map(q => `<div class="row"><div><b>Cotação ${esc(q.label || q.id || '')}</b><br><small class="note">${esc(q.cliente || '')} · de ${esc(q.criadoPor || '—')}</small></div><a class="btn sm" href="#cotacoes-${esc(q.id || '')}" onclick="HUB.ir('cotacoes', '${esc(q.id || '')}');return false">Revisar</a></div>`));
       return { acoes: `<span class="note">lançamentos do extrato, pagamentos até 10 dias e cotações</span>`, corpo: `<div class="box-b list">${linhas.length ? linhas.join('') : vazio('Nada aguardando sua aprovação.')}</div>` };
     },
 

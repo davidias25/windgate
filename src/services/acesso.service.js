@@ -56,8 +56,37 @@ function gravacaoRH(atual, recebido, k) {
   return out;
 }
 
+/* PIN não sai do servidor para ninguém: o login é conferido aqui, e quem lia o
+   banco no navegador via o PIN de todo mundo. Vai só `temPin`, para a tela de
+   Equipe saber quem ainda não tem. Na gravação, o PIN de quem já existe nunca
+   vem do navegador — o sistema antigo preenche o PIN padrão quando não recebe
+   o real, e gravaria esse padrão por cima. Trocar PIN é pela rota própria
+   (POST /api/usuarios/:chave/pin). Com o login desligado (sem segredo) nada
+   muda: não há o que proteger e a tela confere o PIN localmente. */
+const podeGerirPins = (db, k) => k === 'samir' || !!(db && db.users && db.users[k] && db.users[k].config);
+function semPinsLeitura(db, k, original) {
+  if (!db || !db.users || k === '(sem-auth)') return db;
+  const out = Object.assign({}, db), users = {};
+  Object.entries(db.users).forEach(([key, u]) => { if (!u || typeof u !== 'object') { users[key] = u; return; } const c = Object.assign({}, u); delete c.pin; const o = original && original.users && original.users[key]; c.temPin = !!(o ? o.pin : u.pin); users[key] = c; });
+  out.users = users;
+  return out;
+}
+function gravacaoPins(atual, recebido, k) {
+  if (!recebido || typeof recebido !== 'object' || !recebido.users || typeof recebido.users !== 'object' || k === '(sem-auth)') return recebido;
+  const out = Object.assign({}, recebido), users = {}, srv = (atual && atual.users) || {};
+  Object.entries(recebido.users).forEach(([key, u]) => {
+    if (!u || typeof u !== 'object') { users[key] = u; return; }
+    const c = Object.assign({}, u); delete c.temPin;
+    if (srv[key]) { if (srv[key].pin) c.pin = srv[key].pin; else delete c.pin; }
+    else if (!podeGerirPins(atual, k)) delete c.pin;   // pessoa nova: só quem administra acessos define o PIN
+    users[key] = c;
+  });
+  out.users = users;
+  return out;
+}
+
 /** O que o usuário pode ler de GET /api/db. */
-function paraLeitura(db, k) { return semNFe(semRH(semDinheiroDocs(paraLeitura0(db, k), k), k), k); }
+function paraLeitura(db, k) { return semPinsLeitura(semNFe(semRH(semDinheiroDocs(paraLeitura0(db, k), k), k), k), k, db); }
 
 /* Documentação & Atendimento (Ívina) também não vê dinheiro: nem financeiro,
    nem cotações (custo e margem), nem câmbio, nem o valor dos negócios. Na
@@ -105,7 +134,7 @@ function paraLeitura0(db, k) {
 }
 
 /** O que o usuário pode gravar em POST /api/db (o resto é descartado). */
-function paraGravacao(atual, recebido, k) { return gravacaoNFe(atual, gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k), k); }
+function paraGravacao(atual, recebido, k) { return gravacaoPins(atual, gravacaoNFe(atual, gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k), k), k); }
 function paraGravacao0(atual, recebido, k) {
   if (recebido && ehRH(atual, k)) {
     const out = Object.assign({}, recebido);
@@ -129,4 +158,4 @@ function paraGravacao0(atual, recebido, k) {
   return out;
 }
 
-module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES, SEM_DINHEIRO };
+module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, podeGerirPins, paraLeitura, paraGravacao, CONTADOR_COLECOES, SEM_DINHEIRO };

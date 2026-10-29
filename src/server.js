@@ -19,6 +19,20 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Servir arquivos de upload local estaticamente
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+/* O endereço principal abre o Hub 2.0. O sistema anterior continua inteiro em
+   /antigo, lendo e gravando o mesmo banco, como reserva. Link antigo com
+   ?aba=<aba> cai na tela equivalente do Hub. */
+const ABA_PARA_HUB = { painel: 'ops', cotacoes: 'cotacoes', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'equipe', config: 'config',
+  crm: 'crm', parceiros: 'crm', sourcing: 'sourcing', fin: 'fin', checklist: 'docs', mapa: 'mapa' };
+app.get(['/', '/index.html'], (req, res) => {
+  const tela = ABA_PARA_HUB[String((req.query && req.query.aba) || '')];
+  res.redirect(302, '/hub/' + (tela ? '#' + tela : ''));
+});
+app.get(['/antigo', '/antigo/'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
 // Servir o Front-End HTML estaticamente se colocado na pasta public.
 // O sistema inteiro é um único index.html, então o HTML nunca pode vir de cache:
 // senão uma aba aberta continua rodando a versão antiga depois de uma atualização.
@@ -177,6 +191,21 @@ app.get('/api/auth/usuarios', async (req, res) => {
   res.json({ success: true, usuarios: Object.entries(us).map(([k, u]) => ({
     key: k, nome: (u && u.nome) || k, papel: (u && u.papel) || '', cor: (u && u.cor) || '#2563EB'
   })) });
+});
+
+/* Troca de PIN. O PIN não viaja mais no banco (nem na leitura nem na gravação
+   pelo /api/db): muda só por aqui. A própria pessoa troca o seu; quem
+   administra acessos (Samir ou quem tem Configurações) troca o de qualquer um. */
+app.post('/api/usuarios/:chave/pin', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto;
+  const alvo = req.params.chave, quem = req.usuario && req.usuario.k, pin = String((req.body || {}).pin || '').trim();
+  const u = memoryDB && memoryDB.users && memoryDB.users[alvo];
+  if (!u) return res.status(404).json({ success: false, message: 'Pessoa não encontrada.' });
+  if (quem !== '(sem-auth)' && quem !== alvo && !acesso.podeGerirPins(memoryDB, quem)) return res.status(403).json({ success: false, message: 'Só a própria pessoa ou quem administra os acessos troca o PIN.' });
+  if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ success: false, message: 'O PIN precisa ter de 4 a 8 números.' });
+  await gravarParcial({ users: { [alvo]: Object.assign({}, u, { pin }) } });
+  console.log(`🔑 PIN de ${alvo} trocado por ${quem}.`);   // registra quem trocou, nunca o PIN
+  res.json({ success: true });
 });
 
 /* Diz ao navegador se a sessão ainda vale, sem devolver dado nenhum. */
@@ -761,7 +790,7 @@ async function salvarArquivoNFe(nome, conteudo, tipo) {
     return '/uploads/' + arq;
   } finally { fs.unlink(tmp, () => {}); }
 }
-require('./routes/nfe.routes')(app, { auth, acesso, gravarParcial, quemChat, pronto: () => bancoPronto, db: () => memoryDB, salvarArquivo: salvarArquivoNFe });
+const nfeRotas = require('./routes/nfe.routes')(app, { auth, acesso, gravarParcial, quemChat, pronto: () => bancoPronto, db: () => memoryDB, salvarArquivo: salvarArquivoNFe });
 
 /* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
 app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
@@ -821,6 +850,8 @@ const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   // Verifica diariamente e rebaixa as planilhas oficiais a cada 15 dias.
   aliquotas.agendar();
+  // NF-e enviada sem aviso da Focus: consulta de reserva a cada 2 minutos.
+  setInterval(() => nfeRotas.rodada().catch(e => console.warn('⚠️ NF-e: consulta de reserva:', e.message)), 2 * 60 * 1000);
   app.listen(PORT, () => {
     console.log(`===================================================`);
     console.log(`🚀 Servidor WindGate API rodando na porta ${PORT}`);

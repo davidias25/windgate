@@ -168,14 +168,15 @@
   H.perfil = () => W.perfilDe(H.db, H.userKey);
 
   /* ---------------- Navegação ---------------- */
-  /* Mesma arquitetura do protótipo aprovado. L: = ainda no sistema atual · I: = em implantação. */
+  /* Mesma arquitetura do protótipo aprovado. Todas as telas já estão no Hub; o sistema anterior continua em /antigo.
+     L: = tela que ainda abre no sistema anterior · I: = em implantação (nenhuma hoje). */
   const MENU = [
     { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['conteineres', 'Contêineres & free time'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['portais', 'Portais externos'], ['dashops', 'Desempenho da empresa']] },
-    { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['contratos', 'Contratos']] },
+    { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['cotacoes', 'Cotações & Propostas'], ['contratos', 'Contratos']] },
     { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['nfe', 'NF-e (emissão)']] },
-    { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['catalogo', 'Catálogo & NCM'], ['L:frete', 'Fretes & Benchmark'], ['compliance', 'Compliance & habilitações']] },
-    { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:ponto', 'Ponto']] },
-    { g: 'Gestão', itens: [['L:gestao', 'Gestão do Mês (antigo)'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
+    { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['catalogo', 'Catálogo & NCM'], ['frete', 'Fretes & Benchmark'], ['compliance', 'Compliance & habilitações']] },
+    { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['agenda', 'Agenda & Tarefas'], ['ponto', 'Ponto']] },
+    { g: 'Gestão', itens: [['gestao', 'Gestão do Mês'], ['equipe', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['config', 'Configurações']] }
   ];
 
   function montarMenu() {
@@ -187,7 +188,7 @@
       const lista = document.createElement('div'); lista.className = 'nav';
       itens.forEach(([k, l]) => {
         if (k.startsWith('L:')) {
-          const a = document.createElement('a'); a.href = '/?aba=' + k.slice(2); a.innerHTML = `${esc(l)} <span class="tag">atual</span>`;
+          const a = document.createElement('a'); a.href = '/antigo?aba=' + k.slice(2); a.innerHTML = `${esc(l)} <span class="tag">atual</span>`;
           a.title = 'Ainda no sistema atual — será refeito no Hub 2.0'; lista.appendChild(a);
         } else if (k.startsWith('I:')) {
           const b = document.createElement('button'); b.dataset.t = 'implantacao'; b.dataset.p = k.slice(2); b.innerHTML = `${esc(l)} <span class="tag novo">em breve</span>`;
@@ -202,18 +203,22 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', nfe: 'nfe.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver' };
-  const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', nfe: 'nfe.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver', cotacoes: 'fin.resultado' };
+  /* Telas que vieram do sistema anterior seguem também a lista de abas liberadas da pessoa (users[k].tabs). */
+  const TELA_ABA = { cotacoes: 'cotacoes', frete: 'frete', gestao: 'gestao' };
+  const ABA_ATUAL = { crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros' };
   function podeTela(k) {
     // Acesso externo (contador): Fiscal, emissão de NF-e e o canal de contabilidade do chat.
     if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat' || (k === 'nfe' && H.pode('nfe.ver'));
     // RH: equipe, cultura e comunicação; nada de operação comercial nem financeiro.
-    if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'L:ponto'].includes(k);
-    if (k === 'implantacao') return true;
+    if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'ponto', 'agenda'].includes(k);
+    if (k === 'implantacao' || k === 'ponto' || k === 'agenda') return true;
+    if (k === 'equipe') return !!W.podeVerEquipe && W.podeVerEquipe(H.db, H.userKey);
+    if (k === 'config') return !!W.podeGerirEquipe && W.podeGerirEquipe(H.db, H.userKey);
+    const tabs0 = H.user && H.user.tabs;
+    if (TELA_ABA[k] && Array.isArray(tabs0) && !tabs0.includes(TELA_ABA[k])) return false;
     if (k.startsWith('L:')) {
       const aba = ABA_ATUAL[k.slice(2)], tabs = H.user && H.user.tabs;
-      if (k === 'L:config') return !!(H.user && (H.user.config || H.userKey === 'samir'));
-      if (k === 'L:agenda') return true;
       return !Array.isArray(tabs) || tabs.includes(aba);
     }
     return !TELA_CAP[k] || H.pode(TELA_CAP[k]);

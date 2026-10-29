@@ -5768,7 +5768,7 @@ function removerFinNF(id){
 function renderConfig(){
   $('cfgUsers').innerHTML=Object.entries(DB.users).map(([k,u])=>`<tr>
     <td><b>${esc(u.nome)}</b></td><td class="note">${esc(u.papel)}</td>
-    <td><input style="width:90px;text-align:center" value="${esc(u.pin)}" maxlength="4" onchange="DB.users['${k}'].pin=this.value;saveDB();toast('PIN de ${esc(u.nome.split(' ')[0])} atualizado')"></td>
+    <td><span style="font-size:11px;color:var(--mut)" title="O PIN não sai mais do servidor">${u.temPin?'definido':'—'} · troque no Hub (Equipe &amp; Acessos)</span></td>
     <td><input type="checkbox" style="width:auto" ${u.fin?'checked':''} ${k==='samir'?'disabled':''} onchange="DB.users['${k}'].fin=this.checked; DB.users['${k}'].tabs=this.checked?[...new Set([...DB.users['${k}'].tabs,'fin'])]:DB.users['${k}'].tabs.filter(t=>t!=='fin'); saveDB(); toast('Permissão atualizada')"></td>
     <td>${u.aprova?'✓ Sim':'—'}</td></tr>`).join('');
 }

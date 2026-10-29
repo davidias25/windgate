@@ -301,7 +301,6 @@ module.exports = function registrar(app, ctx) {
     }
     return n;
   }
-  if (process.env.NODE_ENV !== 'test') { const t = setInterval(() => rodada().catch(() => {}), 2 * 60 * 1000); if (t.unref) t.unref(); }
-
+  // Quem liga o relógio é o server.js, só quando o servidor sobe de verdade (não nos testes).
   return { rodada };
 };

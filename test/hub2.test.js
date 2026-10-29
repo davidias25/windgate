@@ -102,6 +102,17 @@ function bancoReal() {
   await post(hub2);
   const fim2 = await get();
   ok(!fim2.fin.some(l => l._id === 'hub-novo') && fim2.fin.some(l => l._id === 'legado-novo') && fim2.fin.length === fim.fin.length - 1, 'servidor tira só ele; o resto fica');
+
+  console.log('\n--- 3b. Endereço principal no Hub; sistema anterior em /antigo ---');
+  let rr = await fetch(base + '/', { redirect: 'manual' });
+  ok(rr.status === 302 && rr.headers.get('location') === '/hub/', '/ abre o Hub 2.0');
+  rr = await fetch(base + '/?aba=cotacoes', { redirect: 'manual' });
+  ok(rr.headers.get('location') === '/hub/#cotacoes', 'link antigo com ?aba= cai na tela equivalente do Hub');
+  rr = await fetch(base + '/antigo');
+  ok(rr.status === 200 && /WindGate <span>Cota<\/span>/.test(await rr.text()), 'o sistema anterior continua inteiro em /antigo');
+  await post({ settings: { prazosStatus: { embarcado: 80 } }, _removidos: {} });
+  const st3 = (await get()).settings;
+  ok(st3.prazosStatus.embarcado === 80 && st3.schema === 15, 'settings mesclado por chave: gravar os prazos não apaga o esquema');
   srv.close();
 
   console.log('\n--- 4. Contas do financeiro conferidas à mão ---');
@@ -279,7 +290,8 @@ function bancoReal() {
     const lido = acesso.paraLeitura(d, 'pedro');
     ok(!lido.ops && !lido.fin && !lido.crm && !lido.quotes && lido.hubNotas.length === 1 && lido.hubExtratos.length === 1, 'contador recebe só notas e extratos: nada de operações, financeiro, CRM ou cotações');
     ok(Object.values(lido.users).every(u => !u.pin), 'contador não recebe o PIN de ninguém');
-    { const ld = acesso.paraLeitura(d, 'davi'); ok(Object.keys(d).filter(c => c !== 'hubRH').every(c => ld[c] === d[c]) && !('hubRH' in ld), 'demais perfis continuam recebendo o banco como antes (só as anotações de RH ficam de fora)'); }
+    { const ld = acesso.paraLeitura(d, 'davi'); ok(Object.keys(d).filter(c => c !== 'hubRH' && c !== 'users').every(c => ld[c] === d[c]) && !('hubRH' in ld), 'demais perfis continuam recebendo o banco como antes (só as anotações de RH ficam de fora)');
+      ok(Object.entries(d.users).every(([k, u]) => !('pin' in ld.users[k]) && ld.users[k].temPin === !!u.pin && ld.users[k].nome === u.nome), 'usuários chegam sem o PIN, só com "tem PIN"'); }
     const ataque = { ops: [], fin: [{ _id: 'f1', valor: 0 }], settings: { zerado: true }, users: { samir: { pin: '0' } }, hubNotas: [{ _id: 'n1', chave: '1', status: 'lancada' }], _removidos: { f2: Date.now(), n9: 1, x1: Date.now() } };
     const filtrado = acesso.paraGravacao(d, ataque, 'pedro');
     ok(!filtrado.fin && !filtrado.settings && !filtrado.users && !filtrado.ops && filtrado.hubNotas.length === 1, 'o que o contador manda fora de notas/extratos é descartado');

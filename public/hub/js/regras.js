@@ -83,7 +83,7 @@
   /* Gravação parcial: o Hub só envia o que ELE mudou desde a última leitura.
      Assim uma aba aberta há tempo não devolve ao servidor cópias velhas de
      registros que outra pessoa alterou nesse meio-tempo. */
-  const OBJETOS_SYNC = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel'];
+  const OBJETOS_SYNC = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel', 'settings'];
   function fotografarConteudo(db) {
     const base = { col: {}, obj: {} };
     COLECOES_SYNC.forEach(k => { const m = new Map(); (db[k] || []).forEach(r => { if (r && r._id) m.set(r._id, JSON.stringify(r)); }); base.col[k] = m; });

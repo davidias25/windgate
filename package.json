@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js && node test/historico.test.js && node test/hub2.test.js && node test/comex.test.js && node test/nfe.test.js",
+    "test": "node test/server.test.js && node test/recorrencia.test.js && node test/triangular.test.js && node test/concluidas.test.js && node test/crmdocs.test.js && node test/ponto.test.js && node test/historico.test.js && node test/hub2.test.js && node test/comex.test.js && node test/nfe.test.js && node test/cotacoes.test.js && node test/fretes.test.js && node test/agenda.test.js && node test/equipe.test.js && node test/pins.test.js",
     "test:comex": "node test/comex.test.js",
     "test:recorrencia": "node test/recorrencia.test.js",
     "verificar:filtros": "node scripts/verificar-filtros.js",
@@ -21,7 +21,13 @@
     "historico": "node scripts/historico.js",
     "copiar:teste": "node scripts/copiar-para-teste.js",
     "test:hub2": "node test/hub2.test.js",
-    "test:nfe": "node test/nfe.test.js"
+    "test:nfe": "node test/nfe.test.js",
+    "test:cotacoes": "node test/cotacoes.test.js",
+    "test:fretes": "node test/fretes.test.js",
+    "test:agenda": "node test/agenda.test.js",
+    "test:equipe": "node test/equipe.test.js",
+    "gerar:cotacao-hub": "node scripts/gerar-cotacao-hub.js",
+    "test:pins": "node test/pins.test.js"
   },
   "keywords": [
     "windgate",

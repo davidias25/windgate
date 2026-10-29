@@ -352,3 +352,6 @@ tr.clic:hover td{background:var(--surface-2)}
 /* NF-e: faixa de produção e pendências que bloqueiam a transmissão */
 .banner.crit{background:var(--crit-soft);border-color:var(--crit);color:var(--crit)}
 .list.pend .row{color:var(--crit)}
+/* Proposta: versão de impressão (reserva quando o PDF não sai). Só ela vai para o papel. */
+#printProposal{display:none}
+@media print{body>*:not(#printProposal){display:none!important}#printProposal{display:block}}
