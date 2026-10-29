@@ -16,15 +16,19 @@ const fs = require('fs');
 const path = require('path');
 
 const raiz = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(raiz, 'public/index.html'), 'utf8');
+// Quebra de linha normalizada: o Git do Windows pode trocar LF por CRLF no checkout.
+const lf = t => t.replace(/\r\n/g, '\n');
+const html = lf(fs.readFileSync(path.join(raiz, 'public/index.html'), 'utf8'));
 
 function trechoProposta(texto) {
+  texto = lf(texto);
   const ini = texto.indexOf('/* ============================================================\n   PROPOSTA EM PDF');
   const fim = texto.indexOf('/* ============================================================\n   INIT');
   if (ini < 0 || fim < 0) throw new Error('Marcadores da proposta não encontrados.');
   return texto.slice(ini, fim);
 }
 function bibliotecaJsPDF(texto) {
+  texto = lf(texto);
   const m = /<script>(\/\* jsPDF [\d.]+ embutido \*\/[\s\S]*?)<\/script>/.exec(texto);
   if (!m) throw new Error('jsPDF embutido não encontrado.');
   return m[1];
@@ -56,4 +60,4 @@ ${proposta}/* ==== FIM proposta-pdf ==== */
 }
 
 if (require.main === module) { const r = gerar(); console.log(`Proposta copiada (${r.proposta} caracteres) e jsPDF extraído.`); }
-module.exports = { trechoProposta, bibliotecaJsPDF, gerar };
+module.exports = { trechoProposta, bibliotecaJsPDF, gerar, lf };

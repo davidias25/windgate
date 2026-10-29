@@ -73,7 +73,8 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   ok(igual(Rm.custoReal, 55300 + 5972.4 + 1161.3 + 5336.45 - 1161.3 - 5336.45) && igual(Rm.preco, Rm.custoReal * 1.25) && Rm.st === 0, 'custo real = compra + impostos − créditos de PIS/COFINS (sem saída); preço = custo + 25%; sem DIFAL');
 
   console.log('\nCópia do motor triangular:');
-  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8'), js = fs.readFileSync(path.join(__dirname, '../public/hub/js/cotacao-regras.js'), 'utf8');
+  const semCR = t => t.replace(/\r\n/g, '\n');   // o Git do Windows pode trocar LF por CRLF no checkout
+  const html = semCR(fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')), js = semCR(fs.readFileSync(path.join(__dirname, '../public/hub/js/cotacao-regras.js'), 'utf8'));
   const corte = t => t.slice(t.indexOf('/* ==== INÍCIO triangular-core'), t.indexOf('/* ==== FIM triangular-core ==== */')).trimEnd();
   ok(corte(html).length > 10000 && corte(html) === corte(js), 'o trecho triangular-core do Hub é idêntico ao do index.html');
   ok(JSON.stringify(/const ICMS_INTERNO=\{([\s\S]*?)\};/.exec(html)[1].replace(/\s/g, '').split(',').map(x => x.split(':')).map(([u, v]) => [u, +v])) === JSON.stringify(Object.entries(C.ICMS_INTERNO)), 'tabela de ICMS interno por UF igual à do sistema atual');
@@ -114,10 +115,10 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
 
   console.log('\nProposta em PDF: Hub × sistema atual:');
   const ger = require('../scripts/gerar-cotacao-hub.js');
-  const pdfHub = fs.readFileSync(path.join(__dirname, '../public/hub/js/cotacao-pdf.js'), 'utf8');
+  const pdfHub = semCR(fs.readFileSync(path.join(__dirname, '../public/hub/js/cotacao-pdf.js'), 'utf8'));
   const entreMarcas = t => t.slice(t.indexOf('/* ==== INÍCIO proposta-pdf ==== */\n') + 36, t.indexOf('/* ==== FIM proposta-pdf ==== */'));
   ok(entreMarcas(pdfHub) === ger.trechoProposta(html), 'o gerador da proposta no Hub é cópia fiel do index.html (se mudar lá, rode scripts/gerar-cotacao-hub.js)');
-  ok(fs.readFileSync(path.join(__dirname, '../public/hub/vendor/jspdf.umd.min.js'), 'utf8') === ger.bibliotecaJsPDF(html), 'mesma biblioteca jsPDF do sistema atual');
+  ok(semCR(fs.readFileSync(path.join(__dirname, '../public/hub/vendor/jspdf.umd.min.js'), 'utf8')) === ger.bibliotecaJsPDF(html), 'mesma biblioteca jsPDF do sistema atual');
   /* PDF de mentira que anota cada traço: os dois geradores têm de desenhar exatamente a mesma coisa. */
   const fakePDF = log => function () { const doc = this; ['setFillColor', 'rect', 'addImage', 'setTextColor', 'setFont', 'setFontSize', 'text', 'setDrawColor', 'setLineWidth', 'line', 'circle', 'addPage', 'setPage', 'save']
     .forEach(m => { doc[m] = (...a) => { log.push(m + JSON.stringify(a)); return doc; }; });
