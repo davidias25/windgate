@@ -671,7 +671,7 @@ app.post('/api/fiscal/sefaz', auth.exigirTokenSeAtiva, async (req, res) => {
     let novas = [];
     for (const [empresa, cnpj] of Object.entries(cnpjs)) {
       if (!cnpj) continue;
-      const lista = await fiscal.buscarRecebidasFocus(cnpj);
+      const lista = await fiscal.buscarRecebidasFocus(cnpj, null, null, require('./services/nfe.service').tokenDe(empresa));
       novas = novas.concat(lista.map(n => fiscal.novaNota(Object.assign(n, { tipo: 'entrada', empresa }), 'sefaz')));
     }
     const entram = fiscal.semRepetidas(memoryDB.hubNotas || [], novas);
@@ -748,6 +748,21 @@ if (email.configurado() && process.env.NODE_ENV !== 'test') setInterval(() => le
 /* ---------- Comércio exterior: dólar, rastreio, bancos, portais, MCP ---------- */
 require('./routes/comex.routes')(app, { auth, acesso, gravarParcial, podeOperar, quemChat, ia, pronto: () => bancoPronto, db: () => memoryDB });
 
+/* ---------- Emissão de NF-e (Focus NFe) ---------- */
+const nfeFocus = require('./services/nfe.service');
+/* XML e DANFE autorizados vão para o Storage; sem Storage, ficam em /uploads deste servidor. */
+async function salvarArquivoNFe(nome, conteudo, tipo) {
+  const arq = Date.now() + '-' + nome.replace(/[^\w.-]/g, '_'), tmp = path.join(require('os').tmpdir(), arq);
+  fs.writeFileSync(tmp, conteudo);
+  try {
+    const r = await uploadParaSupabase(tmp, nome, tipo);
+    if (r && r.publicUrl) return r.publicUrl;
+    fs.copyFileSync(tmp, path.join(__dirname, '../uploads', arq));
+    return '/uploads/' + arq;
+  } finally { fs.unlink(tmp, () => {}); }
+}
+require('./routes/nfe.routes')(app, { auth, acesso, gravarParcial, quemChat, pronto: () => bancoPronto, db: () => memoryDB, salvarArquivo: salvarArquivoNFe });
+
 /* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
 app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;
@@ -757,7 +772,9 @@ app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
     ia: { ok: tem('ANTHROPIC_API_KEY'), detalhe: 'API do Claude: pedidos, comprovantes, invoices' },
     tracking: { ok: tem('SHIPSGO_API_KEY'), detalhe: 'ShipsGo: posição por contêiner' },
     portalUnico: { ok: portalUnico.configurado(), detalhe: `certificado A1 · ambiente ${portalUnico.cfg().ambiente}` },
-    nfe: { ok: tem('FOCUS_NFE_TOKEN'), detalhe: `Focus NFe · ${process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'produção' : 'homologação'}` },
+    nfe: { ok: fiscal.focusAtivo(), detalhe: `Focus NFe · notas recebidas · ${process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'produção' : 'homologação'}` },
+    nfeEmissao: { ok: nfeFocus.configurado('WindGate') || nfeFocus.configurado('JeT'),
+      detalhe: `Focus NFe · ${nfeFocus.ambiente() === 'producao' ? 'PRODUÇÃO' : 'homologação (sem valor fiscal)'} · SF ${nfeFocus.configurado('WindGate') ? 'ok' : 'sem token'} · JeT ${nfeFocus.configurado('JeT') ? 'ok' : 'sem token'} · aviso ${tem('FOCUS_WEBHOOK_TOKEN') ? 'ligado' : 'desligado (consulta a cada 2 min)'}` },
     emailNotas: { ok: email.configurado() || tem('FISCAL_WEBHOOK_TOKEN'), detalhe: email.configurado() ? 'caixa ' + process.env.IMAP_USUARIO + ' lida a cada 10 min' : 'caixa de notas do domínio windgate.com.br (IMAP)' },
     bancos: { ok: tem('SANTANDER_CLIENT_ID') || tem('ITAU_CLIENT_ID'), detalhe: 'extrato automático Santander/Itaú; hoje por OFX' },
     santander: { ok: require('./services/bancos.service').configurado('santander'), detalhe: 'API de Saldo e Extrato (SF) · mTLS com certificado A1' },

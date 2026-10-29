@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -342,13 +342,15 @@
      fin.ver = painel, DRE, contas e resultado · fin.lancar = registrar e dar baixa
      fin.excluir · fin.autorizar = autorizar pagamento · fin.resultado = margem por operação
      equipe.ver = desempenho da equipe · recado.outros = fixar recado na torre de outra pessoa
-     torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês */
+     torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês
+     nfe.ver = ver as NF-e emitidas · nfe.emitir = montar, conferir, transmitir, cancelar e corrigir NF-e
+     (só Operações e o contador emitem; a diretoria acompanha) */
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver'],
       torre: ['excecoes', 'resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver', 'nfe.emitir'],
       torre: ['excecoes', 'resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
       caps: ['fin.lancar', 'sourcing.ver'],
@@ -356,7 +358,7 @@
     rh: { nome: 'Pessoas & Cultura (RH)', foco: 'Desenvolvimento da equipe, cultura, comunicação interna e ponto',
       caps: ['equipe.ver', 'rh.ver', 'chat.aviso', 'recado.outros', 'cultura.editar', 'reuniao.editar'], torre: ['equipe', 'recados', 'tarefas', 'alertas'], restrito: true },
     contador: { nome: 'Contabilidade (acesso externo)', foco: 'Notas fiscais e extratos do trimestre para a apuração',
-      caps: ['fiscal.ver'], torre: [], externo: true },
+      caps: ['fiscal.ver', 'nfe.ver', 'nfe.emitir'], torre: [], externo: true },
     documentos: { nome: 'Documentação & Atendimento', foco: 'Documentos das operações e contato com clientes',
       caps: ['crm.ver', 'pedidos.ver', 'sourcing.ver'],
       torre: ['excecoes', 'resumo', 'coletar', 'clientes', 'vendas', 'tarefas', 'recados', 'alertas', 'etapas', 'operacoes'] }

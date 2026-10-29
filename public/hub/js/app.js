@@ -83,6 +83,17 @@
     }
   }
 
+  /* Registro que o SERVIDOR acabou de gravar (ex.: NF-e): entra na tela já
+     como sincronizado, para não voltar ao servidor como alteração local. */
+  H.aplicarDoServidor = function (colecao, rec) {
+    if (!H.db || !rec || !rec._id) return;
+    const l = Array.isArray(H.db[colecao]) ? H.db[colecao] : (H.db[colecao] = []);
+    const i = l.findIndex(x => x && x._id === rec._id);
+    if (i >= 0) l[i] = rec; else l.unshift(rec);
+    if (base) W.absorver(base, { [colecao]: [rec] });
+    H.conhecidos = W.fotografarIds(H.db);
+  };
+
   /* Cópia de segurança do que não subiu (queda de rede, sessão expirada). */
   const CHAVE_PEND = 'wg_hub_pendente';
   function guardarPendente(db) {
@@ -161,7 +172,7 @@
   const MENU = [
     { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['conteineres', 'Contêineres & free time'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['portais', 'Portais externos'], ['dashops', 'Desempenho da empresa']] },
     { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['L:cotacoes', 'Cotações & Propostas'], ['contratos', 'Contratos']] },
-    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['I:nfe', 'NF-e (DUIMP)']] },
+    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['nfe', 'NF-e (emissão)']] },
     { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['catalogo', 'Catálogo & NCM'], ['L:frete', 'Fretes & Benchmark'], ['compliance', 'Compliance & habilitações']] },
     { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['L:agenda', 'Agenda & Tarefas'], ['L:ponto', 'Ponto']] },
     { g: 'Gestão', itens: [['L:gestao', 'Gestão do Mês (antigo)'], ['L:org', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['L:config', 'Configurações']] }
@@ -191,11 +202,11 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', 'I:nfe': 'fin.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver' };
+  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', nfe: 'nfe.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver' };
   const ABA_ATUAL = { cotacoes: 'cotacoes', crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros', frete: 'frete', agenda: 'agenda', gestao: 'gestao', ponto: 'ponto', org: 'org', config: 'config' };
   function podeTela(k) {
-    // Acesso externo (contador): só Fiscal e o canal de contabilidade do chat.
-    if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat';
+    // Acesso externo (contador): Fiscal, emissão de NF-e e o canal de contabilidade do chat.
+    if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat' || (k === 'nfe' && H.pode('nfe.ver'));
     // RH: equipe, cultura e comunicação; nada de operação comercial nem financeiro.
     if (H.db && H.userKey && H.perfil().id === 'rh') return ['rh', 'cultura', 'chat', 'reuniao', 'produtividade', 'L:ponto'].includes(k);
     if (k === 'implantacao') return true;

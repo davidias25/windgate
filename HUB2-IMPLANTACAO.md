@@ -19,6 +19,15 @@ Testes: `npm test` → 744 verificações (19 em `test/historico.test.js`, 73 em
 
 Os dois sistemas convivem: `/` continua sendo o sistema atual e `/hub` o novo. Quando a equipe aprovar, `/` passa a abrir o Hub 2.0.
 
+## Emissão de NF-e (Focus NFe)
+
+Tela **NF-e (emissão)** no Hub, mais o bloco "Notas fiscais da operação" na ficha. Só **Davi e Pedro** emitem (`nfe.emitir`); o Samir acompanha; Matheus, Ívina e Oneide não veem. Coleção nova `hubNFe` (nada existente foi renomeado). A nota é montada no servidor: o contador não recebe operações, cotações nem CRM.
+
+- **Cenários A a G** em `public/hub/js/nfe-regras.js`, editáveis pela diretoria em Cenários fiscais. São **sugestões a validar** pelo Pedro e pela Gil: a tela mostra "a validar" e, em produção, nota de cenário não conferido não sai.
+- **Variáveis no Render:** `FOCUS_NFE_TOKEN_SF`, `FOCUS_NFE_TOKEN_JET` (sem elas vale `FOCUS_NFE_TOKEN`), `FOCUS_NFE_AMBIENTE=homologacao` e `FOCUS_WEBHOOK_TOKEN` (um texto longo qualquer). Na Focus, cadastrar o gatilho `nfe` de cada CNPJ para `https://<servidor>/api/webhooks/focus/<FOCUS_WEBHOOK_TOKEN>`. Sem o gatilho, o sistema consulta a cada 2 minutos.
+- **Antes de emitir:** em NF-e › Configuração, cadastrar os dados da JeT (destinatária na triangular) e conferir o ICMS interno por UF. No CRM, completar o endereço, o código IBGE e a IE dos clientes.
+- **Ordem do teste:** em homologação, uma nota de cada cenário com uma operação real (OP20), XML e DANFE conferidos com o Pedro, um cancelamento e uma carta de correção. Só então `FOCUS_NFE_AMBIENTE=producao`, e só então cancelar o Maino.
+
 ## Passo a passo (Davi)
 
 1. **Backup antes de tudo:** no sistema atual, Config → Backup & dados → Exportar backup completo. Guardar como `backup-antes.json`.

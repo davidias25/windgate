@@ -25,12 +25,13 @@ function semRepetidas(existentes, novas) {
 }
 
 /* ---------- Focus NFe: NF-e recebidas (MDe) ---------- */
-const focusAtivo = () => !!process.env.FOCUS_NFE_TOKEN;
-async function buscarRecebidasFocus(cnpj, versao, fetchImpl) {
+const focusAtivo = () => !!(process.env.FOCUS_NFE_TOKEN || process.env.FOCUS_NFE_TOKEN_SF || process.env.FOCUS_NFE_TOKEN_JET);
+/* `token` é o da empresa (FOCUS_NFE_TOKEN_SF/_JET); sem ele vale o FOCUS_NFE_TOKEN de sempre. */
+async function buscarRecebidasFocus(cnpj, versao, fetchImpl, token) {
   const f = fetchImpl || fetch;
   const base = process.env.FOCUS_NFE_AMBIENTE === 'producao' ? 'https://api.focusnfe.com.br' : 'https://homologacao.focusnfe.com.br';
   const r = await f(`${base}/v2/nfes_recebidas?cnpj=${soDig(cnpj)}${versao ? '&versao=' + versao : ''}`, {
-    headers: { Authorization: 'Basic ' + Buffer.from(process.env.FOCUS_NFE_TOKEN + ':').toString('base64') } });
+    headers: { Authorization: 'Basic ' + Buffer.from((token || process.env.FOCUS_NFE_TOKEN) + ':').toString('base64') } });
   if (!r.ok) throw new Error(`Focus NFe respondeu ${r.status}`);
   const lista = await r.json();
   return (Array.isArray(lista) ? lista : []).map(x => ({

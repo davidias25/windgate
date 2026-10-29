@@ -8,13 +8,40 @@
  */
 const W = require('../../public/hub/js/regras.js');
 
-const CONTADOR_COLECOES = ['hubNotas', 'hubExtratos'];
+const CONTADOR_COLECOES = ['hubNotas', 'hubExtratos', 'hubNFe'];
 
 function perfil(db, k) { return W.perfilDe(db || {}, k).id; }
 const ehContador = (db, k) => !!k && perfil(db, k) === 'contador';
 
 /* RH vê a equipe e o andamento, nunca dinheiro: sem financeiro, cotações (custos e margens), notas nem extratos. */
-const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos', 'hubCambio'];
+const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos', 'hubCambio', 'hubNFe'];
+
+/* NF-e emitidas: só leem Davi, o contador e a diretoria (nfe.ver). O registro é
+   do SERVIDOR — status, chave, protocolo e o JSON da nota só mudam pelas rotas
+   /api/nfe/*. Pelo /api/db quem emite grava apenas a observação de uma nota que
+   já existe; nota nova, troca de status e exclusão que vierem de um navegador
+   (inclusive do sistema antigo, com cópia velha) são descartadas. A
+   configuração e os cenários fiscais também só mudam pelas rotas. */
+const NFE_PAINEL = ['_nfeConfig', '_nfeCenarios'];
+const podeNFe = (db, k, cap) => k === '(sem-auth)' || W.pode(db || {}, k, cap);
+function semNFe(db, k) { if (!db || !Array.isArray(db.hubNFe) || podeNFe(db, k, 'nfe.ver')) return db; const out = Object.assign({}, db); delete out.hubNFe; return out; }
+function gravacaoNFe(atual, recebido, k) {
+  if (!recebido || typeof recebido !== 'object') return recebido;
+  const out = Object.assign({}, recebido);
+  if (Array.isArray(recebido.hubNFe)) {
+    const srv = new Map(((atual && atual.hubNFe) || []).filter(n => n && n._id).map(n => [n._id, n]));
+    const lista = podeNFe(atual, k, 'nfe.emitir') ? recebido.hubNFe.filter(n => n && srv.has(n._id)).map(n => Object.assign({}, srv.get(n._id), typeof n.obs === 'string' ? { obs: n.obs.slice(0, 500) } : {})) : [];
+    if (lista.length) out.hubNFe = lista; else delete out.hubNFe;
+  }
+  if (recebido._removidos) {
+    const ids = new Set(((atual && atual.hubNFe) || []).map(n => n && n._id).filter(Boolean));
+    out._removidos = {}; Object.entries(recebido._removidos).forEach(([id, ts]) => { if (!ids.has(id)) out._removidos[id] = ts; });
+  }
+  if (recebido.hubPainel && typeof recebido.hubPainel === 'object' && NFE_PAINEL.some(c => c in recebido.hubPainel)) {
+    out.hubPainel = Object.assign({}, recebido.hubPainel); NFE_PAINEL.forEach(c => { delete out.hubPainel[c]; });
+  }
+  return out;
+}
 const ehRH = (db, k) => !!k && perfil(db, k) === 'rh';
 function semPins(users) { const out = {}; Object.entries(users || {}).forEach(([key, u]) => { const c = Object.assign({}, u); delete c.pin; out[key] = c; }); return out; }
 
@@ -30,7 +57,7 @@ function gravacaoRH(atual, recebido, k) {
 }
 
 /** O que o usuário pode ler de GET /api/db. */
-function paraLeitura(db, k) { return semRH(semDinheiroDocs(paraLeitura0(db, k), k), k); }
+function paraLeitura(db, k) { return semNFe(semRH(semDinheiroDocs(paraLeitura0(db, k), k), k), k); }
 
 /* Documentação & Atendimento (Ívina) também não vê dinheiro: nem financeiro,
    nem cotações (custo e margem), nem câmbio, nem o valor dos negócios. Na
@@ -71,14 +98,14 @@ function paraLeitura0(db, k) {
   });
   const ids = new Set();
   const hp = db.hubPainel || {};
-  const out = { users, _removidos: {}, hubPainel: { _fiscal: hp._fiscal || {}, _fiscalContador: hp._fiscalContador || {} } };
+  const out = { users, _removidos: {}, hubPainel: { _fiscal: hp._fiscal || {}, _fiscalContador: hp._fiscalContador || {}, _nfeConfig: hp._nfeConfig || {}, _nfeCenarios: hp._nfeCenarios || {} } };
   CONTADOR_COLECOES.forEach(c => { out[c] = Array.isArray(db[c]) ? db[c] : []; out[c].forEach(r => r && r._id && ids.add(r._id)); });
   Object.entries(db._removidos || {}).forEach(([id, ts]) => { if (ids.has(id)) out._removidos[id] = ts; });
   return out;
 }
 
 /** O que o usuário pode gravar em POST /api/db (o resto é descartado). */
-function paraGravacao(atual, recebido, k) { return gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k); }
+function paraGravacao(atual, recebido, k) { return gravacaoNFe(atual, gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k), k); }
 function paraGravacao0(atual, recebido, k) {
   if (recebido && ehRH(atual, k)) {
     const out = Object.assign({}, recebido);
@@ -96,10 +123,10 @@ function paraGravacao0(atual, recebido, k) {
   });
   // Do painel, o contador só grava a própria confirmação de recebimento/apuração.
   if (recebido.hubPainel && recebido.hubPainel._fiscalContador) out.hubPainel = { _fiscalContador: recebido.hubPainel._fiscalContador };
-  // Exclusão só vale para nota/extrato; tombstone de qualquer outro registro é ignorado.
+  // Exclusão só vale para nota/extrato (NF-e emitida nunca se exclui: ver gravacaoNFe); tombstone de qualquer outro registro é ignorado.
   out._removidos = {};
   Object.entries(recebido._removidos || {}).forEach(([id, ts]) => { if (ids.has(id)) out._removidos[id] = ts; });
   return out;
 }
 
-module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES };
+module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, paraLeitura, paraGravacao, CONTADOR_COLECOES, SEM_DINHEIRO };
