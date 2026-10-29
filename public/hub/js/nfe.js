@@ -54,7 +54,7 @@
           <select class="inp" id="nop" aria-label="Operação"><option value="">Todas as operações</option>${ops.concat(filtro.op && !ops.includes(filtro.op) ? [filtro.op] : []).map(o => `<option ${filtro.op === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
           <button class="btn" id="ncen">Cenários fiscais${aValidar ? ` · ${aValidar} a validar` : ''}</button>
           ${H.perfil().id === 'operacoes' ? '<button class="btn" id="ncfg">Configuração</button>' : ''}
-          ${ctx.podeEmitir ? '<button class="btn pri" id="nnova">+ Nova nota</button>' : ''}</div></div>
+          ${ctx.podeEmitir ? '<button class="btn blue" id="nduimp">Importar DUIMP</button><button class="btn pri" id="nnova">+ Nova nota</button>' : ''}</div></div>
       ${faixaAmbiente()}
       ${!ctx.tokens.WindGate || !ctx.tokens.JeT ? `<div class="banner" style="margin-top:8px">Falta o token da Focus ${[!ctx.tokens.WindGate && 'da SF (FOCUS_NFE_TOKEN_SF)', !ctx.tokens.JeT && 'da JeT (FOCUS_NFE_TOKEN_JET)'].filter(Boolean).join(' e ')} no Render.</div>` : ''}
       <div class="kpis" style="margin-top:12px">
@@ -76,7 +76,7 @@
     el.querySelector('#nop').onchange = e => { filtro.op = e.target.value; H.estado.param = filtro.op || null; H.render(); };
     el.querySelectorAll('[data-n]').forEach(r => r.onclick = () => detalhe(r.dataset.n));
     const on = (s, fn) => { const x = el.querySelector(s); if (x) x.onclick = fn; };
-    on('#nnova', nova); on('#ncen', telaCenarios); on('#ncfg', telaConfig);
+    on('#nnova', nova); on('#ncen', telaCenarios); on('#ncfg', telaConfig); on('#nduimp', () => importarDuimp(filtro.op));
     if (abrir) setTimeout(() => detalhe(abrir), 0);
   };
 
@@ -91,7 +91,8 @@
       <p class="note" id="ncobs" style="margin-top:8px"></p>
       <p class="note">O sistema preenche itens, destinatário e DUIMP com o que há na operação, na cotação, no Catálogo de NCM e no CRM. Você corrige o que faltar na tela seguinte.</p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="ncok">Montar nota</button>');
-    const atual = () => { const c = cens.find(x => x.k === v(m, '#ncn')) || {}; m.querySelector('#ngref').hidden = m.querySelector('#ngfin').hidden = c.k !== 'G'; m.querySelector('#ncobs').textContent = c.obs || ''; };
+    const atual = () => { const c = cens.find(x => x.k === v(m, '#ncn')) || {}; m.querySelector('#ngref').hidden = m.querySelector('#ngfin').hidden = c.k !== 'G';
+      m.querySelector('#ncobs').innerHTML = c.k === 'A' ? '<b>A NF de entrada nasce da DUIMP.</b> Use <b>Importar DUIMP</b>: o rascunho é criado sozinho, com itens, valores e tributos federais da DUIMP. Aqui só se abre a nota de uma DUIMP já importada.' : esc(c.obs || ''); };
     m.querySelector('#ncn').onchange = atual; atual();
     m.querySelector('#ncok').onclick = async () => {
       const b = m.querySelector('#ncok'); b.disabled = true; b.textContent = 'Montando…';
@@ -133,6 +134,7 @@
           ${dif ? `<td class="num">${x.icms_valor_uf_destino != null ? `${W.fmtBRL(x.icms_valor_uf_destino)}<br><small class="note">${x.icms_aliquota_interna_uf_destino}% s/ ${W.fmtBRL(x.icms_base_calculo_uf_destino)}</small>` : '—'}</td>` : ''}
           <td>CST ${esc(x.pis_situacao_tributaria)}${x.pis_valor != null ? ` · ${W.fmtBRL((x.pis_valor || 0) + (x.cofins_valor || 0))}` : ''}</td>${py.tipo_documento === 0 ? `<td class="num">${W.fmtBRL(x.valor_outras_despesas || 0)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
       <table class="mini" style="margin-top:8px"><tbody><tr><td>Produtos</td><td class="num">${W.fmtBRL(t.produtos || 0)}</td><td>IPI</td><td class="num">${W.fmtBRL(t.ipi || 0)}</td><td>ICMS</td><td class="num">${W.fmtBRL(t.icms || 0)}</td>${t.ii ? `<td>II</td><td class="num">${W.fmtBRL(t.ii)}</td>` : ''}${t.difal ? `<td>DIFAL</td><td class="num">${W.fmtBRL(t.difal)}</td>` : ''}<td><b>Total</b></td><td class="num"><b>${W.fmtBRL(t.total || 0)}</b></td></tr></tbody></table>
+      ${n.duimp && n.duimp.numero ? `<div class="banner" style="margin-top:10px">Nota gerada da <b>DUIMP ${esc(n.duimp.numero)} · versão ${esc(n.duimp.versao)}</b>${(n.ops || []).length > 1 ? ' · operações ' + esc(n.ops.join(', ')) : ''}. Itens, quantidades, valores, tributos federais, exportador e dados da declaração vêm da DUIMP e não se editam. <button class="btn sm" id="dDu">Ver DUIMP</button></div>` : ''}
       ${di ? `<h3 class="h3" style="margin-top:12px">DUIMP</h3><p class="note mono">${esc(di.numero || '—')} · registro ${W.dataBR(di.data_registro)} · ${esc(di.local_desembaraco_aduaneiro || '')}/${esc(di.uf_desembaraco_aduaneiro || '')} · desembaraço ${W.dataBR(di.data_desembaraco_aduaneiro)} · intermediação ${di.forma_intermedio}${di.cnpj ? ' · terceiro ' + esc(di.cnpj) + '/' + esc(di.uf_terceiro || '') : ''}</p>` : ''}
       ${py.informacoes_adicionais_contribuinte ? `<h3 class="h3" style="margin-top:12px">Informações complementares</h3><p class="note">${esc(py.informacoes_adicionais_contribuinte)}</p>` : ''}
       ${(n.cartas || []).length ? `<h3 class="h3" style="margin-top:12px">Cartas de correção</h3><div class="list">${n.cartas.map(c => `<div class="row"><div><b>CC-e ${c.numero}</b> · ${W.dataBR(c.em)} · ${esc(quem(c.por))}<br><small class="note">${esc(c.correcao)}</small></div><div class="btns">${c.pdfLink ? `<a class="btn ghost sm" href="${esc(c.pdfLink)}" target="_blank" rel="noopener">PDF</a>` : ''}${c.xmlLink ? `<a class="btn ghost sm" href="${esc(c.xmlLink)}" target="_blank" rel="noopener">XML</a>` : ''}</div></div>`).join('')}</div>` : ''}
@@ -155,7 +157,8 @@
       H.toast(esc(r.ok ? (typeof okMsg === 'function' ? okMsg(r.j.nota) : okMsg) : (r.j.message || 'Não deu certo.')));
       H.fecharModal(); H.render(); if (r.j.nota || r.ok) detalhe(id);
     };
-    on('#dEd', () => editar(n));
+    on('#dEd', () => n.cenario === 'A' && n.duimp ? editarEntrada(n) : editar(n));
+    on('#dDu', () => verDuimp(n.duimp.numero));
     on('#dCf', e => acao(`/api/nfe/${n._id}/conferir`, {}, 'Nota conferida.', e.target));
     on('#dTx', () => {
       const c = H.modal('Transmitir à SEFAZ', `${faixaAmbiente()}<p style="margin-top:10px">Transmitir a nota <b class="mono">${esc(n.ref)}</b> de ${W.fmtBRL(t.total || 0)} para ${esc((n.destinatario || {}).nome || '')}?</p><p class="note">A referência é única: transmitir de novo só consulta a situação, nunca emite outra nota.</p>`,
@@ -185,6 +188,86 @@
       const c = H.modal('Enviar NF-e por e-mail', `<div class="fields"><div class="f w4"><label class="lbl" for="em1">E-mails (separados por vírgula, até 10)</label><input id="em1" value="${esc(((n.entrada || {}).destinatario || {}).email || '')}"></div></div>`, '<button class="btn" data-x>Voltar</button><button class="btn pri" id="emk">Enviar</button>');
       c.querySelector('#emk').onclick = e => acao(`/api/nfe/${n._id}/email`, { emails: v(c, '#em1').split(/[,;\s]+/).filter(Boolean) }, 'E-mail agendado pela Focus.', e.target);
     });
+  }
+
+  /* ---------------- DUIMP ---------------- */
+  /* Importa a DUIMP do Portal Único: grava o retrato na operação e cria (ou remonta) a NF de entrada. */
+  function importarDuimp(opPreset) {
+    const ops = (ctx && ctx.ops) || (H.db.ops || []).filter(o => o && o.id).map(o => ({ id: o.id, cliente: o.cliente || '', duimp: o.duimp || '' }));
+    const op0 = ops.find(o => o.id === opPreset) || ops.find(o => o.duimp) || ops[0] || {};
+    const m = H.modal('Importar DUIMP', `<p class="note" style="margin-bottom:10px">Consulta a DUIMP no Portal Único (só leitura: nada é registrado) pela versão vigente, com itens, tributos federais e o exportador do Catálogo. Em seguida a NF de entrada é montada sozinha.</p>
+      <div class="fields"><div class="f w2"><label class="lbl" for="du_op">Operação</label><select id="du_op">${ops.map(o => `<option value="${esc(o.id)}" data-du="${esc(o.duimp || '')}" ${o.id === op0.id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.cliente || '')}${o.duimp ? ' · DUIMP ' + esc(o.duimp) : ''}</option>`).join('')}</select></div>
+      <div class="f w2"><label class="lbl" for="du_num">Número da DUIMP</label><input id="du_num" class="mono" value="${esc(op0.duimp || '')}" placeholder="26BR0000012345-6"></div></div>
+      <p class="note" style="margin-top:8px">Se a mesma DUIMP serve a mais de uma operação, cadastre o número em cada uma; depois de importar, cada item é atribuído à sua operação.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="du_ok">Importar</button>');
+    m.querySelector('#du_op').onchange = e => { const o = e.target.selectedOptions[0]; if (o && o.dataset.du) m.querySelector('#du_num').value = o.dataset.du; };
+    m.querySelector('#du_ok').onclick = async ev => {
+      ev.target.disabled = true; ev.target.textContent = 'Consultando o Portal…';
+      const r = await post('/api/duimp/' + encodeURIComponent(v(m, '#du_op')) + '/importar', { numero: v(m, '#du_num') }).catch(() => ({ ok: false, j: { message: 'Sem conexão.' } }));
+      if (!r.ok) { ev.target.disabled = false; ev.target.textContent = 'Importar'; return H.toast(esc(r.j.message || 'Não deu para importar.')); }
+      H.fecharModal(); H.render();
+      const j = r.j;
+      const rm = H.modal('DUIMP importada', `<p><b class="mono">${esc(j.numero)}</b> · versão <b>${esc(j.versao)}</b> · ${j.itens} item(ns) · ${esc((j.ops || []).join(', '))}</p>
+        ${j.aviso ? `<div class="banner" style="margin-top:8px"><b>${esc(j.aviso)}</b>${(j.diferencas || []).length ? '<br>' + j.diferencas.map(esc).join('<br>') : ''}</div>` : ''}
+        ${j.semOp ? `<div class="banner crit" style="margin-top:8px">${j.semOp} item(ns) sem operação: a DUIMP serve a mais de uma operação. Atribua cada item antes de conferir a nota.</div>` : ''}
+        ${j.notaIntocada ? `<div class="banner" style="margin-top:8px">${esc(j.notaIntocada)}</div>` : ''}
+        ${(j.conferencia || []).length ? `<h3 class="h3" style="margin-top:10px">DUIMP × cotação (avisos)</h3><div class="list">${j.conferencia.map(a => `<div class="row"><span class="note">${esc(a)}</span></div>`).join('')}</div>` : '<p class="note" style="margin-top:8px">DUIMP e cotação batem (diferenças até 1%).</p>'}`,
+        `<button class="btn" data-x>Fechar</button><button class="btn" id="dr_ver">Ver DUIMP e itens</button>${j.nota ? '<button class="btn pri" id="dr_nota">Abrir a NF de entrada</button>' : ''}`);
+      rm.querySelector('#dr_ver').onclick = () => { H.fecharModal(); verDuimp(j.numero); };
+      const bn = rm.querySelector('#dr_nota'); if (bn) bn.onclick = () => { H.fecharModal(); H.ir('nfe', 'n:' + j.nota._id); };
+    };
+  }
+  H.nfeImportarDuimp = importarDuimp;
+
+  /* Retrato da DUIMP: itens com tributos, atribuição de cada item à operação e conferência contra a cotação. */
+  async function verDuimp(numero) {
+    let j; try { j = await (await H.api('/api/duimp/' + encodeURIComponent(numero))).json(); } catch (e) { return H.toast('Não consegui abrir a DUIMP.'); }
+    if (!j.success) return H.toast(esc(j.message || 'DUIMP não importada.'));
+    const r = j.retrato, g = r.geral, varias = (j.ops || []).length > 1, emite = !!(ctx && ctx.podeEmitir) || H.pode('nfe.emitir');
+    const t = (it, k) => { const x = (it.tributos || {})[k]; return x ? W.fmtBRL(x.devido != null ? x.devido : x.aRecolher || 0) : '—'; };
+    const m = H.modal(`DUIMP ${g.numero} · versão ${r.versao}`, `<div class="fields">
+        <div class="f"><span class="lbl">Registro</span><span class="ro">${W.dataBR(String(g.dataRegistro || '').slice(0, 10))}</span></div><div class="f"><span class="lbl">Situação · canal</span><span class="ro">${esc(g.situacao || '—')} · ${esc(g.canal || '—')}</span></div>
+        <div class="f"><span class="lbl">Unidade de despacho</span><span class="ro mono">${esc(g.unidadeDespacho || '—')}</span></div><div class="f"><span class="lbl">Carga</span><span class="ro">${esc(g.tipoIdentificacaoCarga || '')} ${esc(g.identificacaoCarga || '')}</span></div>
+        <div class="f"><span class="lbl">Câmbio</span><span class="ro">${g.taxaCambio ? g.taxaCambio.toFixed(4) + ' ' + esc(g.moeda || '') : '—'}</span></div><div class="f"><span class="lbl">Siscomex · AFRMM</span><span class="ro">${W.fmtBRL(g.taxaSiscomex || 0)} · ${W.fmtBRL(g.afrmm || 0)}</span></div>
+        <div class="f w2"><span class="lbl">Consultada</span><span class="ro">${W.dataBR(String(r.consultadoEm || '').slice(0, 10))}${r.consultadoPor ? ' por ' + esc(H.nomeUsuario(r.consultadoPor)) : ''}</span></div></div>
+      <div class="tw" style="margin-top:10px"><table><thead><tr><th>#</th><th>NCM</th><th>Descrição</th><th class="num">Qtd</th><th class="num">Aduaneiro</th><th class="num">II</th><th class="num">IPI</th><th class="num">PIS</th><th class="num">COFINS</th><th>Exportador</th>${varias ? '<th>Operação</th>' : ''}</tr></thead><tbody>
+        ${(r.itens || []).map(it => `<tr><td>${it.numero}</td><td class="mono">${esc(it.ncm)}</td><td>${esc(it.descricao)}</td><td class="num">${it.quantidade} ${esc(it.unidadeComercial || '')}</td><td class="num">${W.fmtBRL(it.valorAduaneiroBRL || 0)}</td>
+          <td class="num">${t(it, 'ii')}</td><td class="num">${t(it, 'ipi')}</td><td class="num">${t(it, 'pis')}</td><td class="num">${t(it, 'cofins')}</td><td>${esc((it.exportador && (it.exportador.nome || it.exportador.codigo)) || '—')}</td>
+          ${varias ? `<td>${emite ? `<select class="inp" data-item="${it.numero}"><option value="">— escolher —</option>${j.ops.map(o => `<option ${it.op === o.id ? 'selected' : ''}>${esc(o.id)}</option>`).join('')}</select>` : esc(it.op || '—')}</td>` : ''}</tr>`).join('')}</tbody></table></div>
+      ${(j.conferencia || []).length ? `<h3 class="h3" style="margin-top:10px">DUIMP × cotação (avisos)</h3><div class="list">${j.conferencia.map(a => `<div class="row"><span class="note">${esc(a)}</span></div>`).join('')}</div>` : ''}
+      ${(r.historicoVersoes || []).length ? `<h3 class="h3" style="margin-top:10px">Versões anteriores</h3><div class="list">${r.historicoVersoes.map(h => `<div class="row"><span>versão ${esc(h.versao)} · ${W.dataBR(String(h.consultadoEm || '').slice(0, 10))}<br><small class="note">${(h.diferencas || []).map(esc).join(' · ')}</small></span></div>`).join('')}</div>` : ''}`,
+      `<button class="btn" data-x>Fechar</button>${emite ? '<button class="btn" id="vd_re">Reimportar</button>' : ''}${emite && varias ? '<button class="btn blue" id="vd_at">Salvar atribuição</button>' : ''}${j.nota ? '<button class="btn pri" id="vd_nota">Abrir a NF de entrada</button>' : ''}`);
+    m.querySelector('.modal').classList.add('larga');
+    const on = (s, fn) => { const x = m.querySelector(s); if (x) x.onclick = fn; };
+    on('#vd_nota', () => { H.fecharModal(); H.ir('nfe', 'n:' + j.nota._id); });
+    on('#vd_re', () => { H.fecharModal(); importarDuimp(j.dono); });
+    on('#vd_at', async () => {
+      const itens = {}; m.querySelectorAll('[data-item]').forEach(s => { itens[s.dataset.item] = s.value || null; });
+      const rr = await post('/api/duimp/' + encodeURIComponent(g.numero) + '/atribuir', { itens }).catch(() => ({ ok: false, j: {} }));
+      if (!rr.ok) return H.toast(esc(rr.j.message || 'Não salvou.'));
+      H.toast(rr.j.semOp ? `Salvo. Ainda ${rr.j.semOp} item(ns) sem operação.` : 'Itens atribuídos: a NF de entrada foi remontada.'); H.fecharModal(); H.render();
+    });
+  }
+  H.nfeVerDuimp = verDuimp;
+
+  /* Entrada da DUIMP: só o que a DUIMP não traz ou o cenário permite, sempre com motivo. */
+  function editarEntrada(n) {
+    const ex = (n.entrada || {}).extras || {}, du = ex.duimp || {};
+    const campo = (id, l, val, tipo) => `<div class="f"><label class="lbl" for="${id}">${l}</label><input id="${id}" ${tipo ? 'type="' + tipo + '"' : ''} value="${esc(val == null ? '' : val)}"></div>`;
+    const m = H.modal('Correção manual · ' + n.ref, `<p class="note" style="margin-bottom:8px">Itens, quantidades, valores, tributos federais, exportador e dados da declaração vêm da DUIMP e ficam travados. Aqui só o que a API da DUIMP não informa ou o cenário permite; a alteração fica no histórico com quem fez e o motivo.</p>
+      <div class="fields">${campo('ee_dd', 'Data do desembaraço', du.data_desembaraco, 'date')}${campo('ee_via', 'Via de transporte (1 = marítima)', du.via_transporte)}${campo('ee_afrmm', 'AFRMM do despachante (se não veio na DUIMP)', du.afrmm)}
+        ${campo('ee_loc', 'Local do desembaraço (se diferente da unidade)', du.local)}${campo('ee_uf', 'UF do desembaraço', du.uf)}${campo('ee_uft', 'UF do adquirente/encomendante', ex.terceiroUf)}</div>
+      <div class="fields" style="margin-top:8px"><div class="f w4"><label class="lbl" for="ee_inf">Informações complementares (além das automáticas)</label><textarea id="ee_inf" rows="2">${esc(ex.informacoes || '')}</textarea></div>
+        <div class="f w4"><label class="lbl" for="ee_mot">Motivo da correção</label><input id="ee_mot" placeholder="ex.: data do extrato do despachante"></div></div>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="ee_ok">Salvar e montar de novo</button>');
+    m.querySelector('#ee_ok').onclick = async ev => {
+      ev.target.disabled = true;
+      const corpo = { id: n._id, motivo: v(m, '#ee_mot'), extras: { informacoes: v(m, '#ee_inf'), terceiroUf: v(m, '#ee_uft'), duimp: { data_desembaraco: v(m, '#ee_dd'), via_transporte: v(m, '#ee_via'), afrmm: v(m, '#ee_afrmm'), local: v(m, '#ee_loc'), uf: v(m, '#ee_uf') } } };
+      const r = await post('/api/nfe/montar', corpo).catch(() => ({ ok: false, j: {} }));
+      ev.target.disabled = false;
+      if (!r.ok) return H.toast(esc(r.j.message || 'Não salvou.'));
+      H.toast(r.j.nota.pendencias.length ? `${r.j.nota.pendencias.length} pendência(s) ainda` : 'Nota sem pendências: pode conferir.'); H.fecharModal(); H.render(); detalhe(n._id);
+    };
   }
 
   /* ---------------- Corrigir dados (volta a montar no servidor) ---------------- */
@@ -251,7 +334,7 @@
     m.querySelectorAll('[data-des]').forEach(b => b.onclick = () => salvar({ k: b.dataset.des, desconferir: true }));
     m.querySelectorAll('[data-edc]').forEach(b => b.onclick = () => {
       const c = ctx.cenarios.find(x => x.k === b.dataset.edc);
-      const e = H.modal(`Editar cenário ${c.k} · ${c.nome}`, `<div class="fields">${W.CAMPOS_CENARIO.map(([k, l]) => `<div class="f ${k === 'obs' || k === 'natureza_operacao' ? 'w4' : ''}"><label class="lbl" for="c_${k}">${esc(l)}</label><input id="c_${k}" data-k="${k}" value="${esc(c[k] == null ? '' : c[k])}"></div>`).join('')}</div>`,
+      const e = H.modal(`Editar cenário ${c.k} · ${c.nome}`, `<div class="fields">${W.CAMPOS_CENARIO.map(([k, l]) => `<div class="f ${k === 'obs' || k === 'natureza_operacao' ? 'w4' : ''}"><label class="lbl" for="c_${k}">${esc(l)}</label><input id="c_${k}" data-k="${k}" value="${esc(c[k] == null ? '' : typeof c[k] === 'boolean' ? (c[k] ? 'sim' : 'não') : c[k])}"></div>`).join('')}</div>`,
         '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="c_ok">Salvar (volta a "a validar")</button>');
       e.querySelector('.modal').classList.add('larga');
       e.querySelector('#c_ok').onclick = () => { const campos = {}; e.querySelectorAll('[data-k]').forEach(i => { campos[i.dataset.k] = i.value.trim(); }); salvar({ k: c.k, campos }); };
@@ -265,6 +348,8 @@
     const m = H.modal('Configuração da NF-e', `
       <div class="fields"><div class="f w2"><label class="lbl"><input type="checkbox" id="g_cruz" style="width:auto" ${c.conferenciaCruzada !== false ? 'checked' : ''}> Conferência cruzada em produção (quem monta não transmite)</label></div>
         <div class="f"><label class="lbl" for="g_prazo">Prazo de cancelamento (horas)</label><input id="g_prazo" value="${esc(c.prazoCancelamentoHoras || 24)}"></div>
+        <div class="f w2"><label class="lbl" for="g_urf">Unidades de despacho da DUIMP, uma por linha: código=local/UF (ex.: 0317900=Porto do Pecém/CE)</label><textarea id="g_urf" rows="3">${esc(Object.entries(c.urfs || {}).map(([k, x]) => k + '=' + x.nome + '/' + x.uf).join('\n'))}</textarea></div>
+        <div class="f w2"><label class="lbl" for="g_pais">Países do exportador (ISO=código Banco Central nome), um por linha (China já vem: CN=1600)</label><textarea id="g_pais" rows="3">${esc(Object.entries(c.paises || {}).map(([k, x]) => k + '=' + x.codigo + ' ' + x.nome).join('\n'))}</textarea></div>
         <div class="f w2"><label class="lbl" for="g_aliq">ICMS interno por UF (DIFAL), ex.: CE=20, ES=17</label><input id="g_aliq" value="${esc(Object.entries(c.aliquotasInternas || {}).map(([u, a]) => u + '=' + a).join(', '))}"></div></div>
       <h3 class="h3" style="margin-top:10px">JeT Import (destinatária na triangular)</h3>
       <div class="fields" id="g_jet">${CE.map(([k, l]) => `<div class="f"><label class="lbl">${l}</label><input data-k="${k}" value="${esc((emp.JeT || {})[k] || '')}"></div>`).join('')}</div>
@@ -275,8 +360,10 @@
     m.querySelector('.modal').classList.add('larga');
     m.querySelector('#g_ok').onclick = async () => {
       const aliq = {}; v(m, '#g_aliq').split(/[,;]+/).forEach(p => { const [u, a] = p.split('=').map(s => s.trim()); if (/^[A-Za-z]{2}$/.test(u || '') && a !== '' && isFinite(+String(a).replace(',', '.'))) aliq[u.toUpperCase()] = +String(a).replace(',', '.'); });
+      const urfs = {}; v(m, '#g_urf').split(/\n+/).forEach(l => { const mm = /^\s*(\w+)\s*=\s*(.+?)\s*\/\s*([A-Za-z]{2})\s*$/.exec(l); if (mm) urfs[mm[1]] = { nome: mm[2], uf: mm[3].toUpperCase() }; });
+      const paises = {}; v(m, '#g_pais').split(/\n+/).forEach(l => { const mm = /^\s*([A-Za-z]{2})\s*=\s*(\d{3,4})\s*(.*)$/.exec(l); if (mm) paises[mm[1].toUpperCase()] = { codigo: mm[2], nome: mm[3].trim() || mm[1].toUpperCase() }; });
       const ler = s => { const o = {}; m.querySelectorAll(s + ' [data-k]').forEach(i => { o[i.dataset.k] = i.value.trim(); }); return o; };
-      const r = await post('/api/nfe/config', { conferenciaCruzada: v(m, '#g_cruz'), prazoCancelamentoHoras: +v(m, '#g_prazo') || 24, aliquotasInternas: aliq, empresas: { JeT: Object.assign({ nome: 'JeT Import' }, ler('#g_jet')), WindGate: Object.assign({ nome: 'SF Trading' }, ler('#g_sf')) } }).catch(() => ({ ok: false, j: {} }));
+      const r = await post('/api/nfe/config', { conferenciaCruzada: v(m, '#g_cruz'), prazoCancelamentoHoras: +v(m, '#g_prazo') || 24, aliquotasInternas: aliq, urfs, paises, empresas: { JeT: Object.assign({ nome: 'JeT Import' }, ler('#g_jet')), WindGate: Object.assign({ nome: 'SF Trading' }, ler('#g_sf')) } }).catch(() => ({ ok: false, j: {} }));
       if (!r.ok) return H.toast(esc(r.j.message || 'Não consegui salvar.'));
       ctx.config = r.j.config; H.toast('Configuração salva'); H.fecharModal(); H.render();
     };
@@ -286,12 +373,18 @@
   H.nfeBlocoOp = function (o) {
     if (!H.pode('nfe.ver')) return '';
     const ns = (H.db.hubNFe || []).filter(n => n && n.op === o.id).sort((a, b) => String(a.criadaEm || '').localeCompare(String(b.criadaEm || '')));
-    return `<div class="box"><div class="box-h"><h2>Notas fiscais da operação</h2><span class="btns"><button class="btn sm" data-nfeir="${esc(o.id)}">${H.pode('nfe.emitir') ? 'Emitir / ver na tela NF-e' : 'Ver na tela NF-e'}</button></span></div>
+    const ret = W.retratoDuimp(H.db, o.duimp), du = W.duimpDaOp(H.db, o.id), emite = H.pode('nfe.emitir');
+    const blocoDuimp = `<div class="box"><div class="box-h"><h2>DUIMP</h2><span class="btns">${ret ? `<button class="btn sm" data-duver="${esc(ret.dados.geral.numero)}">Ver DUIMP</button>` : ''}${emite ? `<button class="btn sm blue" data-duimp="${esc(o.id)}">${ret ? 'Reimportar' : 'Importar'} DUIMP</button>` : ''}</span></div><div class="box-b">${ret
+      ? `<p><b class="mono">${esc(ret.dados.geral.numero)}</b> · versão ${esc(ret.dados.versao)} · consultada em ${W.dataBR(String(ret.dados.consultadoEm || '').slice(0, 10))} · ${du ? du.itens.length : 0} item(ns) desta operação${du && du.varias ? ` (DUIMP compartilhada; ${du.semOp.length ? '<b>' + du.semOp.length + ' sem operação</b>' : 'itens atribuídos'})` : ''}.</p>${W.conferirDuimpCotacao(H.db, o.id).map(a => `<p class="note">⚠ ${esc(a)}</p>`).join('')}`
+      : `<p class="empty">${o.duimp ? 'DUIMP ' + esc(o.duimp) + ' ainda não importada.' : 'Sem DUIMP cadastrada.'} A NF de entrada nasce da DUIMP importada.</p>`}</div></div>`;
+    return blocoDuimp + `<div class="box"><div class="box-h"><h2>Notas fiscais da operação</h2><span class="btns"><button class="btn sm" data-nfeir="${esc(o.id)}">${H.pode('nfe.emitir') ? 'Emitir / ver na tela NF-e' : 'Ver na tela NF-e'}</button></span></div>
       ${ns.length ? `<div class="tw"><table><thead><tr><th>Cenário</th><th>Referência</th><th>Destinatário</th><th class="num">Valor</th><th>Situação</th><th>Nº</th></tr></thead><tbody>${ns.map(n => `<tr class="click" data-nfeop="${esc(n._id)}"><td>${esc(n.cenario)} · ${esc(((W.cenarioDe(H.db, n.cenario) || {}).nome) || '')}</td><td class="mono">${esc(n.ref)}</td><td>${esc((n.destinatario || {}).nome || '—')}</td><td class="num">${W.fmtBRL((n.totais || {}).total || 0)}</td><td>${stPill(n.status)}</td><td class="mono">${esc(n.numero || '—')}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="empty">Nenhuma NF-e emitida para esta operação.</p>'}</div>`;
   };
   H.nfeLigarBloco = function (box) {
     box.querySelectorAll('[data-nfeop]').forEach(r => r.onclick = () => H.ir('nfe', 'n:' + r.dataset.nfeop));
     box.querySelectorAll('[data-nfeir]').forEach(b => b.onclick = () => H.ir('nfe', b.dataset.nfeir));
+    box.querySelectorAll('[data-duimp]').forEach(b => b.onclick = () => importarDuimp(b.dataset.duimp));
+    box.querySelectorAll('[data-duver]').forEach(b => b.onclick = () => verDuimp(b.dataset.duver));
   };
 })();

@@ -1,0 +1,79 @@
+{
+  "_aviso": "DADOS FICTÍCIOS no formato da API do Portal Único (Duimp Intervenientes Privados 75.2.0 e Catálogo de Produtos 1.0.0). Nenhum CNPJ, nome ou valor é real. Uma DUIMP para OP16 (itens 1 e 2) e OP21 (item 3).",
+  "versoes": { "numero": "26BR00000123456", "versao": "2", "dataRegistro": "2026-10-20T10:15:00-0300" },
+  "geral": {
+    "identificacao": { "numero": "26BR00000123456", "versao": "2", "importador": { "tipoImportador": "CNPJ", "ni": "58762606000144" }, "dataRegistro": "2026-10-20T10:15:00-0300", "responsavelRegistroNumero": "00000000000", "informacaoComplementar": "Processo de teste" },
+    "situacao": { "situacaoDuimp": "DESEMBARACADA", "situacaoAnaliseRetificacao": "NA", "situacaoLicenciamento": "DISPENSADO", "controleCarga": "ENTREGUE" },
+    "resultadoAnaliseRisco": { "canalConsolidado": "VERDE" },
+    "carga": { "unidadeDeclarada": { "codigo": "0317900" }, "tipoIdentificacaoCarga": "CE", "identificacao": "262605123456789",
+      "seguro": { "codigoMoedaNegociada": "USD", "valorMoedaNegociada": 0 }, "frete": { "codigoMoedaNegociada": "USD", "valorMoedaNegociada": 190 }, "paisProcedencia": { "codigo": "CN" } },
+    "adicoes": [ { "numero": 1, "itens": 1 }, { "numero": 2, "itens": 2 }, { "numero": 3, "itens": 3 } ],
+    "tributos": {
+      "tributosCalculados": [
+        { "tipo": "II", "valoresBRL": { "calculado": 3582.8, "aReduzir": 0, "devido": 3582.8, "suspenso": 0, "aRecolher": 3582.8, "recolhido": 3582.8 } },
+        { "tipo": "IPI", "valoresBRL": { "calculado": 0, "aReduzir": 0, "devido": 0, "suspenso": 0, "aRecolher": 0, "recolhido": 0 } },
+        { "tipo": "PIS", "valoresBRL": { "calculado": 415.8, "aReduzir": 0, "devido": 415.8, "suspenso": 0, "aRecolher": 415.8, "recolhido": 415.8 } },
+        { "tipo": "COFINS", "valoresBRL": { "calculado": 1910.7, "aReduzir": 0, "devido": 1910.7, "suspenso": 0, "aRecolher": 1910.7, "recolhido": 1910.7 } },
+        { "tipo": "TAXA_UTILIZACAO", "valoresBRL": { "calculado": 180, "devido": 180, "aRecolher": 180 } }
+      ],
+      "mercadoria": { "valorTotalLocalEmbarqueBRL": 19000, "valorTotalLocalEmbarqueUSD": 3800 }
+    },
+    "quantidadeItens": 3,
+    "itens": [ { "indice": 1, "link": "/duimp-api/api/ext/duimp/26BR00000123456/2/itens/1" }, { "indice": 2, "link": "/duimp-api/api/ext/duimp/26BR00000123456/2/itens/2" }, { "indice": 3, "link": "/duimp-api/api/ext/duimp/26BR00000123456/2/itens/3" } ]
+  },
+  "itens": [
+    { "status": "ATIVO", "identificacao": { "numero": "26BR00000123456", "versao": "2", "numeroItem": 1 },
+      "produto": { "codigo": 1001, "versao": "1", "niResponsavel": "58762606", "ncm": "84743100" },
+      "caracterizacaoImportacao": { "indicador": "IMPORTACAO_POR_CONTA_E_ORDEM", "ni": "11444777000161" },
+      "indicadorExportadorFabricante": { "codigo": "EXPORTADOR_DIFERENTE_FABRICANTE" },
+      "fabricante": { "codigo": "FAB001", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "exportador": { "codigo": "EXP001", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "mercadoria": { "tipoAplicacao": { "codigo": "REVENDA" }, "condicao": "NOVA", "unidadeComercial": "UN", "quantidadeComercial": 2, "quantidadeMedidaEstatistica": 2, "pesoLiquido": 1800,
+        "moedaNegociada": { "codigo": "USD" }, "valorUnitarioMoedaNegociada": 1000, "descricao": "Betoneira 400 litros (teste)" },
+      "condicaoVenda": { "metodoValoracao": { "codigo": 1 }, "incoterm": { "codigo": "FOB" }, "valorBRL": 10000, "valorMoedaNegociada": 2000, "frete": { "valorBRL": 500 }, "seguro": { "valorBRL": 0 } },
+      "tributos": { "mercadoria": { "valorLocalEmbarqueBRL": 10000, "valorAduaneiroBRL": 10500, "taxaUtilizacao": 100, "afrmm": 40, "tum": 0 },
+        "tributosCalculados": [
+          { "tipo": "II", "valoresBRL": { "calculado": 2100, "aReduzir": 0, "devido": 2100, "suspenso": 0, "aRecolher": 2100 }, "memoriaCalculo": { "baseCalculoBRL": 10500, "tipoAliquota": "AD_VALOREM", "valorAliquota": 20, "tributado": true } },
+          { "tipo": "IPI", "valoresBRL": { "calculado": 0, "aReduzir": 0, "devido": 0, "suspenso": 0, "aRecolher": 0 }, "memoriaCalculo": { "baseCalculoBRL": 12600, "tipoAliquota": "AD_VALOREM", "valorAliquota": 0, "tributado": true } },
+          { "tipo": "PIS", "valoresBRL": { "calculado": 220.5, "aReduzir": 0, "devido": 220.5, "suspenso": 0, "aRecolher": 220.5 }, "memoriaCalculo": { "baseCalculoBRL": 10500, "tipoAliquota": "AD_VALOREM", "valorAliquota": 2.1, "tributado": true } },
+          { "tipo": "COFINS", "valoresBRL": { "calculado": 1013.25, "aReduzir": 0, "devido": 1013.25, "suspenso": 0, "aRecolher": 1013.25 }, "memoriaCalculo": { "baseCalculoBRL": 10500, "tipoAliquota": "AD_VALOREM", "valorAliquota": 9.65, "tributado": true } }
+        ] } },
+    { "status": "ATIVO", "identificacao": { "numero": "26BR00000123456", "versao": "2", "numeroItem": 2 },
+      "produto": { "codigo": 1001, "versao": "1", "niResponsavel": "58762606", "ncm": "84743100" },
+      "caracterizacaoImportacao": { "indicador": "IMPORTACAO_POR_CONTA_E_ORDEM", "ni": "11444777000161" },
+      "indicadorExportadorFabricante": { "codigo": "EXPORTADOR_DIFERENTE_FABRICANTE" },
+      "fabricante": { "codigo": "FAB001", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "exportador": { "codigo": "EXP001", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "mercadoria": { "tipoAplicacao": { "codigo": "REVENDA" }, "condicao": "NOVA", "unidadeComercial": "UN", "quantidadeComercial": 1, "quantidadeMedidaEstatistica": 1, "pesoLiquido": 900,
+        "moedaNegociada": { "codigo": "USD" }, "valorUnitarioMoedaNegociada": 1000, "descricao": "Betoneira 400 litros (teste) — reserva" },
+      "condicaoVenda": { "metodoValoracao": { "codigo": 1 }, "incoterm": { "codigo": "FOB" }, "valorBRL": 5000, "valorMoedaNegociada": 1000, "frete": { "valorBRL": 200 }, "seguro": { "valorBRL": 0 } },
+      "tributos": { "mercadoria": { "valorLocalEmbarqueBRL": 5000, "valorAduaneiroBRL": 5200, "taxaUtilizacao": 50, "afrmm": 20, "tum": 0 },
+        "tributosCalculados": [
+          { "tipo": "II", "valoresBRL": { "calculado": 1040, "devido": 1040, "suspenso": 0, "aRecolher": 1040 }, "memoriaCalculo": { "baseCalculoBRL": 5200, "tipoAliquota": "AD_VALOREM", "valorAliquota": 20 } },
+          { "tipo": "IPI", "valoresBRL": { "calculado": 0, "devido": 0, "suspenso": 0, "aRecolher": 0 }, "memoriaCalculo": { "baseCalculoBRL": 6240, "tipoAliquota": "AD_VALOREM", "valorAliquota": 0 } },
+          { "tipo": "PIS", "valoresBRL": { "calculado": 109.2, "devido": 109.2, "suspenso": 0, "aRecolher": 109.2 }, "memoriaCalculo": { "baseCalculoBRL": 5200, "tipoAliquota": "AD_VALOREM", "valorAliquota": 2.1 } },
+          { "tipo": "COFINS", "valoresBRL": { "calculado": 501.8, "devido": 501.8, "suspenso": 0, "aRecolher": 501.8 }, "memoriaCalculo": { "baseCalculoBRL": 5200, "tipoAliquota": "AD_VALOREM", "valorAliquota": 9.65 } }
+        ] } },
+    { "status": "ATIVO", "identificacao": { "numero": "26BR00000123456", "versao": "2", "numeroItem": 3 },
+      "produto": { "codigo": 2002, "versao": "1", "niResponsavel": "58762606", "ncm": "73089090" },
+      "caracterizacaoImportacao": { "indicador": "IMPORTACAO_POR_CONTA_E_ORDEM", "ni": "11444777000161" },
+      "indicadorExportadorFabricante": { "codigo": "EXPORTADOR_DIFERENTE_FABRICANTE" },
+      "fabricante": { "codigo": "FAB002", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "exportador": { "codigo": "EXP001", "versao": "1", "niOperador": "58762606", "pais": { "codigo": "CN" } },
+      "mercadoria": { "tipoAplicacao": { "codigo": "REVENDA" }, "condicao": "NOVA", "unidadeComercial": "UN", "quantidadeComercial": 100, "quantidadeMedidaEstatistica": 2500, "pesoLiquido": 2500,
+        "moedaNegociada": { "codigo": "USD" }, "valorUnitarioMoedaNegociada": 8, "descricao": "Escora metálica 3,4 m (teste)" },
+      "condicaoVenda": { "metodoValoracao": { "codigo": 1 }, "incoterm": { "codigo": "FOB" }, "valorBRL": 4000, "valorMoedaNegociada": 800, "frete": { "valorBRL": 100 }, "seguro": { "valorBRL": 0 } },
+      "tributos": { "mercadoria": { "valorLocalEmbarqueBRL": 4000, "valorAduaneiroBRL": 4100, "taxaUtilizacao": 30, "afrmm": 15, "tum": 0 },
+        "tributosCalculados": [
+          { "tipo": "II", "valoresBRL": { "calculado": 442.8, "devido": 442.8, "suspenso": 0, "aRecolher": 442.8 }, "memoriaCalculo": { "baseCalculoBRL": 4100, "tipoAliquota": "AD_VALOREM", "valorAliquota": 10.8 } },
+          { "tipo": "IPI", "valoresBRL": { "calculado": 0, "devido": 0, "suspenso": 0, "aRecolher": 0 }, "memoriaCalculo": { "baseCalculoBRL": 4542.8, "tipoAliquota": "AD_VALOREM", "valorAliquota": 0 } },
+          { "tipo": "PIS", "valoresBRL": { "calculado": 86.1, "devido": 86.1, "suspenso": 0, "aRecolher": 86.1 }, "memoriaCalculo": { "baseCalculoBRL": 4100, "tipoAliquota": "AD_VALOREM", "valorAliquota": 2.1 } },
+          { "tipo": "COFINS", "valoresBRL": { "calculado": 395.65, "devido": 395.65, "suspenso": 0, "aRecolher": 395.65 }, "memoriaCalculo": { "baseCalculoBRL": 4100, "tipoAliquota": "AD_VALOREM", "valorAliquota": 9.65 } }
+        ] } }
+  ],
+  "operadores": {
+    "EXP001": [ { "codigo": "EXP001", "versao": "1", "situacao": "ATIVADO", "nome": "Exemplo Machinery Trading Co., Ltd.", "logradouro": "No. 8 Exemplo Industrial Road", "nomeCidade": "Jinan", "codigoSubdivisaoPais": "CN-SD", "cep": "250000", "codigoPais": "CN", "tin": "CN0000000001", "cpfCnpjRaiz": "58762606" } ],
+    "FAB001": [ { "codigo": "FAB001", "versao": "1", "situacao": "ATIVADO", "nome": "Exemplo Mixer Factory", "logradouro": "Zone A, Exemplo Park", "nomeCidade": "Zibo", "codigoPais": "CN", "cpfCnpjRaiz": "58762606" } ],
+    "FAB002": [ { "codigo": "FAB002", "versao": "1", "situacao": "ATIVADO", "nome": "Exemplo Steel Props Factory", "logradouro": "Road 3, Exemplo Steel Town", "nomeCidade": "Cangzhou", "codigoPais": "CN", "cpfCnpjRaiz": "58762606" } ]
+  }
+}

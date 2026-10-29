@@ -27,14 +27,15 @@ function banco() {
   return {
     users: { samir: { nome: 'Samir', pin: '1' }, davi: { nome: 'Davi', pin: '2' }, matheus: { nome: 'Matheus', pin: '3' }, ivina: { nome: 'Ívina', pin: '4' }, pedro: { nome: 'Pedro', pin: '5' }, oneide: { nome: 'Oneide', pin: '6' } },
     hubPainel: { _fiscal: { cnpjs: { WindGate: '58.762.606/0001-44', JeT: '11.222.333/0001-81' } },
-      _nfeConfig: { empresas: { JeT: { nome: 'JeT Import', razaoSocial: 'JET IMPORT LTDA', cnpj: '11222333000181', ie: '082123456', logradouro: 'Av. Jerônimo Monteiro', numero: '100', bairro: 'Centro', municipio: 'Vitória', codigo_municipio: '3205309', uf: 'ES', cep: '29010000' } } } },
+      _nfeConfig: { urfs: { '0317900': { nome: 'Pecém', uf: 'CE' } }, empresas: { JeT: { nome: 'JeT Import', razaoSocial: 'JET IMPORT LTDA', cnpj: '11222333000181', ie: '082123456', logradouro: 'Av. Jerônimo Monteiro', numero: '100', bairro: 'Centro', municipio: 'Vitória', codigo_municipio: '3205309', uf: 'ES', cep: '29010000' } } } },
     crm: [
       { _id: 'c1', empresa: 'Custódio Máquinas', cnpj: '11.444.777/0001-61', contribuinte: false, email: 'compras@custodio.com.br', end: end('Fortaleza', 'CE', '2304400', '60000-000') },
       { _id: 'c2', empresa: 'Construtora Beta', cnpj: '45.997.418/0001-53', contribuinte: true, ie: '061234567', end: end('Fortaleza', 'CE', '2304400', '60100000') },
       { _id: 'c3', empresa: 'Encomendante AL', cnpj: '33.000.167/0001-01', contribuinte: true, ie: '240000000', end: end('Maceió', 'AL', '2704302', '57000000') }
     ],
     ops: [
-      { _id: 'o20', id: 'OP20', cliente: 'Custódio Máquinas', modalidade: 'conta e ordem', empresa: 'WindGate', status: 'chegada', duimp: '26BR0000012345-6', destinoPorto: 'Pecém', fornecedor: 'Shandong Machinery Co' },
+      { _id: 'o20', id: 'OP20', cliente: 'Custódio Máquinas', modalidade: 'conta e ordem', empresa: 'WindGate', status: 'chegada', duimp: '26BR0000012345-6', destinoPorto: 'Pecém', fornecedor: 'Shandong Machinery Co',
+        duimpDados: retrato(), portalEventos: [{ id: 'e1', de: 'despachante', acao: 'desembaracado', data: '2026-10-22', texto: '', em: '2026-10-22T15:00:00Z' }] },
       { _id: 'o30', id: 'OP30', cliente: 'Encomendante AL', modalidade: 'encomenda', empresa: 'WindGate', status: 'chegada' },
       { _id: 'o40', id: 'OP40', cliente: 'Construtora Beta', modalidade: 'propria', empresa: 'WindGate', status: 'logistica' }
     ],
@@ -48,54 +49,67 @@ function banco() {
     docs: [], hubNotas: [], hubExtratos: [], hubNFe: [], _removidos: {}
   };
 }
-const EXPORTADOR = { nome: 'Shandong Machinery Co', pais: 'China', codigo_pais: '1600', logradouro: 'No. 8 Industrial Rd', numero: '8' };
-const DUIMP = { numero: '26BR0000012345-6', data_registro: '2026-10-20', local: 'Pecém', uf: 'CE', data_desembaraco: '2026-10-22', via_transporte: 1, afrmm: 250, siscomex: 154.23, outras: 0 };
+/* Retrato da DUIMP (formato normalizado do Portal Único), com os números conferidos à mão. */
+const NUM20 = '26BR00000123456', REF_A = 'wg-sf-duimp-26br00000123456-a-1';
+const r2 = v => Math.round(v * 100 + 1e-7) / 100;
+function itemDuimp(n, va, sisc, afrmm, o) {
+  o = o || {};
+  return Object.assign({ numero: n, ncm: '84743100', produtoCodigo: '1001', descricao: 'Betoneira 400L', quantidade: 2, unidadeComercial: 'UN', valorAduaneiroBRL: va, valorMercadoriaBRL: va, taxaSiscomex: sisc, afrmm,
+    intermedio: { modalidade: o.modalidade || 'conta e ordem', cnpj: o.cnpj == null ? '11444777000161' : o.cnpj },
+    exportador: { codigo: 'EXP1', nome: 'Shandong Machinery Co', pais: 'CN', logradouro: 'No. 8 Industrial Rd', cidade: 'Jinan', noCatalogo: true }, fabricante: { codigo: 'FAB1', noCatalogo: true },
+    tributos: { ii: { base: va, aliquota: 20, devido: r2(va * 0.2) }, ipi: { base: r2(va * 1.2), aliquota: 0, devido: 0 }, pis: { base: va, aliquota: 2.1, devido: r2(va * 0.021) }, cofins: { base: va, aliquota: 9.65, devido: r2(va * 0.0965) } }, op: null }, o.item);
+}
+function retrato(o) {
+  o = o || {};
+  const itens = o.itens || [itemDuimp(1, 10000, 154.23, 250, o)];
+  const soma = k => r2(itens.reduce((s, i) => s + ((i.tributos[k] || {}).devido || 0), 0));
+  return { versao: '1', consultadoEm: '2026-10-28T10:00:00Z', geral: { numero: o.numero || NUM20, versao: '1', dataRegistro: '2026-10-20T10:00:00-0300', unidadeDespacho: '0317900', tipoIdentificacaoCarga: 'CE', viaTransporte: 1,
+    importador: { cnpj: '58762606000144' }, taxaCambio: 5, valorAduaneiroBRL: r2(itens.reduce((s, i) => s + i.valorAduaneiroBRL, 0)), totais: { ii: { devido: soma('ii') }, ipi: { devido: 0 }, pis: { devido: soma('pis') }, cofins: { devido: soma('cofins') } } }, itens };
+}
 const montar = (db, cen, op, extra) => { const e = R.sugerirEntrada(db, { cenario: cen, opId: op }); return R.montarNFe(db, Object.assign({}, e, { ambiente: 'homologacao', dataEmissao: '2026-10-29' }, extra && extra(e))); };
 /* Nota autorizada no sistema, para os cenários que dependem dela (B, D, G). */
 const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-' + cen + op, op, cenario: cen, empresa: m.empresa, status: 'autorizada', chave, numero: '1', serie: '1', payload: m.payload, totais: m.totais, entrada: m.entrada || {}, criadaEm: '2026-10-29T10:00:00Z' });
 
 (async () => {
   /* ======================= Montagem por cenário ======================= */
-  console.log('\nA · entrada de importação (SF, conta e ordem):');
+  console.log('\nA · entrada de importação (SF, conta e ordem) — nasce da DUIMP:');
   const db = banco();
   const sA = R.sugerirEntrada(db, { cenario: 'A', opId: 'OP20' });
-  ok(sA.itens.length === 1 && sA.itens[0].valorUnitario === 5000 && sA.itens[0].ncm === '84743100' && sA.itens[0].ii === 20 && sA.itens[0].c5291 === true, 'sugestão: valor aduaneiro US$ 1.000 × 5 = R$ 5.000/un, alíquotas e 52/91 do Catálogo de NCM');
-  ok(sA.extras.duimp.numero === '26BR0000012345-6' && sA.extras.duimp.afrmm === 250 && sA.extras.duimp.siscomex === 154.23 && sA.extras.icmsAliquota === 1.6, 'sugestão: DUIMP da operação, AFRMM e Siscomex da cotação, ICMS de entrada 1,6%');
-  const mA = montar(db, 'A', 'OP20', () => ({ destinatario: EXPORTADOR, extras: { duimp: DUIMP, icmsAliquota: 1.6 } }));
+  ok(sA.duimpNumero === NUM20 && sA.itens.length === 0, 'a entrada aponta a DUIMP da operação; os itens não vêm da cotação');
+  const mA = montar(db, 'A', 'OP20');
   const iA = mA.payload.items[0], diA = iA.documentos_importacao[0];
-  ok(mA.pendencias.length === 0, 'sem pendências com DUIMP, exportador e adição preenchidos');
+  ok(mA.pendencias.length === 0, 'sem pendências com a DUIMP importada' + (mA.pendencias.length ? ': ' + mA.pendencias.map(p => p.msg).join(' | ') : ''));
   ok(iA.cfop === '3102' && mA.payload.tipo_documento === 0 && mA.payload.local_destino === 3 && mA.payload.indicador_inscricao_estadual_destinatario === 9, 'CFOP 3102, entrada, destino exterior, IE indicador 9');
-  // VA 10.000 · II 20% = 2.000 · IPI 0 · PIS 2,1% = 210 · COFINS 9,65% = 965 · Siscomex 154,23 + AFRMM 250 = 404,23
-  ok(iA.valor_bruto === 10000 && iA.ii_base_calculo === 10000 && iA.ii_valor === 2000 && iA.ii_despesas_aduaneiras === 404.23 && iA.pis_valor === 210 && iA.cofins_valor === 965, 'II 2.000 sobre o valor aduaneiro; PIS 210; COFINS 965; despesas aduaneiras 404,23');
+  // VA 10.000 · II 2.000 · IPI 0 · PIS 210 · COFINS 965 — da DUIMP · Siscomex 154,23 + AFRMM 250 = 404,23
+  ok(iA.valor_bruto === 10000 && iA.ii_base_calculo === 10000 && iA.ii_valor === 2000 && iA.ii_despesas_aduaneiras === 404.23 && iA.pis_valor === 210 && iA.cofins_valor === 965, 'II 2.000, PIS 210 e COFINS 965 como na DUIMP; despesas aduaneiras 404,23');
   // ICMS por dentro: (10.000 + 2.000 + 0 + 210 + 965 + 404,23) ÷ (1 − 1,6%) = 13.800,03 · × 1,6% = 220,80
-  ok(iA.icms_base_calculo === 13800.03 && iA.icms_valor === 220.8 && iA.icms_aliquota === 1.6, 'ICMS de importação por dentro: base 13.800,03 e ICMS 220,80');
+  ok(iA.icms_base_calculo === 13800.03 && iA.icms_valor === 220.8 && iA.icms_aliquota === 1.6, 'ICMS de importação por dentro (regra do cenário): base 13.800,03 e ICMS 220,80');
   ok(iA.valor_outras_despesas === 1800.03 && mA.totais.total === 13800.03 && mA.totais.somaItens === mA.totais.total, 'outras despesas = PIS + COFINS + Siscomex + AFRMM + ICMS = 1.800,03; total 13.800,03 = soma dos itens');
-  ok(diA.numero === '26BR00000123456' && diA.valor_afrmm === 250 && diA.via_transporte === 1 && diA.uf_desembaraco_aduaneiro === 'CE' && diA.adicoes[0].numero === 1 && diA.adicoes[0].codigo_fabricante_estrangeiro === 'Shandong Machinery Co', 'DUIMP no item: número sem pontuação (15 posições), AFRMM, via marítima e adição');
-  ok(diA.forma_intermedio === 2 && diA.cnpj === '11444777000161' && diA.uf_terceiro === 'CE', 'conta e ordem: forma de intermediação 2 com CNPJ e UF do adquirente');
+  ok(diA.numero === NUM20 && diA.valor_afrmm === 250 && diA.via_transporte === 1 && diA.uf_desembaraco_aduaneiro === 'CE' && diA.data_desembaraco_aduaneiro === '2026-10-22' && diA.adicoes[0].numero === 1 && diA.adicoes[0].codigo_fabricante_estrangeiro === 'FAB1', 'DUIMP no item: número (15 posições), AFRMM, via marítima, desembaraço do aviso do despachante e adição = item da DUIMP');
+  ok(diA.forma_intermedio === 2 && diA.cnpj === '11444777000161' && diA.uf_terceiro === 'CE', 'conta e ordem pela DUIMP: forma de intermediação 2 com CNPJ do adquirente e UF do CRM');
   ok(mA.payload.nome_destinatario === W.HOMOLOGACAO_NOME && /DUIMP 26BR00000123456/.test(mA.payload.informacoes_adicionais_contribuinte), 'homologação: destinatário com o texto exigido pela SEFAZ; DUIMP nas informações complementares');
   ok(mA.avisos.some(a => /a validar/.test(a)), 'cenário ainda não conferido aparece como "a validar"');
 
-  const mA30 = montar(db, 'A', 'OP30', () => ({ destinatario: EXPORTADOR, extras: { duimp: DUIMP } }));
-  const di30 = mA30.payload.items[0].documentos_importacao[0];
-  ok(di30.forma_intermedio === 3 && di30.cnpj === '33000167000101' && di30.uf_terceiro === 'AL', 'encomenda: forma de intermediação 3 com CNPJ e UF do encomendante');
-  const dbP = banco(); dbP.ops[2].modalidade = 'propria'; dbP.quotes.q40.fields.icmsEnt = '1.6';
-  const mA40 = montar(dbP, 'A', 'OP40', e => ({ destinatario: EXPORTADOR, extras: { duimp: DUIMP }, itens: e.itens.map(i => Object.assign(i, { adicao: { numero: 1, sequencial: 1, fabricante: 'X' } })) }));
-  ok(mA40.payload.items[0].documentos_importacao[0].forma_intermedio === 1 && !mA40.payload.items[0].documentos_importacao[0].cnpj, 'importação própria: forma de intermediação 1, sem terceiro');
+  const db30 = banco(); Object.assign(db30.ops[1], { duimp: '26BR00000222222', duimpDados: retrato({ numero: '26BR00000222222', modalidade: 'encomenda', cnpj: '33000167000101' }) });
+  const di30 = R.montarNFe(db30, { cenario: 'A', opId: 'OP30', dataEmissao: '2026-10-29' }).payload.items[0].documentos_importacao[0];
+  ok(di30.forma_intermedio === 3 && di30.cnpj === '33000167000101' && di30.uf_terceiro === 'AL', 'encomenda: forma de intermediação 3 com CNPJ do encomendante e UF do CRM');
+  const db40 = banco(); Object.assign(db40.ops[2], { duimp: '26BR00000333333', duimpDados: retrato({ numero: '26BR00000333333', modalidade: 'propria', cnpj: '' }) });
+  const di40 = R.montarNFe(db40, { cenario: 'A', opId: 'OP40', dataEmissao: '2026-10-29' }).payload.items[0].documentos_importacao[0];
+  ok(di40.forma_intermedio === 1 && !di40.cnpj, 'importação própria: forma de intermediação 1, sem terceiro');
 
-  // Rateio das despesas aduaneiras com arredondamento: o último item fecha a conta.
-  const mA2 = R.montarNFe(db, { cenario: 'A', opId: 'OP20', ambiente: 'homologacao', dataEmissao: '2026-10-29', destinatario: EXPORTADOR, extras: { duimp: Object.assign({}, DUIMP, { siscomex: 100.01, afrmm: 0.01 }), icmsAliquota: 1.6 },
-    itens: [{ ncm: '84743100', descricao: 'A', quantidade: 1, valorUnitario: 3333.33, ii: 20, ipi: 0, pis: 2.1, cofins: 9.65, adicao: { numero: 1, sequencial: 1, fabricante: 'X' } }, { ncm: '84743100', descricao: 'B', quantidade: 1, valorUnitario: 6666.67, ii: 20, ipi: 0, pis: 2.1, cofins: 9.65, adicao: { numero: 1, sequencial: 2, fabricante: 'X' } }] });
-  ok(mA2.payload.items[0].ii_despesas_aduaneiras === 33.34 && mA2.payload.items[1].ii_despesas_aduaneiras === 66.68 && igual(mA2.payload.items[0].ii_despesas_aduaneiras + mA2.payload.items[1].ii_despesas_aduaneiras, 100.02), 'despesas rateadas pelo valor: 33,34 + 66,68 = 100,02 (Siscomex 100,01 + AFRMM 0,01), sem centavo perdido');
+  // AFRMM informado pelo despachante (não veio na DUIMP): rateado pelo valor, o último item fecha a conta.
+  const dbR2 = banco(); dbR2.ops[0].duimpDados = retrato({ itens: [itemDuimp(1, 3333.33, 0, 0), itemDuimp(2, 6666.67, 0, 0)] });
+  const mA2 = R.montarNFe(dbR2, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: 100.02 } } });
+  ok(mA2.payload.items[0].ii_despesas_aduaneiras === 33.34 && mA2.payload.items[1].ii_despesas_aduaneiras === 66.68, 'AFRMM do despachante rateado: 33,34 + 66,68 = 100,02, sem centavo perdido');
   ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + x.ii_valor + x.ipi_valor + x.valor_outras_despesas, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
 
   console.log('\nPendências que bloqueiam:');
-  const pA = (fn) => R.montarNFe(db, Object.assign({ cenario: 'A', opId: 'OP20', ambiente: 'homologacao', dataEmissao: '2026-10-29', destinatario: EXPORTADOR, extras: { duimp: DUIMP, icmsAliquota: 1.6 }, itens: clone(sA.itens) }, fn())).pendencias.map(p => p.campo);
-  ok(pA(() => ({ itens: [Object.assign(clone(sA.itens[0]), { ncm: '' })] })).includes('items[1].codigo_ncm'), 'sem NCM: pendência no item');
-  ok(pA(() => ({ extras: { duimp: Object.assign({}, DUIMP, { numero: '' }), icmsAliquota: 1.6 } })).includes('documentos_importacao.numero'), 'sem DUIMP: pendência');
-  ok(pA(() => ({ extras: { duimp: Object.assign({}, DUIMP, { afrmm: 0 }), icmsAliquota: 1.6 } })).includes('documentos_importacao.valor_afrmm'), 'marítimo sem AFRMM: pendência');
-  ok(pA(() => ({ itens: [Object.assign(clone(sA.itens[0]), { adicao: {} })] })).some(c => /adicoes/.test(c)), 'item sem adição da DUIMP: pendência');
-  ok(pA(() => ({ extras: { duimp: Object.assign({}, DUIMP, { numero: '26BR0000012345678' }), icmsAliquota: 1.6 } })).includes('documentos_importacao.numero'), 'número com mais de 15 posições não cabe no nDI: pendência');
-  const prodNC = R.montarNFe(db, Object.assign({}, sA, { ambiente: 'producao', dataEmissao: '2026-10-29', destinatario: EXPORTADOR, extras: { duimp: DUIMP, icmsAliquota: 1.6 } }));
+  const pA = mexe => { const d = banco(); mexe(d.ops[0].duimpDados, d); return R.montarNFe(d, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.map(p => p.campo); };
+  ok(pA(r => { r.itens[0].ncm = ''; }).includes('items[1].codigo_ncm'), 'item da DUIMP sem NCM: pendência');
+  ok(pA((r, d) => { delete d.ops[0].duimpDados; }).includes('duimp'), 'sem DUIMP importada: pendência');
+  ok(pA(r => { r.itens[0].afrmm = 0; }).includes('documentos_importacao.valor_afrmm'), 'marítimo sem AFRMM: pendência');
+  ok(pA(r => { r.itens[0].fabricante = null; }).some(c => /adicoes/.test(c)), 'item sem fabricante: pendência');
+  const prodNC = R.montarNFe(db, { cenario: 'A', opId: 'OP20', ambiente: 'producao', dataEmissao: '2026-10-29' });
   ok(prodNC.pendencias.some(p => p.campo === 'cenario'), 'em produção, cenário não conferido pelo contador é pendência');
 
   console.log('\nB · saída na conta e ordem:');
@@ -203,15 +217,17 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const lerDB = async quem => (await chamar(quem, 'GET', '/api/db')).j.db;
   const respostas = [];
 
-  const corpoA = { cenario: 'A', opId: 'OP20', destinatario: EXPORTADOR, extras: { duimp: DUIMP } };
+  const corpoA = { cenario: 'A', opId: 'OP20' };
+  require('../src/services/portal-unico.service')._usarRequisicao(async url => /autenticar$/.test(new URL(url).pathname)
+    ? { status: 200, headers: { 'set-token': 'Bearer sim', 'x-csrf-token': 'c' }, corpo: '' } : { status: 200, headers: {}, corpo: JSON.stringify({ numero: NUM20, versao: '1' }) });
   for (const k of ['samir', 'matheus', 'ivina', 'oneide']) { const r = await chamar(k, 'POST', '/api/nfe/montar', corpoA); ok(r.status === 403, `${k} não monta NF-e (403)`); }
   let r = await chamar('davi', 'POST', '/api/nfe/montar', corpoA); respostas.push(r);
   const nA = r.j.nota;
-  ok(r.status === 200 && nA.pendencias.length === 0 && nA.status === 'rascunho' && nA.ref === 'wg-sf-op20-a-1' && nA.ambiente === 'homologacao' && nA.montadoPor === 'davi', 'Davi monta a entrada no servidor: rascunho, referência estável, homologação, sem pendências');
+  ok(r.status === 200 && nA.pendencias.length === 0 && nA.status === 'rascunho' && nA.ref === REF_A && nA.ambiente === 'homologacao' && nA.montadoPor === 'davi', 'Davi monta a entrada no servidor: rascunho, referência estável, homologação, sem pendências');
   ok(nA.totais.total === 13800.03, 'o servidor chega ao mesmo total conferido à mão (13.800,03)');
-  r = await chamar('pedro', 'POST', '/api/nfe/montar', { cenario: 'A', opId: 'OP20' }); respostas.push(r);
+  r = await chamar('pedro', 'POST', '/api/nfe/montar', { cenario: 'B', opId: 'OP20' }); respostas.push(r);
   const nP = r.j.nota;
-  ok(r.status === 200 && nP.pendencias.some(p => p.campo === 'codigo_pais_destinatario') && nP.ref === 'wg-sf-op20-a-2', 'o contador monta pelo servidor (sem ler operações nem cotações) e recebe as pendências');
+  ok(r.status === 200 && nP.pendencias.some(p => p.campo === 'cfop') && nP.ref === 'wg-sf-op20-b-1' && nP.montadoPor === 'pedro', 'o contador monta pelo servidor (sem ler operações nem cotações) e recebe as pendências');
   r = await chamar('davi', 'POST', `/api/nfe/${nP._id}/conferir`);
   ok(r.status === 409, 'nota com pendência não é conferida (409)');
   r = await chamar('davi', 'POST', `/api/nfe/${nP._id}/transmitir`);
@@ -226,7 +242,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   r = await chamar('davi', 'POST', `/api/nfe/${nA._id}/transmitir`); respostas.push(r);
   ok(r.status === 200 && r.j.nota.status === 'enviada' && F.posts === 1 && r.j.nota.transmitidoPor === 'davi', 'transmitida: um POST na Focus, nota enviada');
   const ultimo = F.chamadas.filter(c => c.metodo === 'POST' && /\/v2\/nfe\?ref=/.test(c.url)).pop();
-  ok(/ref=wg-sf-op20-a-1$/.test(ultimo.url) && ultimo.auth === 'Basic ' + Buffer.from('tk-sf-secreto:').toString('base64') && /^homologacao/.test(new URL(ultimo.url).host), 'POST com ?ref=, token da SF e servidor de homologação');
+  ok(/ref=wg-sf-duimp-26br00000123456-a-1$/.test(ultimo.url) && ultimo.auth === 'Basic ' + Buffer.from('tk-sf-secreto:').toString('base64') && /^homologacao/.test(new URL(ultimo.url).host), 'POST com ?ref=, token da SF e servidor de homologação');
   ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(F.ultimoCorpo.data_emissao) && F.ultimoCorpo.items[0].documentos_importacao[0].numero === '26BR00000123456', 'data de emissão do momento do envio (fuso de SP); DUIMP no item');
   r = await chamar('davi', 'POST', `/api/nfe/${nA._id}/transmitir`);
   ok(r.status === 200 && r.j.jaEnviada && F.posts === 1, 'transmitir de novo só consulta: continua 1 POST');
@@ -234,10 +250,10 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(F.posts === 1 && [t1.status, t2.status].every(s => s === 200 || s === 409), 'dois cliques ao mesmo tempo: nenhum POST a mais');
 
   console.log('\nWebhook e autorização:');
-  autorizar('wg-sf-op20-a-1', '2'.repeat(44), '101');
-  r = await fetch(base + '/api/webhooks/focus/errado', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'wg-sf-op20-a-1' }) });
+  autorizar(REF_A, '2'.repeat(44), '101');
+  r = await fetch(base + '/api/webhooks/focus/errado', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: REF_A }) });
   ok(r.status === 401, 'aviso com token errado é recusado (401)');
-  r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'wg-sf-op20-a-1', status: 'cancelado' }) });
+  r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: REF_A, status: 'cancelado' }) });
   const jw = await r.json();
   ok(r.status === 200 && jw.status === 'autorizada', 'aviso da Focus dispara a consulta: o status vem da consulta (autorizada), não do corpo do aviso');
   let dbS = await lerDB('davi'), nAut = dbS.hubNFe.find(n => n._id === nA._id);
@@ -246,7 +262,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const doc = dbS.docs.find(d => d.nfe === nA._id), notaF = dbS.hubNotas.find(n => n.nfe === nA._id);
   ok(doc && doc.op === 'OP20' && doc.tipo === 'nfe' && doc.link === nAut.danfeLink, 'documento criado no GED da operação');
   ok(notaF && notaF.chave === nAut.chave && notaF.tipo === 'entrada' && notaF.empresa === 'WindGate' && notaF.valor === 13800.03 && notaF.xmlLink === nAut.xmlLink, 'registrada em hubNotas como nota de entrada, para o Fiscal e o contador');
-  r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'wg-sf-op20-a-1' }) });
+  r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: REF_A }) });
   dbS = await lerDB('davi');
   ok(dbS.docs.filter(d => d.nfe === nA._id).length === 1 && dbS.hubNotas.filter(n => n.nfe === nA._id).length === 1, 'aviso repetido não duplica documento nem nota fiscal');
 

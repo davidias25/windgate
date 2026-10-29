@@ -93,6 +93,31 @@
     return { contratos: cs, usdFechado, brlFechado, taxaMedia, variacao, abertos: cs.filter(c => c.status === 'previsto') };
   }
 
+  /* ---------- DUIMP da operação (retrato importado do Portal Único) ----------
+     O retrato fica UMA vez, na operação que importou (ops[].duimpDados); se a
+     mesma DUIMP serve a várias operações, cada item diz de qual é (itens[].op). */
+  const numDuimp = v => String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  function retratoDuimp(db, numero) {
+    const n = numDuimp(numero); if (!n) return null;
+    const o = (db.ops || []).find(x => x && x.duimpDados && x.duimpDados.geral && numDuimp(x.duimpDados.geral.numero) === n);
+    return o ? { op: o, dados: o.duimpDados } : null;
+  }
+  /** Operações que usam a DUIMP (pelo número cadastrado ou por guardarem o retrato). */
+  function opsDaDuimp(db, numero) {
+    const n = numDuimp(numero); if (!n) return [];
+    return (db.ops || []).filter(o => o && o.id && (numDuimp(o.duimp) === n || (o.duimpDados && o.duimpDados.geral && numDuimp(o.duimpDados.geral.numero) === n)));
+  }
+  /** Itens da DUIMP que são desta operação (DUIMP de uma operação só: todos). */
+  function duimpDaOp(db, opId) {
+    const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
+    const r = retratoDuimp(db, o.duimp || (o.duimpDados && o.duimpDados.geral && o.duimpDados.geral.numero)); if (!r) return null;
+    const varias = opsDaDuimp(db, r.dados.geral.numero).length > 1;
+    const itens = (r.dados.itens || []).filter(i => i && (i.op || (varias ? null : r.op.id)) === opId);
+    return { numero: r.dados.geral.numero, versao: r.dados.versao, retrato: r.dados, dono: r.op.id, varias, itens, semOp: varias ? (r.dados.itens || []).filter(i => i && !i.op) : [] };
+  }
+  /** II + IPI + PIS + COFINS a recolher dos itens (o ICMS de importação é estadual e não vem da DUIMP). */
+  const impostosFederais = itens => (itens || []).reduce((a, i) => a + ['ii', 'ipi', 'pis', 'cofins'].reduce((s, k) => { const t = (i.tributos || {})[k]; return s + (t ? (t.aRecolher != null ? +t.aRecolher : +t.devido || 0) : 0); }, 0), 0);
+
   /** Custeio completo: simulado (cotação), previsto (aprovado), realizado (Financeiro) e câmbio. */
   function custeioOp(db, opId, opts) {
     const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
@@ -108,6 +133,11 @@
       if (W.ehReceita(l)) { if (W.realizado(l)) receita.recebida += valorDe(l); else receita.prevista += valorDe(l); return; }
       const c = classeDe(l); if (W.realizado(l)) realizado[c] += valorDe(l); else aPagar[c] += valorDe(l);
     });
+    /* Sem lançamento de impostos no Financeiro, os federais da DUIMP viram o realizado
+       da classe (origem 'duimp'). Nenhum lançamento financeiro é criado. */
+    const du = duimpDaOp(db, opId);
+    const impostosDuimp = du && du.itens.length && !(realizado.impostos + aPagar.impostos > 0.005) ? r2(impostosFederais(du.itens)) : null;
+    if (impostosDuimp != null) realizado.impostos = impostosDuimp;
     const cb = cambioOp(db, opId, taxaPrevista);
     // Dólar ainda sem contrato: vale a PTAX de hoje (quando há) ou a taxa prevista.
     const usdTotal = fobUSD + freteUSD, usdAberto = Math.max(0, usdTotal - cb.usdFechado);
@@ -120,7 +150,8 @@
     // encerrada vale só o lançado.
     const encerrada = !W.ativa(o);
     const proj = k => { const lanc = realizado[k] + aPagar[k]; return lanc > 0.005 || encerrada ? lanc : previsto[k]; };
-    const linhas = CLASSES.map(([k, l]) => ({ k, l, simulado: simulado[k], previsto: previsto[k], realizado: realizado[k], aPagar: aPagar[k], projetado: proj(k), semLancamento: !(realizado[k] + aPagar[k]) && previsto[k] > 0, desvio: previsto[k] ? (proj(k) - previsto[k]) / previsto[k] : null }));
+    const linhas = CLASSES.map(([k, l]) => ({ k, l, simulado: simulado[k], previsto: previsto[k], realizado: realizado[k], aPagar: aPagar[k], projetado: proj(k), semLancamento: !(realizado[k] + aPagar[k]) && previsto[k] > 0, desvio: previsto[k] ? (proj(k) - previsto[k]) / previsto[k] : null,
+      origem: k === 'impostos' && impostosDuimp != null ? 'duimp' : '' }));
     const custoProjetado = linhas.reduce((a, x) => a + x.projetado, 0) + impactoAberto;
     const margem = v => receitaTotal ? (receitaTotal - v) / receitaTotal : null;
     return {
@@ -129,7 +160,8 @@
       receita: receitaTotal, receitaRecebida: receita.recebida, margemSimulada: cq && cq.preco ? (cq.preco - soma(simulado)) / cq.preco : null,
       margemPrevista: margem(totPrev), margemProjetada: margem(custoProjetado), desvio: totPrev ? (custoProjetado - totPrev) / totPrev : null,
       fobUSD, freteUSD, usdTotal, usdFechado: cb.usdFechado, usdAberto, taxaPrevista, taxaMedia: cb.taxaMedia, variacaoCambial: cb.variacao, impactoAberto, ptax,
-      contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null
+      contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null,
+      duimp: du ? { numero: du.numero, versao: du.versao, itens: du.itens.length, impostosFederais: impostosDuimp } : null
     };
   }
   /** Aprova o previsto da operação (foto do custo na hora da aprovação). */
@@ -344,7 +376,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };

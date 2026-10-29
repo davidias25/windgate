@@ -711,13 +711,19 @@ app.post('/api/fiscal/sefaz', auth.exigirTokenSeAtiva, async (req, res) => {
 
 /* ---------- Portal Único: situação das DUIMPs ---------- */
 const portalUnico = require('./services/portal-unico.service');
+/* Operação antiga sem `_id` é identificada pelo conteúdo: ao gravar uma versão
+   alterada dela, o `_id` tem de ser o do conteúdo ORIGINAL, senão a mesclagem
+   enxerga um registro novo e duplica a operação. */
+const mesclaId = require('../public/hub/js/regras.js').idDeterministico;
 app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) => {
   if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
   if (!portalUnico.configurado()) return res.json({ success: false, semIntegracao: true, message: 'Falta o certificado A1 no servidor (PORTAL_UNICO_CERT_ARQUIVO e PORTAL_UNICO_CERT_SENHA).' });
   const alvo = (memoryDB.ops || []).filter(o => o && o.duimp && !['entregue', 'concluida'].includes(o.status));
   const atualizadas = [], erros = [];
   for (const o of alvo.slice(0, 40)) {
-    try { const r = await portalUnico.consultarDuimp(o.duimp, o.duimpVersao || '1'); atualizadas.push(Object.assign({}, o, { duimpSituacao: { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, atualizadoEm: r.atualizadoEm } })); }
+    // Sempre a versão vigente: supor a 1 lia a DUIMP original depois de uma retificação.
+    try { const num = String(o.duimp).toUpperCase().replace(/[^0-9A-Z]/g, ''), v = (await portalUnico.versaoVigente(num)).versao;
+      const r = await portalUnico.consultarDuimp(num, v); atualizadas.push(Object.assign({ _id: o._id || mesclaId(o) }, o, { duimpVersao: v, duimpSituacao: { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, versao: v, atualizadoEm: r.atualizadoEm } })); }
     catch (e) { erros.push({ op: o.id, erro: e.message }); if (/60 s/.test(e.message)) break; }
   }
   if (atualizadas.length) await gravarParcial({ ops: atualizadas });
