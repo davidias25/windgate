@@ -34,6 +34,17 @@ function portalSimulado(estado) {
     const u = new URL(url); estado.chamadas.push(u.pathname + u.search);
     const json = (status, corpo) => ({ status, headers: {}, corpo: JSON.stringify(corpo) });
     if (u.pathname.endsWith('/portal/api/autenticar')) return { status: 200, headers: { 'set-token': 'Bearer sim', 'x-csrf-token': 'csrf' }, corpo: '' };
+    // "Duimp - Nova API da Sefaz" e "Tabelas Comex": só quando o teste liga (sem elas, o Portal responde 404).
+    if (u.pathname.startsWith('/duimp-sefaz/')) {
+      if (estado.sefaz === 403) return json(403, {});
+      if (estado.sefaz && new RegExp(`/duimp/${NUM}/\\d+$`).test(u.pathname)) return json(200, { numeroDeclaracao: NUM, dadosCarga: { uaDeclarada: '0317900', ufDeclarada: 'CE' }, itensHistorico: [
+        { numeroDuimp: NUM, evento: { codigo: '1', descricao: 'Declaração registrada' }, dataHora: '2026-10-19T10:00:00.000-0300' },
+        { numeroDuimp: NUM, evento: { codigo: '413', descricao: 'Desembaraço autorizado' }, dataHora: '2026-10-21T09:00:00.000-0300' },
+        { numeroDuimp: NUM, evento: { codigo: '419', descricao: 'Desembaraço efetuado' }, dataHora: '2026-10-21T16:10:00.000-0300' }] });
+      return json(404, {});
+    }
+    if (estado.tabx && u.pathname === '/tabx/api/ext/tabela') return json(200, [{ nome: 'MOEDA', rotulo: 'Moeda' }, { nome: 'UNIDADE_RFB', rotulo: 'Unidade da Receita Federal' }]);
+    if (estado.tabx && u.pathname === '/tabx/api/ext/tabela/UNIDADE_RFB') { const f = JSON.parse(u.searchParams.get('filtros') || '[]'); return json(200, { nomeTabela: 'UNIDADE_RFB', dados: f[0] && f[0].valores[0] === '0317900' ? [{ campos: [{ nome: 'CODIGO', valor: '0317900' }, { nome: 'NOME', valor: 'ALF - PORTO DE PECEM' }] }] : [] }); }
     if (u.pathname.endsWith('/versoes')) return json(200, Object.assign({}, FX.versoes, { versao: estado.versao }));
     if (u.pathname.includes('/catp/api/ext/operador-estrangeiro')) return json(200, FX.operadores[u.searchParams.get('codigo')] || []);
     if (/\/itens$/.test(u.pathname)) { if (estado.falhar429) { estado.falhar429--; return json(429, {}); } return json(200, u.searchParams.get('inicial') === '1' ? estado.itens() : []); }
@@ -79,6 +90,27 @@ function banco() {
   ok(semCat.itens[0].exportador.codigo === 'EXP001' && !semCat.itens[0].exportador.noCatalogo, 'normalizarDuimp isolada: sem o Catálogo, o código fica e o cadastro é marcado como ausente');
   const inativo = clone(FX.itens); inativo[2].status = 'INATIVO';
   ok(portal.normalizarDuimp(FX.geral, inativo, {}, {}).itens.length === 2, 'item inativo na versão vigente fica de fora');
+  ok(!g.dataDesembaraco && !g.ufDesembaraco && /Não encontrado/.test(g.fontesDesembaraco.sefaz), 'sem a API da Sefaz, o desembaraço fica vazio e o motivo é guardado (a leitura da DUIMP não falha)');
+
+  console.log('\nDesembaraço por outras APIs do Portal (Sefaz e Tabelas Comex):');
+  portal._reset();
+  const estD = { versao: '2', itens: () => clone(FX.itens), sefaz: true, tabx: true };
+  portal._usarRequisicao(portalSimulado(estD));
+  const retD = await portal.consultarDuimpCompleta(NUM, { pausaMs: 0 }), gD = retD.geral;
+  ok(gD.ufDesembaraco === 'CE' && gD.localDesembaraco === 'ALF - PORTO DE PECEM' && gD.dataDesembaraco === '2026-10-21' && /^419/.test(gD.eventoDesembaraco), 'UF da unidade de despacho (Sefaz), nome da unidade (TABX) e data do evento 419 "Desembaraço efetuado"');
+  ok(estD.chamadas.some(c => c.endsWith(`/duimp-sefaz/api/ext/duimp/${NUM}/2`)) && estD.chamadas.some(c => c.startsWith('/tabx/api/ext/tabela/UNIDADE_RFB?filtros=')), 'consulta a versão vigente na API da Sefaz e acha a tabela de unidades pela listagem do TABX');
+  ok(portal.dataDoDesembaraco([{ evento: { codigo: '413' }, dataHora: '2026-10-20T09:00:00.000-0300' }]).data === '2026-10-20' && portal.dataDoDesembaraco([{ evento: { codigo: '414' }, dataHora: '2026-10-20T09:00:00.000-0300' }]) === null, 'sem o 419, vale o 413 (desembaraço autorizado); "em análise fiscal" não conta');
+  portal._reset();
+  const est403 = { versao: '2', itens: () => clone(FX.itens), sefaz: 403 };
+  portal._usarRequisicao(portalSimulado(est403));
+  const g403 = (await portal.consultarDuimpCompleta(NUM, { pausaMs: 0 })).geral;
+  ok(!g403.dataDesembaraco && /permissão/.test(g403.fontesDesembaraco.sefaz) && g403.itens !== null, 'certificado sem acesso à API da Sefaz (403): a DUIMP é lida do mesmo jeito e o motivo fica registrado');
+  const dbD = banco(); dbD.ops[0].portalEventos = [];
+  dbD.ops[0].duimpDados = Object.assign(clone(retD), { itens: retD.itens.map(i => Object.assign({}, i, { op: i.numero === 3 ? 'OP21' : 'OP16' })) });
+  const mD = W.montarNFe(dbD, { cenario: 'A', opId: 'OP16', duimpNumero: NUM, dataEmissao: '2026-10-29' }), diD = mD.payload.items[0].documentos_importacao[0];
+  ok(!mD.pendencias.some(p => /desembaraco/.test(p.campo)) && diD.local_desembaraco_aduaneiro === 'ALF - PORTO DE PECEM' && diD.uf_desembaraco_aduaneiro === 'CE' && diD.data_desembaraco_aduaneiro === '2026-10-21', 'NF de entrada com local, UF e data do desembaraço vindos do Portal, sem cadastro nem aviso do despachante');
+  dbD.hubPainel._nfeConfig = { urfs: { '0317900': { nome: 'Porto do Pecém', uf: 'CE' } } };
+  ok(W.montarNFe(dbD, { cenario: 'A', opId: 'OP16', duimpNumero: NUM, dataEmissao: '2026-10-29' }).payload.items[0].documentos_importacao[0].local_desembaraco_aduaneiro === 'Porto do Pecém', 'o cadastro da unidade em NF-e › Configuração prevalece sobre o nome do TABX');
 
   const binario = require('crypto').randomBytes(2400), arqB = TMP + '.pfx', arq64 = TMP + '.pfx.txt';
   fs.writeFileSync(arqB, binario); fs.writeFileSync(arq64, binario.toString('base64').replace(/(.{64})/g, '$1\n'));

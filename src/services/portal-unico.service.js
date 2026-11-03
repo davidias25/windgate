@@ -109,7 +109,12 @@ function resumirDuimp(j) {
 const P = {
   versoes: () => process.env.PORTAL_UNICO_PATH_VERSOES || '/duimp-api/api/ext/duimp/{numero}/versoes',
   itens: () => process.env.PORTAL_UNICO_PATH_ITENS || '/duimp-api/api/ext/duimp/{numero}/{versao}/itens',
-  operador: () => process.env.PORTAL_UNICO_PATH_OPERADOR || '/catp/api/ext/operador-estrangeiro'
+  operador: () => process.env.PORTAL_UNICO_PATH_OPERADOR || '/catp/api/ext/operador-estrangeiro',
+  // "Duimp - Nova API da Sefaz" 77.0.0 (basePath /duimp-sefaz/api/ext): UF da unidade de despacho e histórico com a data do desembaraço.
+  sefazGeral: () => process.env.PORTAL_UNICO_PATH_SEFAZ || '/duimp-sefaz/api/ext/duimp/{numero}/{versao}',
+  sefazHistorico: () => process.env.PORTAL_UNICO_PATH_SEFAZ_HIST || '/duimp-sefaz/api/ext/duimp/{numero}/historico',
+  // "Tabelas Comex" 1.0.0 (basePath /tabx): nome da unidade da Receita.
+  tabx: () => process.env.PORTAL_UNICO_PATH_TABX || '/tabx/api/ext/tabela'
 };
 let requisicaoTeste = null;
 const _usarRequisicao = fn => { requisicaoTeste = fn; sessao = null; ultimaAuth = 0; };
@@ -154,6 +159,58 @@ async function operadorEstrangeiro(cnpjRaiz, codigo, opts) {
   return dados;
 }
 
+/* ---------- Desembaraço: local, UF e data (a API do importador não traz) ----------
+   Eventos do histórico (domínio oficial): 419 Desembaraço efetuado, 418 Declaração desembaraçada sem
+   conferência aduaneira, 416 Desembaraço autorizado por decisão judicial, 413 Desembaraço autorizado. */
+const EVENTOS_DESEMBARACO = ['419', '418', '416', '413'];
+function dataDoDesembaraco(historico) {
+  const evs = (Array.isArray(historico) ? historico : []).filter(e => e && e.evento && EVENTOS_DESEMBARACO.includes(String(e.evento.codigo)) && /^\d{4}-\d{2}-\d{2}/.test(e.dataHora || ''));
+  for (const cod of EVENTOS_DESEMBARACO) {
+    const e = evs.filter(x => String(x.evento.codigo) === cod).sort((a, b) => String(a.dataHora).localeCompare(String(b.dataHora)))[0];
+    if (e) return { data: e.dataHora.slice(0, 10), evento: cod + ' - ' + (e.evento.descricao || '') };
+  }
+  return null;
+}
+let cacheTabelaUnidades = null;   // { nome, em }: tabela de unidades da RFB no TABX
+const cacheUnidades = new Map();  // código → nome
+/** Nome da unidade da Receita pelo TABX: acha a tabela pela própria listagem do Portal (sem nome fixo no código). */
+async function nomeUnidadeRfb(codigo, opts) {
+  if (!codigo) return '';
+  if (cacheUnidades.has(codigo)) return cacheUnidades.get(codigo);
+  if (!cacheTabelaUnidades || Date.now() - cacheTabelaUnidades.em > 24 * 3600 * 1000) {
+    const lista = await getJson(P.tabx(), opts);
+    const arr = Array.isArray(lista) ? lista : (lista && (lista.tabelas || lista.dados)) || [];
+    const txt = x => (x.nome || '') + ' ' + (x.rotulo || '') + ' ' + (x.descricao || '');
+    const t = process.env.PORTAL_UNICO_TABX_UNIDADES ? { nome: process.env.PORTAL_UNICO_TABX_UNIDADES }
+      : arr.find(x => x && /unidade/i.test(txt(x)) && /(rfb|receita|urf|local)/i.test(txt(x)));
+    cacheTabelaUnidades = { nome: t ? t.nome : '', em: Date.now() };
+  }
+  const tab = cacheTabelaUnidades.nome; if (!tab) return '';
+  const filtros = JSON.stringify([{ nomeTabela: tab, nome: 'CODIGO', valores: [String(codigo)] }]);
+  const r = await getJson(`${P.tabx()}/${enc(tab)}?filtros=${enc(filtros)}`, opts);
+  const campos = ((r && r.dados && r.dados[0]) || {}).campos || [];
+  const v = n => { const c = campos.find(x => x && String(x.nome).toUpperCase() === n); return c && c.valor != null ? String(c.valor).trim() : ''; };
+  const nome = v('NOME') || v('DESCRICAO') || v('NOME_UNIDADE') || '';
+  cacheUnidades.set(codigo, nome);
+  return nome;
+}
+/** Local, UF e data do desembaraço por outras APIs do Portal. Cada fonte é opcional: sem acesso, guarda o motivo. */
+async function desembaracoDuimp(num, versao, unidade, opts) {
+  const out = { local: '', uf: '', data: '', evento: '', fontes: {} };
+  try {
+    const g = await getJson(P.sefazGeral().replace('{numero}', enc(num)).replace('{versao}', enc(versao)), opts);
+    const c = (g && g.dadosCarga) || {};
+    if (/^[A-Z]{2}$/.test(String(c.ufDeclarada || ''))) out.uf = c.ufDeclarada;
+    let hist = g && g.itensHistorico;
+    if (!Array.isArray(hist) || !hist.length) hist = await getJson(P.sefazHistorico().replace('{numero}', enc(num)) + '?offset=0&limit=500', opts);
+    const d = dataDoDesembaraco(hist); if (d) { out.data = d.data; out.evento = d.evento; }
+    out.fontes.sefaz = 'ok';
+  } catch (e) { out.fontes.sefaz = e.message; }
+  try { out.local = await nomeUnidadeRfb(unidade, opts); out.fontes.tabx = out.local ? 'ok' : 'unidade não encontrada'; }
+  catch (e) { out.fontes.tabx = e.message; }
+  return out;
+}
+
 /**
  * DUIMP inteira, normalizada: versão vigente → dados gerais → itens (páginas
  * de 100) → exportadores e fabricantes do Catálogo (um por código, com cache).
@@ -180,7 +237,9 @@ async function consultarDuimpCompleta(numero, opts) {
   // Concorrência baixa: o limite do Portal é por hora, e são poucos códigos por DUIMP.
   const fila = [...codigos];
   await Promise.all(Array.from({ length: Math.min(3, fila.length) }, async () => { while (fila.length) { const cod = fila.shift(); operadores[cod] = raiz ? await operadorEstrangeiro(raiz, cod, o) : null; } }));
-  return normalizarDuimp(geral, itens, operadores, { versao: vig.versao, consultadoEm: o.agora || new Date().toISOString() });
+  const unidade = (geral && geral.carga && geral.carga.unidadeDeclarada && geral.carga.unidadeDeclarada.codigo) || '';
+  const desemb = await desembaracoDuimp(num, vig.versao, unidade, o);
+  return normalizarDuimp(geral, itens, operadores, { versao: vig.versao, consultadoEm: o.agora || new Date().toISOString(), desembaraco: desemb });
 }
 
 /* ---------- Mapeamento: nomes do Portal → objeto do Hub (só esta função muda se o Portal mudar) ---------- */
@@ -227,9 +286,10 @@ function normalizarDuimp(geral, itensBrutos, operadores, extra) {
   return {
     versao: String(x.versao || id.versao || ''), consultadoEm: x.consultadoEm || '',
     geral: {
-      numero: String(id.numero || '').toUpperCase(), versao: String(x.versao || id.versao || ''), dataRegistro: id.dataRegistro || '', dataDesembaraco: '',
+      numero: String(id.numero || '').toUpperCase(), versao: String(x.versao || id.versao || ''), dataRegistro: id.dataRegistro || '', dataDesembaraco: (x.desembaraco && x.desembaraco.data) || '', eventoDesembaraco: (x.desembaraco && x.desembaraco.evento) || '',
       situacao: (g.situacao && g.situacao.situacaoDuimp) || '', canal: (g.resultadoAnaliseRisco && g.resultadoAnaliseRisco.canalConsolidado) || '',
-      unidadeDespacho: (carga.unidadeDeclarada && carga.unidadeDeclarada.codigo) || '', localDesembaraco: '', ufDesembaraco: '',
+      unidadeDespacho: (carga.unidadeDeclarada && carga.unidadeDeclarada.codigo) || '', localDesembaraco: (x.desembaraco && x.desembaraco.local) || '', ufDesembaraco: (x.desembaraco && x.desembaraco.uf) || '',
+      fontesDesembaraco: (x.desembaraco && x.desembaraco.fontes) || {},
       // CE (Conhecimento Eletrônico do Mercante) = transporte marítimo (via 1 da NF-e); outro tipo fica para conferir.
       tipoIdentificacaoCarga: tipoCarga, identificacaoCarga: carga.identificacao || '', viaTransporte: tipoCarga === 'CE' ? 1 : null,
       paisProcedencia: (carga.paisProcedencia && carga.paisProcedencia.codigo) || '',
@@ -246,5 +306,5 @@ function normalizarDuimp(geral, itensBrutos, operadores, extra) {
 /* Nos testes o Portal é simulado (_usarRequisicao): conta como configurado, sem certificado. */
 const emTeste = () => !!requisicaoTeste;
 
-module.exports = { lerCertificado, cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, normalizarDuimp, getJson, _usarRequisicao,
-  _reset: () => { sessao = null; ultimaAuth = 0; cacheOperadores.clear(); } };
+module.exports = { lerCertificado, cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, desembaracoDuimp, dataDoDesembaraco, nomeUnidadeRfb, normalizarDuimp, getJson, _usarRequisicao,
+  _reset: () => { sessao = null; ultimaAuth = 0; cacheOperadores.clear(); cacheUnidades.clear(); cacheTabelaUnidades = null; } };

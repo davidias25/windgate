@@ -302,10 +302,11 @@
 
     /* Declaração. */
     const urf = (cfg.urfs || {})[g.unidadeDespacho] || null;
-    const local = txt(exDu.local) || (urf && urf.nome) || '', uf = String(exDu.uf || (urf && urf.uf) || '').toUpperCase();
-    if (!local || !/^[A-Z]{2}$/.test(uf)) P('documentos_importacao.local_desembaraco_aduaneiro', `Local e UF do desembaraço da unidade ${g.unidadeDespacho || '(sem código)'}: cadastre a unidade em NF-e › Configuração.`);
-    const dataDesemb = ehData(exDu.data_desembaraco) ? exDu.data_desembaraco : dataDesembaracoDaOp(o);
-    if (!ehData(dataDesemb)) P('documentos_importacao.data_desembaraco_aduaneiro', 'Data do desembaraço: a API da DUIMP não informa; vem do aviso do despachante no portal ou é digitada na nota (com motivo).');
+    // Ordem: digitado na nota (com motivo) › cadastro da unidade em NF-e › Configuração › Portal Único (API da Sefaz e Tabelas Comex).
+    const local = txt(exDu.local) || (urf && urf.nome) || txt(g.localDesembaraco) || '', uf = String(exDu.uf || (urf && urf.uf) || g.ufDesembaraco || '').toUpperCase();
+    if (!local || !/^[A-Z]{2}$/.test(uf)) P('documentos_importacao.local_desembaraco_aduaneiro', `Local e UF do desembaraço da unidade ${g.unidadeDespacho || '(sem código)'}${/^[A-Z]{2}$/.test(uf) && !local ? ` (UF ${uf} veio do Portal; falta o nome do local)` : ''}: cadastre a unidade em NF-e › Configuração.`);
+    const dataDesemb = ehData(exDu.data_desembaraco) ? exDu.data_desembaraco : (ehData(g.dataDesembaraco) ? g.dataDesembaraco : dataDesembaracoDaOp(o));
+    if (!ehData(dataDesemb)) P('documentos_importacao.data_desembaraco_aduaneiro', 'Data do desembaraço: o Portal Único ainda não mostra o desembaraço desta DUIMP (ou o certificado não tem acesso ao histórico). Vem do aviso do despachante no portal ou é digitada na nota (com motivo).' + ((g.fontesDesembaraco || {}).sefaz && g.fontesDesembaraco.sefaz !== 'ok' ? ' Resposta do Portal: ' + g.fontesDesembaraco.sefaz : ''));
     else if (ehData(exDu.data_desembaraco)) A('Data do desembaraço digitada na nota: conferir com o extrato da DUIMP.');
     const via = g.viaTransporte || (+exDu.via_transporte || null);
     if (!via) P('documentos_importacao.via_transporte', `Via de transporte: a carga da DUIMP é ${g.tipoIdentificacaoCarga || '(sem tipo)'}, não um CE Mercante. Informe a via na nota.`);
