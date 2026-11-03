@@ -86,8 +86,10 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(iA.icms_situacao_tributaria === '51' && iA.icms_base_calculo === 0 && iA.icms_valor === 0 && mA.totais.icms === 0, 'ICMS CST 51 zerado (benefício de AL fica fora da nota)');
   // IBS/CBS: base = VA 10.000 + II 2.000 + Siscomex 154,23 + AFRMM 250 = 12.404,23 · CBS 0,9% = 111,64 · IBS 0,1% = 12,40
   ok(iA.ibs_cbs_situacao_tributaria === '000' && iA.ibs_cbs_classificacao_tributaria === '000001' && iA.ibs_cbs_base_calculo === 12404.23 && iA.cbs_valor === 111.64 && iA.ibs_uf_valor === 12.4, 'IBS/CBS CST 000 / 000001 sobre 12.404,23: CBS 111,64 e IBS 12,40');
-  // Total = 9.500 + 480 + 20 + 2.000 + 154,23 = 12.154,23
-  ok(iA.valor_outras_despesas === 154.23 && mA.totais.total === 12154.23 && mA.totais.somaItens === mA.totais.total, 'outras despesas = Siscomex 154,23; total 12.154,23 = soma dos itens');
+  // Total como na NF 82 do Maino = 9.500 + 480 + 20 + II 2.000 + Siscomex 154,23 + PIS 210 + COFINS 965 + AFRMM 250 = 13.579,23
+  ok(iA.valor_outras_despesas === 154.23 && mA.totais.total === 13579.23 && mA.totais.somaItens === mA.totais.total && mA.payload.valor_total === 13579.23, 'outras despesas = Siscomex 154,23; total 13.579,23 com PIS, COFINS e AFRMM (como na NF 82) = soma dos itens');
+  ok(mA.payload.natureza_operacao === 'IMPORTACAO' && mA.payload.modalidade_frete === 0 && mA.payload.volumes[0].quantidade === 2 && mA.payload.volumes[0].especie === 'UNIDADES', 'natureza IMPORTACAO, frete por conta do remetente (0) e volumes: 2 UNIDADES, como na NF 82');
+  ok(mA.payload.informacoes_adicionais_contribuinte.includes('II R$ 2.000,00; IPI R$ 0,00; PIS R$ 210,00; COFINS R$ 965,00; AFRMM R$ 250,00; Taxa Siscomex R$ 154,23.'), 'tributos da importação nas informações complementares (o DANFE da Focus não tem quadro de II, PIS e COFINS)');
   ok(diA.numero === NUM20 && diA.valor_afrmm === 250 && diA.via_transporte === 1 && diA.uf_desembaraco_aduaneiro === 'CE' && diA.data_desembaraco_aduaneiro === '2026-10-22' && diA.adicoes[0].numero === 1 && diA.adicoes[0].codigo_fabricante_estrangeiro === 'FAB1', 'DUIMP no item: número (15 posições), AFRMM, via marítima, desembaraço do aviso do despachante e adição = item da DUIMP');
   ok(diA.forma_intermedio === 2 && diA.cnpj === '11444777000161' && diA.uf_terceiro === 'CE', 'conta e ordem pela DUIMP: forma de intermediação 2 com CNPJ do adquirente e UF do CRM');
   ok(mA.payload.nome_destinatario === W.HOMOLOGACAO_NOME && /DUIMP 26BR00000123456/.test(mA.payload.informacoes_adicionais_contribuinte), 'homologação: destinatário com o texto exigido pela SEFAZ; DUIMP nas informações complementares');
@@ -104,7 +106,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const dbR2 = banco(); dbR2.ops[0].duimpDados = retrato({ itens: [itemDuimp(1, 3333.33, 0, 0), itemDuimp(2, 6666.67, 0, 0)] });
   const mA2 = R.montarNFe(dbR2, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: 100.02 } } });
   ok(mA2.payload.items[0].ii_despesas_aduaneiras === 33.34 && mA2.payload.items[1].ii_despesas_aduaneiras === 66.68, 'AFRMM do despachante rateado: 33,34 + 66,68 = 100,02, sem centavo perdido');
-  ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + (x.valor_frete || 0) + (x.valor_seguro || 0) + x.ii_valor + x.ipi_valor + x.valor_outras_despesas, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
+  ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + (x.valor_frete || 0) + (x.valor_seguro || 0) + x.ii_valor + x.ipi_valor + x.valor_outras_despesas + x.pis_valor + x.cofins_valor + x.documentos_importacao[0].valor_afrmm, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
 
   console.log('\nPendências que bloqueiam:');
   const pA = mexe => { const d = banco(); mexe(d.ops[0].duimpDados, d); return R.montarNFe(d, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.map(p => p.campo); };
@@ -123,8 +125,8 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const mB = montar(dbB, 'B', 'OP20');
   const iB = mB.payload.items[0];
   ok(mB.pendencias.length === 0 && iB.cfop === '6949' && mB.payload.notas_referenciadas[0].chave_nfe === '2'.repeat(44), 'com o cenário definido: CFOP 6949 (SF/AL → adquirente/CE) e referência à NF de entrada');
-  // Custo repassado = total da NF de entrada 12.154,23 (frete e seguro inclusos); ICMS 4% = 486,17
-  ok(iB.valor_bruto === 12154.23 && iB.icms_valor === 486.17 && iB.icms_aliquota === 4 && mB.totais.total === 12154.23, 'preço = custo de importação repassado (12.154,23); ICMS interestadual 4% = 486,17');
+  // Custo repassado = total da NF de entrada 13.579,23; ICMS 4% = 543,17
+  ok(iB.valor_bruto === 13579.23 && iB.icms_valor === 543.17 && iB.icms_aliquota === 4 && mB.totais.total === 13579.23, 'preço = custo de importação repassado (13.579,23); ICMS interestadual 4% = 543,17');
   const dbBsem = banco(); dbBsem.hubPainel._nfeCenarios = dbB.hubPainel._nfeCenarios;
   ok(montar(dbBsem, 'B', 'OP20').pendencias.some(p => p.campo === 'notas_referenciadas'), 'sem NF de entrada autorizada, a saída na conta e ordem não sai');
 
@@ -138,11 +140,11 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   console.log('\nD · triangular SF → JeT:');
   const dbD = banco(); dbD.hubNFe.push(autorizada(dbD, 'A', 'OP20', mA, '2'.repeat(44)));
   const mD = montar(dbD, 'D', 'OP20'), iD = mD.payload.items[0];
-  // Piso = 12.154,23 ÷ (1 − 4%) = 12.660,66 · ICMS 4% = 506,43 · base PIS/COFINS 12.154,23 · PIS 1,65% = 200,54 · COFINS 7,6% = 923,72
+  // Piso = 13.579,23 ÷ (1 − 4%) = 14.145,03 · ICMS 4% = 565,80 · base PIS/COFINS 13.579,23 · PIS 1,65% = 224,06 · COFINS 7,6% = 1.032,02
   ok(mD.pendencias.length === 0 && iD.cfop === '6102' && iD.icms_origem === '1' && mD.payload.cnpj_destinatario === '11222333000181' && mD.payload.inscricao_estadual_destinatario === '082123456', 'CFOP 6102, origem 1, destinatária JeT com CNPJ e IE da configuração');
-  ok(iD.valor_bruto === 12660.66 && iD.icms_valor === 506.43 && iD.pis_base_calculo === 12154.23 && iD.pis_valor === 200.54 && iD.cofins_valor === 923.72, 'preço no piso 12.660,66; ICMS 4% = 506,43; PIS 200,54; COFINS 923,72');
+  ok(iD.valor_bruto === 14145.03 && iD.icms_valor === 565.8 && iD.pis_base_calculo === 13579.23 && iD.pis_valor === 224.06 && iD.cofins_valor === 1032.02, 'preço no piso 14.145,03; ICMS 4% = 565,80; PIS 224,06; COFINS 1.032,02');
   const mDbaixo = R.montarNFe(dbD, Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }, { itens: [Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }).itens[0], { valorUnitario: 6000 })] }));
-  ok(mDbaixo.pendencias.some(p => p.campo === 'piso'), 'abaixo do piso (12.000 < 12.660,66): pendência, não transmite');
+  ok(mDbaixo.pendencias.some(p => p.campo === 'piso'), 'abaixo do piso (12.000 < 14.145,03): pendência, não transmite');
 
   console.log('\nE · JeT → cliente contribuinte:');
   const mE = montar(db, 'E', 'OP40'), [e1, e2] = mE.payload.items;
@@ -227,7 +229,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   let r = await chamar('davi', 'POST', '/api/nfe/montar', corpoA); respostas.push(r);
   const nA = r.j.nota;
   ok(r.status === 200 && nA.pendencias.length === 0 && nA.status === 'rascunho' && nA.ref === REF_A && nA.ambiente === 'homologacao' && nA.montadoPor === 'davi', 'Davi monta a entrada no servidor: rascunho, referência estável, homologação, sem pendências');
-  ok(nA.totais.total === 12154.23, 'o servidor chega ao mesmo total conferido à mão (12.154,23)');
+  ok(nA.totais.total === 13579.23, 'o servidor chega ao mesmo total conferido à mão (13.579,23)');
   r = await chamar('pedro', 'POST', '/api/nfe/montar', { cenario: 'B', opId: 'OP20' }); respostas.push(r);
   const nP = r.j.nota;
   ok(r.status === 200 && nP.pendencias.some(p => p.campo === 'cfop') && nP.ref === 'wg-sf-op20-b-1' && nP.montadoPor === 'pedro', 'o contador monta pelo servidor (sem ler operações nem cotações) e recebe as pendências');
@@ -251,8 +253,8 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(/ref=wg-sf-duimp-26br00000123456-a-1$/.test(ultimo.url) && ultimo.auth === 'Basic ' + Buffer.from('tk-sf-secreto:').toString('base64') && /^homologacao/.test(new URL(ultimo.url).host), 'POST com ?ref=, token da SF e servidor de homologação');
   ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(F.ultimoCorpo.data_emissao) && F.ultimoCorpo.items[0].documentos_importacao[0].numero === '26BR00000123456', 'data de emissão do momento do envio (fuso de SP); DUIMP no item');
   const cb = F.ultimoCorpo;
-  ok(cb.valor_produtos === 9500 && cb.valor_frete === 480 && cb.valor_seguro === 20 && cb.valor_total_ii === 2000 && cb.valor_ipi === 0 && cb.valor_pis === 210 && cb.valor_cofins === 965 && cb.valor_outras_despesas === 154.23 && cb.icms_valor_total === 0 && cb.valor_total === 12154.23,
-    'totais do cabeçalho enviados à Focus: produtos 9.500 + frete 480 + seguro 20 + II 2.000 + outras 154,23 = total 12.154,23 (o DANFE mostra o total)');
+  ok(cb.valor_produtos === 9500 && cb.valor_frete === 480 && cb.valor_seguro === 20 && cb.valor_total_ii === 2000 && cb.valor_ipi === 0 && cb.valor_pis === 210 && cb.valor_cofins === 965 && cb.valor_outras_despesas === 154.23 && cb.icms_valor_total === 0 && cb.valor_total === 13579.23 && cb.data_entrada_saida === cb.data_emissao,
+    'totais do cabeçalho enviados à Focus: total 13.579,23 da nota (com PIS, COFINS e AFRMM) e data de entrada = emissão');
   ok(cb.ibs_cbs_base_calculo === 12404.23 && cb.cbs_valor_total === 111.64 && cb.ibs_valor_total === 12.4, 'totais do IBS/CBS no cabeçalho: base 12.404,23, CBS 111,64, IBS 12,40');
   const tF = R.totaisCabecalho(mF.payload.items), tC = R.totaisCabecalho(mC.payload.items);
   ok(tF.valor_total === 30000 && tF.icms_valor_total === 1200 && tF.icms_valor_total_uf_destino === 1440 && tC.valor_total === 21000 && tC.valor_ipi === 1000 && tC.icms_base_calculo === 20000, 'saídas: total 30.000 com DIFAL 1.440 no cabeçalho (fora do total); C com IPI por fora = 21.000');
@@ -273,7 +275,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(nAut.xmlLink === 'https://storage.teste/NFe_101_SF.xml' && nAut.danfeLink === 'https://storage.teste/NFe_101_SF.pdf' && nAut.arquivosSalvos, 'XML e DANFE baixados da Focus e guardados no Storage');
   const doc = dbS.docs.find(d => d.nfe === nA._id), notaF = dbS.hubNotas.find(n => n.nfe === nA._id);
   ok(doc && doc.op === 'OP20' && doc.tipo === 'nfe' && doc.link === nAut.danfeLink, 'documento criado no GED da operação');
-  ok(notaF && notaF.chave === nAut.chave && notaF.tipo === 'entrada' && notaF.empresa === 'WindGate' && notaF.valor === 12154.23 && notaF.xmlLink === nAut.xmlLink, 'registrada em hubNotas como nota de entrada, para o Fiscal e o contador');
+  ok(notaF && notaF.chave === nAut.chave && notaF.tipo === 'entrada' && notaF.empresa === 'WindGate' && notaF.valor === 13579.23 && notaF.xmlLink === nAut.xmlLink, 'registrada em hubNotas como nota de entrada, para o Fiscal e o contador');
   r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: REF_A }) });
   dbS = await lerDB('davi');
   ok(dbS.docs.filter(d => d.nfe === nA._id).length === 1 && dbS.hubNotas.filter(n => n.nfe === nA._id).length === 1, 'aviso repetido não duplica documento nem nota fiscal');

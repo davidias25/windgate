@@ -33,8 +33,8 @@
      o contador ainda não definiu, e a nota fica pendente até ele definir. */
   const CENARIOS_PADRAO = [
     { k: 'A', nome: 'Entrada de importação', emitente: 'WindGate', destino: 'exportador', tipo_documento: 0, finalidade_emissao: 1,
-      natureza_operacao: 'Compra para comercialização - importação', cfop_exterior: '3102', cfop_interna: '', cfop_interestadual: '',
-      consumidor_final: 0, presenca_comprador: 9, modalidade_frete: 9,
+      natureza_operacao: 'IMPORTACAO', cfop_exterior: '3102', cfop_interna: '', cfop_interestadual: '',
+      consumidor_final: 0, presenca_comprador: 9, modalidade_frete: 0,
       icms_origem: '1', icms_cst: '51', icms_aliquota: null, icms_aliquota_sem_beneficio: 19, icms_reducao_base: 0,
       ipi_cst: '00', ipi_enquadramento: '999', pis_cst: '50', cofins_cst: '50', pis_aliquota: null, cofins_aliquota: null, pis_cst_extinto: '08',
       ibs_cbs_cst: '000', ibs_cbs_classificacao: '000001', difal: false, aplica_monofasico: false, exige_referencia: false, piso_saida: false,
@@ -43,6 +43,8 @@
       /* Padrão da NF de entrada do Maino (NF 88): produto = mercadoria, frete no item, ICMS CST 51
          zerado (o benefício de AL fica como custo à parte), IBS/CBS CST 000 / cClassTrib 000001. */
       a_vprod: 'mercadoria', a_tributo_valor: 'devido', a_icms_modo: 'zero',
+      // NF 82 do Maino: total = produtos + frete + seguro + II + IPI + outras + PIS + COFINS + AFRMM (97.390,84).
+      a_total_soma: 'pis,cofins,afrmm', a_volume_especie: 'UNIDADES',
       a_outras_pis_cofins: false, a_outras_siscomex: true, a_outras_afrmm: false, a_outras_icms: false, a_icms_base_despesas: true,
       obs: 'Nasce da DUIMP importada, no padrão da NF de entrada do Maino: valor do produto = mercadoria, frete e seguro no item, ICMS CST 51 zerado (benefício de AL como custo à parte), IBS/CBS CST 000 / cClassTrib 000001. Outras despesas = Taxa Siscomex: conferir com o XML da NF 88.' },
     { k: 'B', nome: 'Saída na conta e ordem', emitente: 'WindGate', destino: 'adquirente', tipo_documento: 1, finalidade_emissao: 1,
@@ -95,6 +97,7 @@
     ['carga_5291', 'Carga Convênio 52/91 (%)', 'n'], ['fcp_destino', 'FCP/FECOP destino (%)', 'n'], ['ibs_cbs_cst', 'CST IBS/CBS', 't'], ['ibs_cbs_classificacao', 'cClassTrib IBS/CBS', 't'],
     ['presenca_comprador', 'Presença do comprador', 'n'], ['modalidade_frete', 'Modalidade do frete', 'n'],
     ['pis_cofins_exclui_icms', 'Saída: PIS/COFINS sobre o valor sem o ICMS', 'b'], ['a_icms_modo', 'Entrada: ICMS (zero | calculado)', 't'],
+    ['a_total_soma', 'Entrada: somar ao total da nota (pis, cofins, afrmm, icms)', 't'], ['a_volume_especie', 'Entrada: espécie dos volumes', 't'],
     ['a_vprod', 'Entrada: valor do produto (aduaneiro | mercadoria)', 't'], ['a_tributo_valor', 'Entrada: tributo federal (devido | aRecolher)', 't'],
     ['a_outras_pis_cofins', 'Entrada: PIS/COFINS em outras despesas', 'b'], ['a_outras_siscomex', 'Entrada: Siscomex em outras despesas', 'b'], ['a_outras_afrmm', 'Entrada: AFRMM em outras despesas', 'b'],
     ['a_outras_icms', 'Entrada: ICMS em outras despesas', 'b'], ['a_icms_base_despesas', 'Entrada: Siscomex e AFRMM na base do ICMS', 'b'], ['obs', 'Observação', 't']
@@ -199,10 +202,12 @@
       out.extras = { referencia: ref ? ref._id : '', finalidade: 2, cfop: '' };
     } else {
       const ent = notaEntradaDaOp(db, a.opId), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
+      const baseEnt = x => num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ipi_valor) + num(x.ii_valor) + num(x.valor_outras_despesas);
+      const somaBaseEnt = itensEnt.reduce((s, x) => s + baseEnt(x), 0), fatorEnt = somaBaseEnt > 0 && ent && ent.totais && num(ent.totais.total) > 0 ? num(ent.totais.total) / somaBaseEnt : 1;
       const inter = num(cen.icms_aliquota_interestadual) / 100;
       out.itens = qi.map((it, i) => {
         const b = baseItem(it, i), fob = num(it.q) * num(it.u) * txD, sh = fobTot > 0 ? fob / fobTot : 0;
-        const totEnt = itensEnt[i] ? num(itensEnt[i].valor_bruto) + num(itensEnt[i].valor_frete) + num(itensEnt[i].valor_seguro) + num(itensEnt[i].ipi_valor) + num(itensEnt[i].ii_valor) + num(itensEnt[i].valor_outras_despesas) : 0;
+        const totEnt = itensEnt[i] ? baseEnt(itensEnt[i]) * fatorEnt : 0;
         let total = 0;
         if (cen.k === 'B') total = totEnt;
         else if (cen.k === 'D') total = totEnt && inter < 1 ? totEnt / (1 - inter) : 0;
@@ -348,6 +353,9 @@
     /* Itens: um item da NF-e por item da DUIMP, tributos federais exatamente como lá. */
     const campoT = cen.a_tributo_valor === 'aRecolher' ? 'aRecolher' : 'devido', sim = v => v === true || v === 'sim' || v === 'true';
     const tot = { produtos: 0, ii: 0, ipi: 0, icms: 0, outras: 0, pis: 0, cofins: 0, difal: 0, fcp: 0, cbs: 0, ibs: 0, total: 0 };
+    // O que, além dos campos da NF-e, entra no total da nota (cenário; padrão da NF 82: PIS, COFINS e AFRMM).
+    const somaT = String(cen.a_total_soma == null ? '' : cen.a_total_soma).toLowerCase();
+    const somaNoTotal = (pis, cof, afrmm, icms) => r2((/pis/.test(somaT) && !sim(cen.a_outras_pis_cofins) ? pis + cof : 0) + (/afrmm/.test(somaT) && !sim(cen.a_outras_afrmm) ? afrmm : 0) + (/icms/.test(somaT) && !sim(cen.a_outras_icms) ? icms : 0));
     let afrmmUsado = 0;
     const lib = db.ncmlib || {};
     const items = itensD.map((d, i) => {
@@ -362,9 +370,12 @@
       const sisc = r2(d.taxaSiscomex), afrmm = afrmmDuimp > 0 ? r2(d.afrmm) : (afrmmManual ? (ult ? r2(afrmmManual - afrmmUsado) : r2(afrmmManual * V / (itensD.reduce((s, x) => s + r2(cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL), 0) || 1))) : 0);
       afrmmUsado = r2(afrmmUsado + afrmm);
       const vu = qtd ? +(V / qtd).toFixed(10) : 0, un = txt(d.unidadeComercial, 6) || 'UN';
-      // Como no Maino: código = nº do item da declaração; descrição "ITEM n - <descrição>".
-      const desc = txt(d.descricao, 100) || txt((lib[soDig(d.ncm)] || {}).d, 100) || 'mercadoria';
-      const x = { numero_item: n, codigo_produto: String(d.numero), descricao: `ITEM ${d.numero} - ${desc}`.slice(0, 120), cfop: txt(cen.cfop_exterior), codigo_ncm: soDig(d.ncm),
+      // Como no Maino (NF 82): código e descrição do Catálogo de Produtos (denominação + detalhamento);
+      // o que passa de 120 caracteres vai nas informações adicionais do item. Sem Catálogo: "ITEM n - <descrição da DUIMP>".
+      const cat = d.produto || null, denom = txt(cat && cat.denominacao, 3700), detal = txt(cat && cat.descricao, 3700);
+      const descLonga = denom ? [denom, detal].filter(Boolean).join(' ') : `ITEM ${d.numero} - ${txt(d.descricao, 3700) || txt((lib[soDig(d.ncm)] || {}).d, 100) || 'mercadoria'}`;
+      const codigo = txt(cat && cat.codigoInterno, 60) || (denom ? txt(denom.split(' - ')[0], 60) : '') || String(d.numero);
+      const x = { numero_item: n, codigo_produto: codigo, descricao: descLonga.slice(0, 120), cfop: txt(cen.cfop_exterior), codigo_ncm: soDig(d.ncm),
         unidade_comercial: un, quantidade_comercial: qtd, valor_unitario_comercial: vu, unidade_tributavel: un, quantidade_tributavel: qtd, valor_unitario_tributavel: vu, valor_bruto: V, inclui_no_total: 1,
         icms_origem: txt(cen.icms_origem), icms_situacao_tributaria: txt(cen.icms_cst) };
       // Produto = mercadoria: frete e seguro do item vão nos campos próprios (no aduaneiro já estão dentro).
@@ -404,10 +415,14 @@
           ibs_uf_aliquota: tr.ibsUf ? +tr.ibsUf.aliquota || 0 : t.ibs.aliq, ibs_uf_valor: ibsV, ibs_mun_aliquota: 0, ibs_mun_valor: 0, ibs_valor_total: ibsV, cbs_aliquota: tr.cbs ? +tr.cbs.aliquota || 0 : t.cbs.aliq, cbs_valor: cbsV });
         tot.cbs = r2(tot.cbs + cbsV); tot.ibs = r2(tot.ibs + ibsV);
       }
-      if (varias && d.op) x.informacoes_adicionais_item = `Operação ${d.op}`;
+      const infItem = [descLonga.length > 120 ? descLonga.slice(120) : '', varias && d.op ? `Operação ${d.op}` : ''].filter(Boolean).join(' · ');
+      if (infItem) x.informacoes_adicionais_item = infItem.slice(0, 500);
+      if (!denom) A(`Item ${d.numero}: produto ${d.produtoCodigo || '(sem código)'} não encontrado no Catálogo de Produtos: código e descrição saem da DUIMP.`);
       tot.produtos = r2(tot.produtos + V); tot.ii = r2(tot.ii + II); tot.ipi = r2(tot.ipi + IPI); tot.icms = r2(tot.icms + ICMS); tot.outras = r2(tot.outras + outras);
       tot.frete = r2((tot.frete || 0) + freteI); tot.seguro = r2((tot.seguro || 0) + seguroI);
-      tot.pis = r2(tot.pis + PIS); tot.cofins = r2(tot.cofins + COF); tot.total = r2(tot.total + V + freteI + seguroI + II + IPI + outras);
+      tot.pis = r2(tot.pis + PIS); tot.cofins = r2(tot.cofins + COF); tot.afrmm = r2((tot.afrmm || 0) + afrmm); tot.siscomex = r2((tot.siscomex || 0) + sisc);
+      tot.peso = r2((tot.peso || 0) + num(d.pesoLiquido)); tot.qtd = (tot.qtd || 0) + qtd;
+      tot.total = r2(tot.total + V + freteI + seguroI + II + IPI + outras + somaNoTotal(PIS, COF, afrmm, ICMS));
       return x;
     });
 
@@ -425,16 +440,23 @@
     const infos = [`DUIMP ${g.numero} versão ${r.versao} de ${W.dataBR(W.soData(g.dataRegistro))}.`];
     if (fi !== 1 && terceiro) infos.push(`Importação ${fi === 2 ? 'por conta e ordem do adquirente' : 'por encomenda do encomendante'} CNPJ ${terceiro.cnpj}.`);
     if (varias) infos.push(`Operações: ${opsD.map(x => x.id).join(', ')}.`);
+    const brl = v => 'R$ ' + r2(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    infos.push(`II ${brl(tot.ii)}; IPI ${brl(tot.ipi)}; PIS ${brl(tot.pis)}; COFINS ${brl(tot.cofins)}; AFRMM ${brl(tot.afrmm)}; Taxa Siscomex ${brl(tot.siscomex)}.`);
     if (txt(ex.informacoes)) infos.push(txt(ex.informacoes, 2000));
+    const pesoBruto = num(ex.duimp && ex.duimp.pesoBruto) || num(ex.pesoBruto) || 0;
+    if (!pesoBruto) A('Peso bruto: a DUIMP não informa (só o líquido). Digite na nota se quiser no DANFE.');
+    const volumes = [limpar({ quantidade: Math.round(tot.qtd || 0) || '', especie: txt(cen.a_volume_especie, 60), peso_liquido: tot.peso ? +tot.peso.toFixed(3) : '', peso_bruto: pesoBruto ? +pesoBruto.toFixed(3) : '' })];
     const payload = limpar({
-      natureza_operacao: txt(cen.natureza_operacao, 60) || 'Compra para comercialização - importação', data_emissao: data + 'T12:00:00-03:00', tipo_documento: 0, finalidade_emissao: 1,
+      natureza_operacao: txt(cen.natureza_operacao, 60) || 'IMPORTACAO', data_emissao: data + 'T12:00:00-03:00', tipo_documento: 0, finalidade_emissao: 1,
       local_destino: 3, consumidor_final: 0, presenca_comprador: +cen.presenca_comprador || 9, modalidade_frete: temNum(cen.modalidade_frete) ? +cen.modalidade_frete : 9, cnpj_emitente: soDig(emit.cnpj),
       nome_destinatario: a.ambiente === 'homologacao' ? HOMOLOGACAO_NOME : txt(exp && exp.nome, 60), indicador_inscricao_estadual_destinatario: 9,
       logradouro_destinatario: txt(exp && exp.logradouro, 60), numero_destinatario: 'S/N', bairro_destinatario: txt(exp && exp.cidade, 60) || 'EXTERIOR',
       municipio_destinatario: 'EXTERIOR', codigo_municipio_destinatario: '9999999', pais_destinatario: pais ? pais.nome : '', codigo_pais_destinatario: pais ? pais.codigo : '',
-      id_estrangeiro_destinatario: txt(exp && exp.tin, 20), informacoes_adicionais_contribuinte: infos.join(' ').slice(0, 5000), items
+      id_estrangeiro_destinatario: txt(exp && exp.tin, 20), informacoes_adicionais_contribuinte: infos.join(' ').slice(0, 5000), volumes, items
     });
-    const somaItens = r2(items.reduce((s, x) => s + num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ii_valor) + num(x.ipi_valor) + num(x.valor_outras_despesas), 0));
+    Object.assign(payload, totaisCabecalho(items), { valor_total: tot.total });
+    const somaItens = r2(items.reduce((s, x) => s + num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ii_valor) + num(x.ipi_valor) + num(x.valor_outras_despesas)
+      + somaNoTotal(num(x.pis_valor), num(x.cofins_valor), num(((x.documentos_importacao || [])[0] || {}).valor_afrmm), num(x.icms_valor)), 0));
     if (Math.abs(somaItens - tot.total) > 0.005) P('total', `Total da nota (R$ ${tot.total.toFixed(2)}) não bate com a soma dos itens (R$ ${somaItens.toFixed(2)}).`);
     return { payload, pendencias: pend, avisos, totais: Object.assign(tot, { somaItens }), empresa, cenario: 'A', opId: (ret.op && ret.op.id) || a.opId || '',
       destinatario: { nome: txt(exp && exp.nome, 60), cnpj: '', uf: '' }, formaIntermedio: fi, duimp: { numero: g.numero, versao: r.versao }, ops: opsD.map(x => x.id) };
@@ -731,7 +753,8 @@
   /** Payload na hora de enviar: data de emissão de agora (fuso de São Paulo) e totais do cabeçalho. */
   function paraEnvio(payload, agora) {
     const d = new Date(agora || Date.now()), sp = new Date(d.getTime() - 3 * 3600 * 1000);
-    return Object.assign({}, payload, totaisCabecalho(payload && payload.items), { data_emissao: sp.toISOString().slice(0, 19) + '-03:00' });
+    const quando = sp.toISOString().slice(0, 19) + '-03:00';
+    return Object.assign(totaisCabecalho(payload && payload.items), payload, { data_emissao: quando, data_entrada_saida: quando });
   }
 
   return { montarEntradaDuimp, conferirDuimpCotacao, dataDesembaracoDaOp, PAISES_BACEN, paisBacen,

@@ -43,6 +43,7 @@ function portalSimulado(estado) {
         { numeroDuimp: NUM, evento: { codigo: '419', descricao: 'Desembaraço efetuado' }, dataHora: '2026-10-21T16:10:00.000-0300' }] });
       return json(404, {});
     }
+    if (estado.catalogo && u.pathname === '/catp/api/ext/produto/58762606/1001/1') return json(200, { codigo: '1001', versao: '1', denominacao: 'BETONEIRA 400L - Betoneira elétrica de 400 litros', descricao: 'BETONEIRA ELETRICA 400 LITROS, MOTOR 2CV, TAMBOR EM ACO CARBONO, COM RODAS PARA TRANSPORTE E SUPORTE DE ACO PINTADO', codigosInterno: [] });
     if (estado.tabx && u.pathname === '/tabx/api/ext/tabela') return json(200, [{ nome: 'MOEDA', rotulo: 'Moeda' }, { nome: 'UNIDADE_RFB', rotulo: 'Unidade da Receita Federal' }]);
     if (estado.tabx && u.pathname === '/tabx/api/ext/tabela/UNIDADE_RFB') { const f = JSON.parse(u.searchParams.get('filtros') || '[]'); return json(200, { nomeTabela: 'UNIDADE_RFB', dados: f[0] && f[0].valores[0] === '0317900' ? [{ campos: [{ nome: 'CODIGO', valor: '0317900' }, { nome: 'NOME', valor: 'ALF - PORTO DE PECEM' }] }] : [] }); }
     if (u.pathname.endsWith('/versoes')) return json(200, Object.assign({}, FX.versoes, { versao: estado.versao }));
@@ -94,7 +95,7 @@ function banco() {
 
   console.log('\nDesembaraço por outras APIs do Portal (Sefaz e Tabelas Comex):');
   portal._reset();
-  const estD = { versao: '2', itens: () => clone(FX.itens), sefaz: true, tabx: true };
+  const estD = { versao: '2', itens: () => clone(FX.itens), sefaz: true, tabx: true, catalogo: true };
   portal._usarRequisicao(portalSimulado(estD));
   const retD = await portal.consultarDuimpCompleta(NUM, { pausaMs: 0 }), gD = retD.geral;
   ok(gD.ufDesembaraco === 'CE' && gD.localDesembaraco === 'ALF - PORTO DE PECEM' && gD.dataDesembaraco === '2026-10-21' && /^419/.test(gD.eventoDesembaraco), 'UF da unidade de despacho (Sefaz), nome da unidade (TABX) e data do evento 419 "Desembaraço efetuado"');
@@ -108,6 +109,10 @@ function banco() {
   const dbD = banco(); dbD.ops[0].portalEventos = [];
   dbD.ops[0].duimpDados = Object.assign(clone(retD), { itens: retD.itens.map(i => Object.assign({}, i, { op: i.numero === 3 ? 'OP21' : 'OP16' })) });
   const mD = W.montarNFe(dbD, { cenario: 'A', opId: 'OP16', duimpNumero: NUM, dataEmissao: '2026-10-29' }), diD = mD.payload.items[0].documentos_importacao[0];
+  const pD = mD.payload.items;
+  ok(retD.itens[0].produto && retD.itens[0].produto.denominacao.startsWith('BETONEIRA 400L') && estD.chamadas.filter(c => c.startsWith('/catp/api/ext/produto/')).length === 2, 'Catálogo de Produtos: uma consulta por produto e versão (1001 e 2002)');
+  ok(pD[0].codigo_produto === 'BETONEIRA 400L' && pD[0].descricao.length === 120 && pD[0].descricao.startsWith('BETONEIRA 400L - Betoneira elétrica de 400 litros BETONEIRA ELETRICA') && pD[0].informacoes_adicionais_item.length > 0 && /^ITEM 3 - /.test(pD[2].descricao),
+    'produto do Catálogo como na NF 82: código = denominação até o " - ", descrição = denominação + detalhamento (o resto vai nas informações do item); sem Catálogo, "ITEM n - …"');
   ok(!mD.pendencias.some(p => /desembaraco/.test(p.campo)) && diD.local_desembaraco_aduaneiro === 'ALF - PORTO DE PECEM' && diD.uf_desembaraco_aduaneiro === 'CE' && diD.data_desembaraco_aduaneiro === '2026-10-21', 'NF de entrada com local, UF e data do desembaraço vindos do Portal, sem cadastro nem aviso do despachante');
   dbD.hubPainel._nfeConfig = { urfs: { '0317900': { nome: 'Porto do Pecém', uf: 'CE' } } };
   ok(W.montarNFe(dbD, { cenario: 'A', opId: 'OP16', duimpNumero: NUM, dataEmissao: '2026-10-29' }).payload.items[0].documentos_importacao[0].local_desembaraco_aduaneiro === 'Porto do Pecém', 'o cadastro da unidade em NF-e › Configuração prevalece sobre o nome do TABX');

@@ -110,6 +110,8 @@ const P = {
   versoes: () => process.env.PORTAL_UNICO_PATH_VERSOES || '/duimp-api/api/ext/duimp/{numero}/versoes',
   itens: () => process.env.PORTAL_UNICO_PATH_ITENS || '/duimp-api/api/ext/duimp/{numero}/{versao}/itens',
   operador: () => process.env.PORTAL_UNICO_PATH_OPERADOR || '/catp/api/ext/operador-estrangeiro',
+  // Catálogo de Produtos 1.0.0: GET /ext/produto/{cpfCnpjRaiz}/{codigo}/{versao} → denominação e detalhamento.
+  produto: () => process.env.PORTAL_UNICO_PATH_PRODUTO || '/catp/api/ext/produto/{raiz}/{codigo}/{versao}',
   // "Duimp - Nova API da Sefaz" 77.0.0 (basePath /duimp-sefaz/api/ext): UF da unidade de despacho e histórico com a data do desembaraço.
   sefazGeral: () => process.env.PORTAL_UNICO_PATH_SEFAZ || '/duimp-sefaz/api/ext/duimp/{numero}/{versao}',
   sefazHistorico: () => process.env.PORTAL_UNICO_PATH_SEFAZ_HIST || '/duimp-sefaz/api/ext/duimp/{numero}/historico',
@@ -146,6 +148,17 @@ async function versaoVigente(numero, opts) {
   return { versao: String(v), dataRegistro: (j && j.dataRegistro) || '' };
 }
 
+const cacheProdutos = new Map();     // "raiz|codigo|versao" → { dados, em }
+async function produtoCatalogo(raiz, codigo, versao, opts) {
+  const chave = [raiz, codigo, versao].join('|'), c = cacheProdutos.get(chave);
+  if (c && Date.now() - c.em < 6 * 3600 * 1000) return c.dados;
+  let d = null;
+  try { d = await getJson(P.produto().replace('{raiz}', enc(raiz)).replace('{codigo}', enc(codigo)).replace('{versao}', enc(versao || '1')), opts); }
+  catch (e) { if (!e.naoEncontrado) throw e; }
+  const dados = d && (d.denominacao || d.descricao) ? { denominacao: d.denominacao || '', descricao: d.descricao || '', codigoInterno: (Array.isArray(d.codigosInterno) && d.codigosInterno[0]) || '' } : null;
+  cacheProdutos.set(chave, { dados, em: Date.now() });
+  return dados;
+}
 const cacheOperadores = new Map();   // "raiz|codigo" → { dados, em }
 async function operadorEstrangeiro(cnpjRaiz, codigo, opts) {
   const chave = cnpjRaiz + '|' + codigo, c = cacheOperadores.get(chave);
@@ -237,9 +250,16 @@ async function consultarDuimpCompleta(numero, opts) {
   // Concorrência baixa: o limite do Portal é por hora, e são poucos códigos por DUIMP.
   const fila = [...codigos];
   await Promise.all(Array.from({ length: Math.min(3, fila.length) }, async () => { while (fila.length) { const cod = fila.shift(); operadores[cod] = raiz ? await operadorEstrangeiro(raiz, cod, o) : null; } }));
+  // Produtos do Catálogo (denominação e detalhamento, como na NF do Maino). Sem acesso, a nota usa a descrição da DUIMP.
+  const produtos = {};
+  for (const it of itens) {
+    const p = it && it.produto; if (!p || p.codigo == null || !raiz) continue;
+    const k = p.codigo + '|' + (p.versao || '');
+    if (!(k in produtos)) { try { produtos[k] = await produtoCatalogo(String(p.niResponsavel || raiz).replace(/\D/g, '').slice(0, 8) || raiz, String(p.codigo), String(p.versao || '1'), o); } catch (e) { produtos[k] = null; } }
+  }
   const unidade = (geral && geral.carga && geral.carga.unidadeDeclarada && geral.carga.unidadeDeclarada.codigo) || '';
   const desemb = await desembaracoDuimp(num, vig.versao, unidade, o);
-  return normalizarDuimp(geral, itens, operadores, { versao: vig.versao, consultadoEm: o.agora || new Date().toISOString(), desembaraco: desemb });
+  return normalizarDuimp(geral, itens, operadores, { versao: vig.versao, consultadoEm: o.agora || new Date().toISOString(), desembaraco: desemb, produtos });
 }
 
 /* ---------- Mapeamento: nomes do Portal → objeto do Hub (só esta função muda se o Portal mudar) ---------- */
@@ -267,6 +287,8 @@ function normalizarDuimp(geral, itensBrutos, operadores, extra) {
     const m = it.mercadoria || {}, cv = it.condicaoVenda || {}, tm = (it.tributos && it.tributos.mercadoria) || {}, car = it.caracterizacaoImportacao || {};
     return {
       numero: +((it.identificacao && it.identificacao.numeroItem) || 0), ncm: String((it.produto && it.produto.ncm) || '').replace(/\D/g, ''), produtoCodigo: it.produto && it.produto.codigo != null ? String(it.produto.codigo) : '',
+      produtoVersao: it.produto && it.produto.versao != null ? String(it.produto.versao) : '',
+      produto: (x.produtos && it.produto && x.produtos[it.produto.codigo + '|' + (it.produto.versao || '')]) || null,
       descricao: m.descricao || '', quantidade: n2(m.quantidadeComercial), unidadeComercial: m.unidadeComercial || '', quantidadeEstatistica: n2(m.quantidadeMedidaEstatistica), unidadeEstatistica: m.unidadeMedidaEstatistica || '',
       pesoLiquido: n2(m.pesoLiquido), moeda: (m.moedaNegociada && m.moedaNegociada.codigo) || '', valorUnitarioMoeda: n2(m.valorUnitarioMoedaNegociada),
       valorMercadoriaMoeda: n2(cv.valorMoedaNegociada), valorMercadoriaBRL: n2(cv.valorBRL), valorAduaneiroBRL: n2(tm.valorAduaneiroBRL), valorLocalEmbarqueBRL: n2(tm.valorLocalEmbarqueBRL),
@@ -306,5 +328,5 @@ function normalizarDuimp(geral, itensBrutos, operadores, extra) {
 /* Nos testes o Portal é simulado (_usarRequisicao): conta como configurado, sem certificado. */
 const emTeste = () => !!requisicaoTeste;
 
-module.exports = { lerCertificado, cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, desembaracoDuimp, dataDoDesembaraco, nomeUnidadeRfb, normalizarDuimp, getJson, _usarRequisicao,
-  _reset: () => { sessao = null; ultimaAuth = 0; cacheOperadores.clear(); cacheUnidades.clear(); cacheTabelaUnidades = null; } };
+module.exports = { lerCertificado, cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, produtoCatalogo, desembaracoDuimp, dataDoDesembaraco, nomeUnidadeRfb, normalizarDuimp, getJson, _usarRequisicao,
+  _reset: () => { sessao = null; ultimaAuth = 0; cacheOperadores.clear(); cacheProdutos.clear(); cacheUnidades.clear(); cacheTabelaUnidades = null; } };
