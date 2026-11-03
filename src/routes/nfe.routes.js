@@ -186,6 +186,8 @@ module.exports = function registrar(app, ctx) {
     await pronto(); const d = db(), k = quemChat(req), n = achar(req.params.id);
     if (!n) return res.status(404).json({ success: false, message: 'NF-e não encontrada.' });
     if (!W.pode(d, k, 'nfe.emitir')) return res.status(403).json({ success: false, message: 'Só o Davi e o contador emitem NF-e.' });
+    // Com pendência o XML sai incompleto e a Focus devolve um erro de esquema ilegível: mostra a pendência.
+    if ((n.pendencias || []).length) return res.status(409).json({ success: false, pendencias: n.pendencias, message: 'Resolva antes da prévia: ' + n.pendencias.map(p => p.msg).join(' · ') });
     try {
       const r = await focus.previa(n.empresa, W.paraEnvio(n.payload));
       if (r.buffer) return res.type('application/pdf').send(r.buffer);

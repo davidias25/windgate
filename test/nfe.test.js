@@ -233,6 +233,9 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(r.status === 200 && nP.pendencias.some(p => p.campo === 'cfop') && nP.ref === 'wg-sf-op20-b-1' && nP.montadoPor === 'pedro', 'o contador monta pelo servidor (sem ler operações nem cotações) e recebe as pendências');
   r = await chamar('davi', 'POST', `/api/nfe/${nP._id}/conferir`);
   ok(r.status === 409, 'nota com pendência não é conferida (409)');
+  const chamadasAntes = F.chamadas.length;
+  r = await chamar('davi', 'POST', `/api/nfe/${nP._id}/previa`);
+  ok(r.status === 409 && /Resolva antes da prévia/.test(r.j.message) && r.j.pendencias.length && F.chamadas.length === chamadasAntes, 'nota com pendência não vai à Focus nem para a prévia: a tela mostra a pendência');
   r = await chamar('davi', 'POST', `/api/nfe/${nP._id}/transmitir`);
   ok(r.status === 409 && F.posts === 0, 'nota com pendência não é transmitida e nada vai à Focus');
 
