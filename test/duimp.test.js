@@ -80,6 +80,11 @@ function banco() {
   const inativo = clone(FX.itens); inativo[2].status = 'INATIVO';
   ok(portal.normalizarDuimp(FX.geral, inativo, {}, {}).itens.length === 2, 'item inativo na versão vigente fica de fora');
 
+  const binario = require('crypto').randomBytes(2400), arqB = TMP + '.pfx', arq64 = TMP + '.pfx.txt';
+  fs.writeFileSync(arqB, binario); fs.writeFileSync(arq64, binario.toString('base64').replace(/(.{64})/g, '$1\n'));
+  ok(portal.lerCertificado(arqB).equals(binario) && portal.lerCertificado(arq64).equals(binario), 'certificado A1 lido igual do arquivo binário e do Secret File em base64 (com quebras de linha)');
+  fs.unlinkSync(arqB); fs.unlinkSync(arq64);
+
   console.log('\nNF de entrada (cenário A) só a partir do retrato:');
   const db = banco();
   db.ops[0].duimpDados = Object.assign(clone(ret), { itens: ret.itens.map(i => Object.assign({}, i, { op: i.numero === 3 ? 'OP21' : 'OP16' })) });

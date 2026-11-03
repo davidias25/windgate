@@ -37,7 +37,13 @@ function requisicaoPadrao(url, opcoes, corpo) {
   });
 }
 
-function agente(c) { return new https.Agent({ pfx: fs.readFileSync(c.certArquivo), passphrase: c.certSenha }); }
+/* O Secret File do Render é cadastrado como texto: o .pfx vai convertido em
+   base64 (o binário colado como texto se corrompe). Aceita os dois formatos. */
+function lerCertificado(arquivo) {
+  const bruto = fs.readFileSync(arquivo), texto = bruto.toString('latin1').replace(/\s+/g, '');
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(texto) && texto.length > 100 ? Buffer.from(texto, 'base64') : bruto;
+}
+function agente(c) { return new https.Agent({ pfx: lerCertificado(c.certArquivo), passphrase: c.certSenha }); }
 
 async function autenticar(req) {
   const c = cfg(), enviar = req || requisicaoPadrao;
@@ -240,5 +246,5 @@ function normalizarDuimp(geral, itensBrutos, operadores, extra) {
 /* Nos testes o Portal é simulado (_usarRequisicao): conta como configurado, sem certificado. */
 const emTeste = () => !!requisicaoTeste;
 
-module.exports = { cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, normalizarDuimp, getJson, _usarRequisicao,
+module.exports = { lerCertificado, cfg, configurado, emTeste, autenticar, consultarDuimp, resumirDuimp, versaoVigente, consultarDuimpCompleta, operadorEstrangeiro, normalizarDuimp, getJson, _usarRequisicao,
   _reset: () => { sessao = null; ultimaAuth = 0; cacheOperadores.clear(); } };
