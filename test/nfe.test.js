@@ -54,14 +54,14 @@ const NUM20 = '26BR00000123456', REF_A = 'wg-sf-duimp-26br00000123456-a-1';
 const r2 = v => Math.round(v * 100 + 1e-7) / 100;
 function itemDuimp(n, va, sisc, afrmm, o) {
   o = o || {};
-  return Object.assign({ numero: n, ncm: '84743100', produtoCodigo: '1001', descricao: 'Betoneira 400L', quantidade: 2, unidadeComercial: 'UN', valorAduaneiroBRL: va, valorMercadoriaBRL: va, taxaSiscomex: sisc, afrmm,
+  return Object.assign({ numero: n, ncm: '84743100', produtoCodigo: '1001', descricao: 'Betoneira 400L', quantidade: 2, unidadeComercial: 'UN', valorAduaneiroBRL: va, valorMercadoriaBRL: r2(va - (o.frete || 0) - (o.seguro || 0)), freteBRL: o.frete || 0, seguroBRL: o.seguro || 0, taxaSiscomex: sisc, afrmm,
     intermedio: { modalidade: o.modalidade || 'conta e ordem', cnpj: o.cnpj == null ? '11444777000161' : o.cnpj },
     exportador: { codigo: 'EXP1', nome: 'Shandong Machinery Co', pais: 'CN', logradouro: 'No. 8 Industrial Rd', cidade: 'Jinan', noCatalogo: true }, fabricante: { codigo: 'FAB1', noCatalogo: true },
     tributos: { ii: { base: va, aliquota: 20, devido: r2(va * 0.2) }, ipi: { base: r2(va * 1.2), aliquota: 0, devido: 0 }, pis: { base: va, aliquota: 2.1, devido: r2(va * 0.021) }, cofins: { base: va, aliquota: 9.65, devido: r2(va * 0.0965) } }, op: null }, o.item);
 }
 function retrato(o) {
   o = o || {};
-  const itens = o.itens || [itemDuimp(1, 10000, 154.23, 250, o)];
+  const itens = o.itens || [itemDuimp(1, 10000, 154.23, 250, Object.assign({ frete: 480, seguro: 20 }, o))];
   const soma = k => r2(itens.reduce((s, i) => s + ((i.tributos[k] || {}).devido || 0), 0));
   return { versao: '1', consultadoEm: '2026-10-28T10:00:00Z', geral: { numero: o.numero || NUM20, versao: '1', dataRegistro: '2026-10-20T10:00:00-0300', unidadeDespacho: '0317900', tipoIdentificacaoCarga: 'CE', viaTransporte: 1,
     importador: { cnpj: '58762606000144' }, taxaCambio: 5, valorAduaneiroBRL: r2(itens.reduce((s, i) => s + i.valorAduaneiroBRL, 0)), totais: { ii: { devido: soma('ii') }, ipi: { devido: 0 }, pis: { devido: soma('pis') }, cofins: { devido: soma('cofins') } } }, itens };
@@ -80,11 +80,14 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const iA = mA.payload.items[0], diA = iA.documentos_importacao[0];
   ok(mA.pendencias.length === 0, 'sem pendências com a DUIMP importada' + (mA.pendencias.length ? ': ' + mA.pendencias.map(p => p.msg).join(' | ') : ''));
   ok(iA.cfop === '3102' && mA.payload.tipo_documento === 0 && mA.payload.local_destino === 3 && mA.payload.indicador_inscricao_estadual_destinatario === 9, 'CFOP 3102, entrada, destino exterior, IE indicador 9');
-  // VA 10.000 · II 2.000 · IPI 0 · PIS 210 · COFINS 965 — da DUIMP · Siscomex 154,23 + AFRMM 250 = 404,23
-  ok(iA.valor_bruto === 10000 && iA.ii_base_calculo === 10000 && iA.ii_valor === 2000 && iA.ii_despesas_aduaneiras === 404.23 && iA.pis_valor === 210 && iA.cofins_valor === 965, 'II 2.000, PIS 210 e COFINS 965 como na DUIMP; despesas aduaneiras 404,23');
-  // ICMS por dentro: (10.000 + 2.000 + 0 + 210 + 965 + 404,23) ÷ (1 − 1,6%) = 13.800,03 · × 1,6% = 220,80
-  ok(iA.icms_base_calculo === 13800.03 && iA.icms_valor === 220.8 && iA.icms_aliquota === 1.6, 'ICMS de importação por dentro (regra do cenário): base 13.800,03 e ICMS 220,80');
-  ok(iA.valor_outras_despesas === 1800.03 && mA.totais.total === 13800.03 && mA.totais.somaItens === mA.totais.total, 'outras despesas = PIS + COFINS + Siscomex + AFRMM + ICMS = 1.800,03; total 13.800,03 = soma dos itens');
+  // Padrão do Maino (NF 88): produto = mercadoria 9.500 · frete 480 e seguro 20 no item (VA 10.000) · II 2.000 · PIS 210 · COFINS 965 — da DUIMP
+  ok(iA.valor_bruto === 9500 && iA.valor_frete === 480 && iA.valor_seguro === 20 && iA.ii_base_calculo === 10000 && iA.ii_valor === 2000 && iA.ii_despesas_aduaneiras === 404.23 && iA.pis_valor === 210 && iA.cofins_valor === 965, 'produto = mercadoria 9.500, frete 480 e seguro 20 no item; II 2.000, PIS 210 e COFINS 965 como na DUIMP; despesas aduaneiras 404,23');
+  ok(iA.codigo_produto === '1' && iA.descricao === 'ITEM 1 - Betoneira 400L', 'código = nº do item da DUIMP; descrição "ITEM 1 - …", como no Maino');
+  ok(iA.icms_situacao_tributaria === '51' && iA.icms_base_calculo === 0 && iA.icms_valor === 0 && mA.totais.icms === 0, 'ICMS CST 51 zerado (benefício de AL fica fora da nota)');
+  // IBS/CBS: base = VA 10.000 + II 2.000 + Siscomex 154,23 + AFRMM 250 = 12.404,23 · CBS 0,9% = 111,64 · IBS 0,1% = 12,40
+  ok(iA.ibs_cbs_situacao_tributaria === '000' && iA.ibs_cbs_classificacao_tributaria === '000001' && iA.ibs_cbs_base_calculo === 12404.23 && iA.cbs_valor === 111.64 && iA.ibs_uf_valor === 12.4, 'IBS/CBS CST 000 / 000001 sobre 12.404,23: CBS 111,64 e IBS 12,40');
+  // Total = 9.500 + 480 + 20 + 2.000 + 154,23 = 12.154,23
+  ok(iA.valor_outras_despesas === 154.23 && mA.totais.total === 12154.23 && mA.totais.somaItens === mA.totais.total, 'outras despesas = Siscomex 154,23; total 12.154,23 = soma dos itens');
   ok(diA.numero === NUM20 && diA.valor_afrmm === 250 && diA.via_transporte === 1 && diA.uf_desembaraco_aduaneiro === 'CE' && diA.data_desembaraco_aduaneiro === '2026-10-22' && diA.adicoes[0].numero === 1 && diA.adicoes[0].codigo_fabricante_estrangeiro === 'FAB1', 'DUIMP no item: número (15 posições), AFRMM, via marítima, desembaraço do aviso do despachante e adição = item da DUIMP');
   ok(diA.forma_intermedio === 2 && diA.cnpj === '11444777000161' && diA.uf_terceiro === 'CE', 'conta e ordem pela DUIMP: forma de intermediação 2 com CNPJ do adquirente e UF do CRM');
   ok(mA.payload.nome_destinatario === W.HOMOLOGACAO_NOME && /DUIMP 26BR00000123456/.test(mA.payload.informacoes_adicionais_contribuinte), 'homologação: destinatário com o texto exigido pela SEFAZ; DUIMP nas informações complementares');
@@ -101,7 +104,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const dbR2 = banco(); dbR2.ops[0].duimpDados = retrato({ itens: [itemDuimp(1, 3333.33, 0, 0), itemDuimp(2, 6666.67, 0, 0)] });
   const mA2 = R.montarNFe(dbR2, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: 100.02 } } });
   ok(mA2.payload.items[0].ii_despesas_aduaneiras === 33.34 && mA2.payload.items[1].ii_despesas_aduaneiras === 66.68, 'AFRMM do despachante rateado: 33,34 + 66,68 = 100,02, sem centavo perdido');
-  ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + x.ii_valor + x.ipi_valor + x.valor_outras_despesas, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
+  ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + (x.valor_frete || 0) + (x.valor_seguro || 0) + x.ii_valor + x.ipi_valor + x.valor_outras_despesas, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
 
   console.log('\nPendências que bloqueiam:');
   const pA = mexe => { const d = banco(); mexe(d.ops[0].duimpDados, d); return R.montarNFe(d, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.map(p => p.campo); };
@@ -120,33 +123,33 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const mB = montar(dbB, 'B', 'OP20');
   const iB = mB.payload.items[0];
   ok(mB.pendencias.length === 0 && iB.cfop === '6949' && mB.payload.notas_referenciadas[0].chave_nfe === '2'.repeat(44), 'com o cenário definido: CFOP 6949 (SF/AL → adquirente/CE) e referência à NF de entrada');
-  // Custo repassado = total da NF de entrada 13.800,03; ICMS 4% = 552,00
-  ok(iB.valor_bruto === 13800.03 && iB.icms_valor === 552 && iB.icms_aliquota === 4 && mB.totais.total === 13800.03, 'preço = custo de importação repassado (13.800,03); ICMS interestadual 4% = 552,00');
+  // Custo repassado = total da NF de entrada 12.154,23 (frete e seguro inclusos); ICMS 4% = 486,17
+  ok(iB.valor_bruto === 12154.23 && iB.icms_valor === 486.17 && iB.icms_aliquota === 4 && mB.totais.total === 12154.23, 'preço = custo de importação repassado (12.154,23); ICMS interestadual 4% = 486,17');
   const dbBsem = banco(); dbBsem.hubPainel._nfeCenarios = dbB.hubPainel._nfeCenarios;
   ok(montar(dbBsem, 'B', 'OP20').pendencias.some(p => p.campo === 'notas_referenciadas'), 'sem NF de entrada autorizada, a saída na conta e ordem não sai');
 
   console.log('\nC · saída na encomenda (interna em AL):');
   const mC = montar(db, 'C', 'OP30'), iC = mC.payload.items[0];
-  // 100 × 200 = 20.000 · IPI 5% = 1.000 (por fora) · ICMS 19% s/ 20.000 = 3.800 · PIS 330 · COFINS 1.530
+  // 100 × 200 = 20.000 · IPI 5% = 1.000 (por fora) · ICMS 19% s/ 20.000 = 3.800 · PIS/COFINS s/ (20.000 − 3.800) = 16.200: PIS 267,30 · COFINS 7,6% 1.231,20
   ok(mC.pendencias.length === 0 && iC.cfop === '5102' && mC.payload.local_destino === 1, 'SF (AL) → encomendante (AL): CFOP 5102, operação interna');
-  ok(iC.valor_bruto === 20000 && iC.ipi_valor === 1000 && iC.icms_base_calculo === 20000 && iC.icms_valor === 3800 && iC.pis_valor === 330 && iC.cofins_valor === 1530, 'IPI 1.000; ICMS 19% = 3.800 sem IPI na base (contribuinte); PIS 330; COFINS 1.530');
+  ok(iC.valor_bruto === 20000 && iC.ipi_valor === 1000 && iC.icms_base_calculo === 20000 && iC.icms_valor === 3800 && iC.pis_base_calculo === 16200 && iC.pis_valor === 267.3 && iC.cofins_aliquota_porcentual === 7.6 && iC.cofins_valor === 1231.2, 'IPI 1.000; ICMS 19% = 3.800 sem IPI na base (contribuinte); PIS/COFINS sem o ICMS na base (NF 96): PIS 267,30; COFINS 7,6% 1.231,20');
   ok(mC.totais.total === 21000 && mC.totais.total === mC.totais.somaItens, 'total 21.000 = produtos + IPI');
 
   console.log('\nD · triangular SF → JeT:');
   const dbD = banco(); dbD.hubNFe.push(autorizada(dbD, 'A', 'OP20', mA, '2'.repeat(44)));
   const mD = montar(dbD, 'D', 'OP20'), iD = mD.payload.items[0];
-  // Piso = 13.800,03 ÷ (1 − 4%) = 14.375,03 · ICMS 4% = 575,00 · PIS 1,65% = 237,19 · COFINS 7,65% = 1.099,69
+  // Piso = 12.154,23 ÷ (1 − 4%) = 12.660,66 · ICMS 4% = 506,43 · base PIS/COFINS 12.154,23 · PIS 1,65% = 200,54 · COFINS 7,6% = 923,72
   ok(mD.pendencias.length === 0 && iD.cfop === '6102' && iD.icms_origem === '1' && mD.payload.cnpj_destinatario === '11222333000181' && mD.payload.inscricao_estadual_destinatario === '082123456', 'CFOP 6102, origem 1, destinatária JeT com CNPJ e IE da configuração');
-  ok(iD.valor_bruto === 14375.03 && iD.icms_valor === 575 && iD.pis_valor === 237.19 && iD.cofins_valor === 1099.69, 'preço no piso 14.375,03; ICMS 4% = 575,00; PIS 237,19; COFINS 1.099,69');
-  const mDbaixo = R.montarNFe(dbD, Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }, { itens: [Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }).itens[0], { valorUnitario: 7000 })] }));
-  ok(mDbaixo.pendencias.some(p => p.campo === 'piso'), 'abaixo do piso (14.000 < 14.375,03): pendência, não transmite');
+  ok(iD.valor_bruto === 12660.66 && iD.icms_valor === 506.43 && iD.pis_base_calculo === 12154.23 && iD.pis_valor === 200.54 && iD.cofins_valor === 923.72, 'preço no piso 12.660,66; ICMS 4% = 506,43; PIS 200,54; COFINS 923,72');
+  const mDbaixo = R.montarNFe(dbD, Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }, { itens: [Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }).itens[0], { valorUnitario: 6000 })] }));
+  ok(mDbaixo.pendencias.some(p => p.campo === 'piso'), 'abaixo do piso (12.000 < 12.660,66): pendência, não transmite');
 
   console.log('\nE · JeT → cliente contribuinte:');
   const mE = montar(db, 'E', 'OP40'), [e1, e2] = mE.payload.items;
   // Preço 50.000 rateado pelo FOB (2/3 e 1/3): 33.333,33 + 16.666,67
   ok(mE.pendencias.length === 0 && e1.cfop === '6102' && e1.icms_origem === '2' && mE.payload.indicador_inscricao_estadual_destinatario === 1 && mE.payload.inscricao_estadual_destinatario === '061234567', 'JeT (ES) → contribuinte (CE): CFOP 6102, origem 2, IE do cliente');
   ok(e1.valor_bruto === 33333.33 && e2.valor_bruto === 16666.67 && e1.icms_valor === 1333.33 && e2.icms_valor === 666.67, 'preço rateado 33.333,33 + 16.666,67; ICMS 4% = 1.333,33 + 666,67');
-  ok(e1.pis_situacao_tributaria === '04' && e1.pis_valor === undefined && e1.cofins_situacao_tributaria === '04' && e2.pis_situacao_tributaria === '01' && e2.pis_valor === 275 && e2.cofins_valor === 1275, 'item monofásico com CST 04 e sem valor; o outro com PIS 275,00 e COFINS 1.275,00');
+  ok(e1.pis_situacao_tributaria === '04' && e1.pis_valor === undefined && e1.cofins_situacao_tributaria === '04' && e2.pis_situacao_tributaria === '01' && e2.pis_valor === 264 && e2.cofins_valor === 1216, 'item monofásico com CST 04 e sem valor; o outro com PIS 264,00 e COFINS 1.216,00 (base 16.666,67 − 666,67)');
   ok(mE.totais.total === 50000 && mE.totais.total === mE.totais.somaItens && !e1.icms_valor_uf_destino, 'total 50.000 = soma dos itens; sem DIFAL para contribuinte');
   const dbE2 = banco(); dbE2.crm[1].contribuinte = false;
   ok(montar(dbE2, 'E', 'OP40').pendencias.some(p => /cenário F/.test(p.msg)), 'cliente não contribuinte no cenário E: pendência mandando usar o F');
@@ -168,7 +171,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const dbG = banco(); dbG.hubNFe.push(autorizada(dbG, 'D', 'OP20', Object.assign({}, mD, { entrada: R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }) }), '3'.repeat(44)));
   const mG = R.montarNFe(dbG, { cenario: 'G', ambiente: 'homologacao', dataEmissao: '2026-10-29', extras: { referencia: 'n-DOP20', finalidade: 2, cfop: '6102' }, itens: [{ ncm: '84743100', descricao: 'Complemento de preço', quantidade: 1, valorUnitario: 100 }] });
   ok(mG.pendencias.length === 0 && mG.payload.finalidade_emissao === 2 && mG.payload.notas_referenciadas[0].chave_nfe === '3'.repeat(44) && mG.empresa === 'WindGate', 'finalidade 2 com a chave da nota original, emitida pela mesma empresa');
-  ok(mG.payload.items[0].icms_valor === 4 && mG.payload.items[0].pis_valor === 1.65 && mG.payload.items[0].cofins_valor === 7.65 && mG.payload.cnpj_destinatario === '11222333000181', 'segue a tributação da original (4%, PIS e COFINS) e o mesmo destinatário');
+  ok(mG.payload.items[0].icms_valor === 4 && mG.payload.items[0].pis_valor === 1.58 && mG.payload.items[0].cofins_valor === 7.3 && mG.payload.cnpj_destinatario === '11222333000181', 'segue a tributação da original (4%, PIS e COFINS) e o mesmo destinatário');
   ok(R.montarNFe(dbG, { cenario: 'G', ambiente: 'homologacao', extras: { finalidade: 2, cfop: '6102' }, itens: [{ ncm: '84743100', descricao: 'x', quantidade: 1, valorUnitario: 1 }] }).pendencias.some(p => p.campo === 'notas_referenciadas'), 'sem a nota original: pendência (notas_referenciadas é obrigatório)');
 
   console.log('\nTributos por data:');
@@ -176,7 +179,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(m27.payload.items[0].pis_situacao_tributaria === '08' && m27.payload.items[0].pis_valor === undefined && m27.payload.items[0].ipi_valor === 0 && m27.pendencias.some(p => p.campo === 'ibs_cbs'), '2027: PIS/COFINS extintos (CST 08), IPI zerado e IBS/CBS obrigatório até o contador definir');
   const db26 = banco(); db26.hubPainel._nfeCenarios = { C: { campos: { ibs_cbs_cst: '000', ibs_cbs_classificacao: '000001' } } };
   const i26 = R.montarNFe(db26, Object.assign(R.sugerirEntrada(db26, { cenario: 'C', opId: 'OP30' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' })).payload.items[0];
-  ok(i26.cbs_aliquota === 0.9 && i26.cbs_valor === 180 && i26.ibs_uf_aliquota === 0.1 && i26.ibs_uf_valor === 20, '2026 com o grupo definido: CBS 0,9% = 180 e IBS 0,1% = 20 (informativos)');
+  ok(i26.ibs_cbs_base_calculo === 14701.5 && i26.cbs_aliquota === 0.9 && i26.cbs_valor === 132.31 && i26.ibs_uf_aliquota === 0.1 && i26.ibs_uf_valor === 14.7, '2026 com o grupo definido: base = 20.000 − ICMS − PIS − COFINS = 14.701,50; CBS 0,9% = 132,31 e IBS 0,1% = 14,70 (informativos)');
 
   console.log('\nReferência e permissões (regras puras):');
   const dbR = banco(); dbR.hubNFe = [{ ref: 'wg-sf-op20-a-1' }, { ref: 'wg-sf-op20-a-2', refsAnteriores: ['wg-sf-op20-a-3'] }];
@@ -224,7 +227,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   let r = await chamar('davi', 'POST', '/api/nfe/montar', corpoA); respostas.push(r);
   const nA = r.j.nota;
   ok(r.status === 200 && nA.pendencias.length === 0 && nA.status === 'rascunho' && nA.ref === REF_A && nA.ambiente === 'homologacao' && nA.montadoPor === 'davi', 'Davi monta a entrada no servidor: rascunho, referência estável, homologação, sem pendências');
-  ok(nA.totais.total === 13800.03, 'o servidor chega ao mesmo total conferido à mão (13.800,03)');
+  ok(nA.totais.total === 12154.23, 'o servidor chega ao mesmo total conferido à mão (12.154,23)');
   r = await chamar('pedro', 'POST', '/api/nfe/montar', { cenario: 'B', opId: 'OP20' }); respostas.push(r);
   const nP = r.j.nota;
   ok(r.status === 200 && nP.pendencias.some(p => p.campo === 'cfop') && nP.ref === 'wg-sf-op20-b-1' && nP.montadoPor === 'pedro', 'o contador monta pelo servidor (sem ler operações nem cotações) e recebe as pendências');
@@ -261,7 +264,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(nAut.xmlLink === 'https://storage.teste/NFe_101_SF.xml' && nAut.danfeLink === 'https://storage.teste/NFe_101_SF.pdf' && nAut.arquivosSalvos, 'XML e DANFE baixados da Focus e guardados no Storage');
   const doc = dbS.docs.find(d => d.nfe === nA._id), notaF = dbS.hubNotas.find(n => n.nfe === nA._id);
   ok(doc && doc.op === 'OP20' && doc.tipo === 'nfe' && doc.link === nAut.danfeLink, 'documento criado no GED da operação');
-  ok(notaF && notaF.chave === nAut.chave && notaF.tipo === 'entrada' && notaF.empresa === 'WindGate' && notaF.valor === 13800.03 && notaF.xmlLink === nAut.xmlLink, 'registrada em hubNotas como nota de entrada, para o Fiscal e o contador');
+  ok(notaF && notaF.chave === nAut.chave && notaF.tipo === 'entrada' && notaF.empresa === 'WindGate' && notaF.valor === 12154.23 && notaF.xmlLink === nAut.xmlLink, 'registrada em hubNotas como nota de entrada, para o Fiscal e o contador');
   r = await fetch(base + '/api/webhooks/focus/wh-123', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: REF_A }) });
   dbS = await lerDB('davi');
   ok(dbS.docs.filter(d => d.nfe === nA._id).length === 1 && dbS.hubNotas.filter(n => n.nfe === nA._id).length === 1, 'aviso repetido não duplica documento nem nota fiscal');
