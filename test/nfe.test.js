@@ -250,6 +250,12 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const ultimo = F.chamadas.filter(c => c.metodo === 'POST' && /\/v2\/nfe\?ref=/.test(c.url)).pop();
   ok(/ref=wg-sf-duimp-26br00000123456-a-1$/.test(ultimo.url) && ultimo.auth === 'Basic ' + Buffer.from('tk-sf-secreto:').toString('base64') && /^homologacao/.test(new URL(ultimo.url).host), 'POST com ?ref=, token da SF e servidor de homologação');
   ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/.test(F.ultimoCorpo.data_emissao) && F.ultimoCorpo.items[0].documentos_importacao[0].numero === '26BR00000123456', 'data de emissão do momento do envio (fuso de SP); DUIMP no item');
+  const cb = F.ultimoCorpo;
+  ok(cb.valor_produtos === 9500 && cb.valor_frete === 480 && cb.valor_seguro === 20 && cb.valor_total_ii === 2000 && cb.valor_ipi === 0 && cb.valor_pis === 210 && cb.valor_cofins === 965 && cb.valor_outras_despesas === 154.23 && cb.icms_valor_total === 0 && cb.valor_total === 12154.23,
+    'totais do cabeçalho enviados à Focus: produtos 9.500 + frete 480 + seguro 20 + II 2.000 + outras 154,23 = total 12.154,23 (o DANFE mostra o total)');
+  ok(cb.ibs_cbs_base_calculo === 12404.23 && cb.cbs_valor_total === 111.64 && cb.ibs_valor_total === 12.4, 'totais do IBS/CBS no cabeçalho: base 12.404,23, CBS 111,64, IBS 12,40');
+  const tF = R.totaisCabecalho(mF.payload.items), tC = R.totaisCabecalho(mC.payload.items);
+  ok(tF.valor_total === 30000 && tF.icms_valor_total === 1200 && tF.icms_valor_total_uf_destino === 1440 && tC.valor_total === 21000 && tC.valor_ipi === 1000 && tC.icms_base_calculo === 20000, 'saídas: total 30.000 com DIFAL 1.440 no cabeçalho (fora do total); C com IPI por fora = 21.000');
   r = await chamar('davi', 'POST', `/api/nfe/${nA._id}/transmitir`);
   ok(r.status === 200 && r.j.jaEnviada && F.posts === 1, 'transmitir de novo só consulta: continua 1 POST');
   const [t1, t2] = await Promise.all([chamar('davi', 'POST', `/api/nfe/${nA._id}/transmitir`), chamar('davi', 'POST', `/api/nfe/${nA._id}/transmitir`)]);

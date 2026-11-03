@@ -708,13 +708,33 @@
     if (n.status !== antes || msg) n.historico.push({ em, por: por || 'Focus NFe', acao: 'retorno', de: antes, para: n.status, msg: msg.slice(0, 500) });
     return n;
   }
-  /** Payload na hora de enviar: data de emissão de agora (fuso de São Paulo). */
+  /**
+   * Totais do cabeçalho (grupo ICMSTot da NF-e; obrigatórios na Focus: valor_produtos, valor_total…),
+   * somados dos itens já arredondados — nunca de outra conta, para o total bater com os itens.
+   * vNF = produtos − desconto + frete + seguro + outras + II + IPI + IPI devolvido + ICMS ST.
+   */
+  function totaisCabecalho(items) {
+    const its = Array.isArray(items) ? items : [], s = k => r2(its.reduce((a, x) => a + num(x[k]), 0));
+    const t = {
+      icms_base_calculo: s('icms_base_calculo'), icms_valor_total: s('icms_valor'), icms_valor_total_desonerado: 0,
+      fcp_valor_total: 0, icms_base_calculo_st: 0, icms_valor_total_st: 0, fcp_valor_total_st: 0, fcp_valor_total_retido_st: 0,
+      valor_produtos: s('valor_bruto'), valor_frete: s('valor_frete'), valor_seguro: s('valor_seguro'), valor_desconto: s('valor_desconto'),
+      valor_total_ii: s('ii_valor'), valor_ipi: s('ipi_valor'), valor_ipi_devolvido: 0, valor_pis: s('pis_valor'), valor_cofins: s('cofins_valor'),
+      valor_outras_despesas: s('valor_outras_despesas')
+    };
+    t.valor_total = r2(t.valor_produtos - t.valor_desconto + t.valor_frete + t.valor_seguro + t.valor_outras_despesas + t.valor_total_ii + t.valor_ipi + t.valor_ipi_devolvido + t.icms_valor_total_st);
+    if (its.some(x => x.icms_valor_uf_destino != null)) Object.assign(t, { icms_valor_total_uf_destino: s('icms_valor_uf_destino'), fcp_valor_total_uf_destino: s('fcp_valor_uf_destino'), icms_valor_total_uf_remetente: s('icms_valor_uf_remetente') });
+    if (its.some(x => x.ibs_cbs_situacao_tributaria)) Object.assign(t, { ibs_cbs_base_calculo: s('ibs_cbs_base_calculo'), ibs_uf_valor_total: s('ibs_uf_valor'), ibs_mun_valor_total: s('ibs_mun_valor'),
+      ibs_valor_total: r2(s('ibs_uf_valor') + s('ibs_mun_valor')), cbs_valor_total: s('cbs_valor') });
+    return t;
+  }
+  /** Payload na hora de enviar: data de emissão de agora (fuso de São Paulo) e totais do cabeçalho. */
   function paraEnvio(payload, agora) {
     const d = new Date(agora || Date.now()), sp = new Date(d.getTime() - 3 * 3600 * 1000);
-    return Object.assign({}, payload, { data_emissao: sp.toISOString().slice(0, 19) + '-03:00' });
+    return Object.assign({}, payload, totaisCabecalho(payload && payload.items), { data_emissao: sp.toISOString().slice(0, 19) + '-03:00' });
   }
 
   return { montarEntradaDuimp, conferirDuimpCotacao, dataDesembaracoDaOp, PAISES_BACEN, paisBacen,
     CENARIOS_PADRAO, CAMPOS_CENARIO, cenarios, cenarioDe, CONFIG_PADRAO, configNFe, empresaDados, FORMA_INTERMEDIO, formaIntermedio, STATUS_NFE, HOMOLOGACAO_NOME,
-    clienteDaOp, notaEntradaDaOp, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, r2 };
+    clienteDaOp, notaEntradaDaOp, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, totaisCabecalho, r2 };
 });
