@@ -335,8 +335,10 @@
     if (anterior) H.db.quotes[ed.id] = Object.assign({}, anterior, { status: 'wait' });
     if (!salvar(true)) return;
     (H.db.hubRecados || []).filter(r => r && r.quoteId === ed.id && r.para === 'samir').forEach(r => { r.feito = Object.assign({}, r.feito, { samir: new Date().toISOString() }); });
+    W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
+    const ent = H.db.qindex.find(x => x && x.id === ed.id); if (ent) ent.funilEm = new Date().toISOString();
     H.salvar();
-    H.toast('Margem aprovada: proposta liberada.');
+    H.toast('Margem aprovada: proposta liberada e negócio no <b>Funil</b> em Proposta enviada.');
     editor(el);
     const m = H.modal('Cotação aprovada', `<p>Criar já a operação <b>${esc((F('opNum') || '—').toUpperCase())}</b> e lançar o <b>previsto</b> no Financeiro (as 3 parcelas do cliente e os 3 pagamentos)?</p>`,
       '<button class="btn" data-x>Agora não</button><button class="btn pri" id="mop">Criar operação + previsto</button>');
@@ -352,6 +354,7 @@
       H.db.opStatusHist.push({ _id: W.novoId(), op: r.id, de: '', para: 'contrato', em: agora, deEm: '', por: eu(), tipo: 'mudanca', origem: 'hub2-cotacao', motivo: 'Cotação aprovada' });
       if (!H.db.checklists[r.id] && H.CHK_MODELO) H.db.checklists[r.id] = H.CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
     }
+    if (H.db.quotes[ed.id]) W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
     if (r.jaLancado) { H.salvar(); return H.toast(`Operação <b>${esc(r.id)}</b> já tinha o cronograma lançado: nada foi duplicado.`); }
     H.db.fin.unshift(...r.lancamentos);
     H.salvar();

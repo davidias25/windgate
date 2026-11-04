@@ -171,6 +171,35 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   const r2 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   ok(r2.jaLancado && !r2.op && r2.lancamentos.length === 0, 'aprovar de novo não duplica a operação nem o cronograma');
 
+  console.log('\nCotação aprovada no funil do CRM:');
+  {
+    const T = '2026-11-04T10:00:00Z';
+    const qf = id => Object.assign({}, base, { id, status: 'ok', aprovadoPor: 'Samir', criadoPor: 'Davi', fields: Object.assign({}, base.fields, { opNum: 'OP90', cliente: 'Lima Construtora', mercadoria: 'Escoras' }) });
+    const d = { crm: [{ _id: 'cL1', empresa: 'Lima Construtora LTDA' }], crmOps: [], ops: [], qindex: [], quotes: {} };
+    const a = C.negocioDaCotacao(d, qf('q_f1'), { preco: 150000, por: 'Samir', agora: T });
+    const n = a.negocio;
+    ok(a.criado && d.crmOps.length === 1 && n._id === 'cot-q_f1' && n.quoteId === 'q_f1', 'aprovada sem negócio: cria um no funil, com _id tirado da cotação');
+    ok(C.faseDe(n) === 'proposta' && n.etapa === 'Proposta enviada' && n.proxData === '2026-11-06', 'entra em Proposta enviada, com follow-up em 2 dias');
+    ok(n.clienteId === 'cL1' && n.clienteNome === 'Lima Construtora' && n.titulo === 'OP90 · Escoras' && n.valor === 150000 && n.resp === 'Davi', 'liga ao cliente do CRM, título com nº e mercadoria, valor da cotação, responsável quem montou');
+    const b = C.negocioDaCotacao(d, qf('q_f1'), { preco: 150000, por: 'Samir', agora: T });
+    ok(!b.criado && d.crmOps.length === 1, 'aprovar de novo não duplica o negócio');
+    d.crmOps.push({ _id: 'n9', quoteId: 'q_f2', fase: 'lead', etapa: 'Novo contato', titulo: 'do pedido', valor: 0 });
+    C.negocioDaCotacao(d, qf('q_f2'), { preco: 80000, agora: T });
+    ok(d.crmOps.length === 2 && C.faseDe(d.crmOps[1]) === 'proposta' && d.crmOps[1].valor === 80000, 'negócio já ligado à cotação avança de Lead para Proposta e ganha o valor');
+    d.crmOps.push({ _id: 'n10', quoteId: 'q_f3', fase: 'negociacao', etapa: 'Negociação' }, { _id: 'n11', quoteId: 'q_f4', fase: 'perdido', etapa: 'Perdido' });
+    C.negocioDaCotacao(d, qf('q_f3'), { agora: T }); C.negocioDaCotacao(d, qf('q_f4'), { agora: T });
+    ok(C.faseDe(d.crmOps[2]) === 'negociacao' && C.faseDe(d.crmOps[3]) === 'perdido', 'negócio em Negociação ou Perdido não volta de fase');
+    d.ops.push({ id: 'OP90', quoteId: 'q_f1' });
+    C.negocioDaCotacao(d, qf('q_f1'), { agora: T });
+    ok(C.faseDe(n) === 'ganho' && n.opId === 'OP90', 'cotação que virou operação deixa o negócio Ganho, ligado à operação');
+
+    const d2 = { crm: [], crmOps: [], ops: [], quotes: { q_a: qf('q_a'), q_w: Object.assign(qf('q_w'), { status: 'wait' }) },
+      qindex: [{ _id: 'i1', id: 'q_a', status: 'ok', preco: 99000 }, { _id: 'i2', id: 'q_w', status: 'wait', preco: 1 }] };
+    ok(C.funilDasCotacoes(d2, { agora: T }) === 1 && d2.crmOps.length === 1 && d2.crmOps[0].quoteId === 'q_a' && d2.crmOps[0].valor === 99000 && d2.crmOps[0].clienteNome === 'Lima Construtora', 'aprovadas antes da regra entram no funil; aguardando aprovação não');
+    d2.crmOps = [];
+    ok(C.funilDasCotacoes(d2, { agora: T }) === 0 && d2.crmOps.length === 0, 'negócio excluído depois não volta (índice marcado com funilEm)');
+  }
+
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
   process.exit(falhou ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

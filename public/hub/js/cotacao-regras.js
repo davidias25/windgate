@@ -669,6 +669,51 @@ function triCalcular(e){
     return { id, op, lancamentos: out, jaLancado: false };
   }
 
+  /* ==== Cotação aprovada no funil do CRM ====
+     Aprovada pelo Samir = proposta liberada: o negócio entra (ou avança) para "Proposta enviada".
+     Já virou operação: o negócio fica Ganho. Negócio em Negociação, Ganho ou Perdido não volta de fase.
+     O _id sai da cotação ("cot-<id>"): dois usuários gravando ao mesmo tempo caem no mesmo negócio. */
+  const nomeNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+  function clienteDoCrm(db, nome) {
+    const alvo = nomeNorm(nome); if (!alvo) return null;
+    const cs = (db.crm || []).filter(Boolean), nomes = c => [nomeNorm(c.empresa), nomeNorm(c.nome)].filter(Boolean);
+    return cs.find(c => nomes(c).includes(alvo)) || cs.find(c => nomes(c).some(n => n.includes(alvo) || alvo.includes(n))) || null;
+  }
+  function negocioDaCotacao(db, q, opts) {
+    const o = opts || {}, t = o.agora || new Date().toISOString();
+    if (!q || !q.id) return { negocio: null, criado: false };
+    if (!Array.isArray(db.crmOps)) db.crmOps = [];
+    const f = camposDe(q), preco = +o.preco || 0;
+    let n = db.crmOps.find(x => x && x.quoteId === q.id), criado = false;
+    if (!n) {
+      const c = clienteDoCrm(db, f.cliente);
+      n = { _id: 'cot-' + q.id, clienteId: c ? c._id : '', clienteNome: f.cliente || '', titulo: [f.opNum, f.mercadoria || f.cliente].filter(Boolean).join(' · ') || 'Cotação',
+        valor: preco, origem: '', tipoPedido: 'direta', resp: q.criadoPor || o.por || '', obs: '', fase: 'cotacao', etapa: 'Cotando', criadoEm: t, atualizadoEm: t, faseEm: t,
+        por: o.por || '', vistoEm: null, quoteId: q.id, pedidoId: '',
+        atividades: [{ _id: W.novoId(), tipo: 'Etapa', texto: 'Negócio criado pela cotação aprovada' + (q.aprovadoPor ? ' por ' + q.aprovadoPor : ''), por: o.por || '', em: t, auto: true }] };
+      db.crmOps.unshift(n); criado = true;
+    }
+    if (!(+n.valor) && preco) n.valor = preco;
+    const op = (db.ops || []).find(x => x && x.quoteId === q.id), ordem = W.CRM_FASES.map(x => x.k);
+    if (W.negocioAberto(n)) {
+      if (op) { W.moverNegocio(n, 'ganho', o.por, t, { motivo: 'operação ' + op.id + ' criada da cotação' }); n.opId = op.id; }
+      else if (ordem.indexOf(W.faseDe(n)) < ordem.indexOf('proposta')) W.moverNegocio(n, 'proposta', o.por, t, { motivo: 'cotação aprovada' });
+    }
+    return { negocio: n, criado };
+  }
+  /** Cotações aprovadas que ainda não passaram pelo funil (aprovadas antes desta regra ou no sistema antigo).
+      Marca `funilEm` no índice: negócio excluído depois não volta. Devolve quantas entraram. */
+  function funilDasCotacoes(db, opts) {
+    const o = opts || {}, t = o.agora || new Date().toISOString(); let n = 0;
+    (db.qindex || []).forEach(e => {
+      const q = e && e.status === 'ok' && !e.funilEm && (db.quotes || {})[e.id];
+      if (!q || q.status !== 'ok') return;
+      negocioDaCotacao(db, Object.assign({ id: e.id }, q), { preco: e.preco, por: o.por, agora: t });
+      e.funilEm = t; n++;
+    });
+    return n;
+  }
+
   /* ==== Proposta: blocos e rateio por item (mesmos do sistema atual) ==== */
   const PROPOSTA_BLOCOS = [
     { k: 'escopo', l: 'Escopo da operação', d: 'Parágrafo de abertura com mercadoria, origem e modalidade.' },
@@ -708,5 +753,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    operacaoDaCotacao, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

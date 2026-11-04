@@ -15,11 +15,13 @@
   H.telas.crm = function (el) {
     if (!H.pode('crm.ver')) { el.innerHTML = '<div class="banner">O CRM não faz parte do seu perfil.</div>'; return; }
     garantir();
+    // Cotações aprovadas antes desta regra (ou no sistema antigo) entram uma vez no funil.
+    if (W.funilDasCotacoes(H.db, { por: eu() })) H.salvar();
     const db = H.db, hoje = W.hojeISO(), ind = W.indicadoresCrm(db, hoje, 90);
     const q = busca.trim().toLowerCase();
     const lista = db.crmOps.filter(n => n && (filtroResp === 'todos' || (filtroResp === 'meus' ? n.resp === eu() : n.resp === filtroResp))
       && (!filtroOrigem || n.origem === filtroOrigem)
-      && (!q || [n.titulo, W.nomeCliente(cliente(n.clienteId)), n.obs, n.prox].join(' ').toLowerCase().includes(q)));
+      && (!q || [n.titulo, W.nomeCliente(cliente(n.clienteId)), n.clienteNome, n.obs, n.prox].join(' ').toLowerCase().includes(q)));
     const pct = v => v == null ? '—' : Math.round(v * 100) + '%';
 
     el.innerHTML = `
@@ -56,8 +58,8 @@
   function cartao(n, hoje) {
     const c = cliente(n.clienteId), sla = W.slaNegocio(n, hoje), sc = W.scoreNegocio(H.db, n);
     const px = n.proxData || n.prazo;
-    return `<article class="ncard ${sla.sit}" draggable="true" data-n="${esc(n._id)}" tabindex="0" aria-label="${esc(W.nomeCliente(c) || n.titulo)}">
-      <div class="nc-top"><b>${esc(W.nomeCliente(c) || 'Cliente sem cadastro')}</b><span class="score ${sc.nivel}" title="${esc(sc.motivos.join(', '))}">${sc.s}</span></div>
+    return `<article class="ncard ${sla.sit}" draggable="true" data-n="${esc(n._id)}" tabindex="0" aria-label="${esc(W.nomeCliente(c) || n.clienteNome || n.titulo)}">
+      <div class="nc-top"><b>${esc(W.nomeCliente(c) || n.clienteNome || 'Cliente sem cadastro')}</b><span class="score ${sc.nivel}" title="${esc(sc.motivos.join(', '))}">${sc.s}</span></div>
       <div class="nc-t">${esc(n.titulo || '—')}${valores() && +n.valor ? ` · ${W.fmtBRLk(n.valor)}` : ''}</div>
       ${n.prox ? `<div class="nc-p ${px && px < hoje ? 'late' : ''}">${esc(n.prox)}${px ? ' · ' + W.dataBR(px).slice(0, 5) : ''}</div>` : ''}
       <div class="nc-f"><span>${esc(n.resp || '—')}</span><span>${n.origem ? esc(n.origem) + ' · ' : ''}${sla.sit === 'atrasado' ? `<b class="neg">${esc(sla.motivo)}</b>` : W.diasParado(n, hoje) + ' d'}</span></div></article>`;
@@ -89,7 +91,7 @@
     const ord = lista.slice().sort((a, b) => W.CRM_FASES.findIndex(f => f.k === W.faseDe(a)) - W.CRM_FASES.findIndex(f => f.k === W.faseDe(b)));
     box.innerHTML = ord.length ? `<div class="tw"><table><thead><tr><th>Cliente</th><th>Negócio</th><th>Fase</th>${valores() ? '<th class="num">Valor</th>' : ''}<th>Origem</th><th>Score</th><th>Próxima ação</th><th>Resp.</th><th>Situação</th></tr></thead><tbody>
       ${ord.map(n => { const f = W.faseMeta(W.faseDe(n)), sla = W.slaNegocio(n, hoje), sc = W.scoreNegocio(H.db, n), px = n.proxData || n.prazo;
-        return `<tr class="click" data-n="${esc(n._id)}"><td><b>${esc(W.nomeCliente(cliente(n.clienteId)) || '—')}</b></td><td>${esc(n.titulo || '—')}</td><td><span class="pill" style="background:${f.c}1A;color:${f.c}">${esc(f.l)}</span></td>
+        return `<tr class="click" data-n="${esc(n._id)}"><td><b>${esc(W.nomeCliente(cliente(n.clienteId)) || n.clienteNome || '—')}</b></td><td>${esc(n.titulo || '—')}</td><td><span class="pill" style="background:${f.c}1A;color:${f.c}">${esc(f.l)}</span></td>
           ${valores() ? `<td class="num">${+n.valor ? W.fmtBRL(n.valor) : '—'}</td>` : ''}<td>${esc(n.origem || '—')}</td><td><span class="score ${sc.nivel}">${sc.s}</span></td>
           <td>${esc(n.prox || '—')}${px ? `<br><small class="note">${W.dataBR(px)}</small>` : ''}</td><td>${esc(n.resp || '—')}</td><td>${sla.sit === 'atrasado' ? `<span class="pill crit">${esc(sla.motivo)}</span>` : W.negocioAberto(n) ? '<span class="pill ok">em dia</span>' : '—'}</td></tr>`; }).join('')}</tbody></table></div>`
       : '<p class="empty">Nenhum negócio com esses filtros.</p>';
