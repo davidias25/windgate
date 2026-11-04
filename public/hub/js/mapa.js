@@ -56,7 +56,8 @@
     if (typeof L === 'undefined') { el.querySelector('#mapa').innerHTML = '<p class="empty">Mapa indisponível sem internet.</p>'; return; }
     if (mapa) { mapa.remove(); mapa = null; }
     mapa = L.map(el.querySelector('#mapa'), { worldCopyJump: true, scrollWheelZoom: false }).setView([5, 40], 2);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 10 }).addTo(mapa);
+    // Quadros do OpenStreetMap (sem chave; a CARTO passou a exigir chave e mostrava "API KEY REQUIRED").
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>', maxZoom: 10 }).addTo(mapa);
     const grupos = {};
     pos.forEach(({ o, p }) => { if (!p) return; const k = (o.navio || o.id) + '|' + p.ll.map(x => x.toFixed(1)).join(','); (grupos[k] = grupos[k] || { p, ops: [] }).ops.push(o); });
     const limites = [];
