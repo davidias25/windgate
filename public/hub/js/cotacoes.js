@@ -208,7 +208,7 @@
     on('#cop', () => criarOperacao());
     on('#csug', () => { if (!(R && R.preco > 0)) return H.toast('Complete a cotação primeiro.'); Object.assign(ed.fields, W.desemSugerir(ed, R)); [1, 2, 3].forEach(n => { el.querySelector('#cf_desR' + n).value = ed.fields['desR' + n]; }); atualizar(el); H.toast('Distribuição sugerida: 35% da margem já nas parcelas 1 e 2.'); });
     on('#citem', () => { ed.items.push(W.ITEM_PADRAO()); editor(el); });
-    ptaxNaCotacao(el, bloq);
+    ptaxNaCotacao(el, travada());
     on('#cexp', () => { ed.exps.push({ l: '', v: 0 }); editor(el); });
     on('#cfotob', () => el.querySelector('#cfotos').click());
     const fi = el.querySelector('#cfotos'); if (fi) fi.onchange = () => enviarFotos(fi, el);
