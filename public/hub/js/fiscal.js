@@ -16,6 +16,7 @@
     garantir();
     const db = H.db, hoje = W.hojeISO(); tri = tri || W.trimestreDe(hoje);
     const f = W.fechamentoTrimestre(db, tri, hoje), c = cfg(), contador = (db.hubPainel._fiscalContador || {})[tri];
+    const fe = editar() && Array.isArray(db.fin) ? W.fechamento(db, tri, empresa, hoje) : null;
     const notas = f.notas.filter(n => (empresa === 'todas' || n.empresa === empresa) && (!filtroTipo || n.tipo === filtroTipo)).sort((a, b) => String(b.data).localeCompare(String(a.data)));
     const tris = (() => { const out = []; let [a, q] = tri.split('-T').map(Number); [a, q] = W.trimestreDe(hoje).split('-T').map(Number); for (let i = 0; i < 6; i++) { out.push(a + '-T' + q); q--; if (!q) { q = 4; a--; } } return out; })();
     const nomeTri = t => { const [a, q] = t.split('-T'); return `${q}º tri ${a}`; };
@@ -32,6 +33,7 @@
         <div class="kpi"><span class="lbl">Aguardando conferência</span><span class="v">${f.pend.length}</span><span class="d ${f.pend.length ? 'bad' : 'good'}">${f.pend.length ? 'antes de enviar ao contador' : 'tudo conferido'}</span></div>
         <div class="kpi"><span class="lbl">Extratos</span><span class="v">${f.extratos.length}</span><span class="d ${f.faltaExtrato.length ? 'bad' : 'good'}">${f.faltaExtrato.length ? f.faltaExtrato.length + ' mês(es) faltando' : f.contas.length ? 'todos os meses' : 'cadastre as contas'}</span></div>
         <div class="kpi"><span class="lbl">Trimestre</span><span class="v" style="font-size:16px">${contador && contador.apuradoEm ? 'Apurado' : f.entrega ? 'Com o contador' : f.pronto ? 'Pronto' : 'Em aberto'}</span><span class="d">${contador && contador.apuradoEm ? 'por ' + esc(contador.por || '') + ' em ' + W.dataBR(contador.apuradoEm) : f.entrega ? 'enviado em ' + W.dataBR(f.entrega.em) : 'apuração trimestral · Lucro Real'}</span></div></div>
+      ${painelFechamento(fe)}${painelPacote(f, contador)}
       <div class="g2 larga">
         <div class="box"><div class="box-h"><h2>Notas do trimestre</h2><div class="btns">${Object.entries(TIPOS).map(([k, l]) => `<button class="chip ${filtroTipo === k ? 'on' : ''}" data-tp="${k}">${l}</button>`).join('')}<button class="btn sm" id="fcsv">Baixar lista</button></div></div>
           ${notas.length ? `<div class="tw"><table><thead><tr><th>Data</th><th>Nota</th><th>Emitente → destinatário</th><th>Tipo</th><th class="num">Valor</th><th>Chegou por</th><th>Situação</th><th></th></tr></thead><tbody>
@@ -48,7 +50,7 @@
             ${f.faltaExtrato.slice(0, 6).map(x => `<div class="row"><span>Extrato ${esc(x.conta.banco || '')} ${esc(x.conta.nome || '')} · ${x.mes.split('-').reverse().join('/')}</span><span class="pill warn">falta</span></div>`).join('')}
             ${!f.contas.length ? '<div class="row"><span>Cadastre as contas bancárias em Configurar para o sistema cobrar os extratos de cada mês.</span></div>' : ''}
             ${f.pronto && !f.entrega ? '<div class="row"><span>Tudo conferido.</span><span class="pill ok">pronto</span></div>' : ''}
-            ${editar() ? `<button class="btn ${f.pronto ? 'pri' : ''}" id="fenv" ${f.entrega ? 'disabled' : ''}>${f.entrega ? 'Enviado ao contador em ' + W.dataBR(f.entrega.em) : 'Enviar trimestre ao contador'}</button>` : ''}
+            ${editar() ? `<p class="note">O envio ao contador é pelo pacote do fechamento, acima.</p>` : ''}
             ${H.perfil().id === 'contador' ? `<button class="btn pri" id="fapu" ${contador && contador.apuradoEm ? 'disabled' : ''}>${contador && contador.apuradoEm ? 'Apuração concluída' : 'Marcar trimestre como apurado'}</button>` : ''}</div></div>
           <div class="box"><div class="box-h"><h2>Extratos bancários</h2></div><div class="box-b list">
             ${f.extratos.length ? f.extratos.map(e => `<div class="row"><div><b>${esc(e.banco || '')} ${esc(e.contaNome || '')}</b> · ${e.mes.split('-').reverse().join('/')}<br><small class="note">${e.formato || ''}${e.transacoes ? ' · ' + e.transacoes.length + ' movimentos · ' + e.transacoes.filter(t => t.lancId).length + ' conciliados com o Financeiro' : ''}${e.saldo != null ? ' · saldo ' + W.fmtBRL(e.saldo) : ''}</small></div><div class="btns">${e.transacoes && editar() ? (() => { const dv = W.divergencias(H.db, e), n = dv.semLancamento.length + dv.semBanco.length; return `<button class="btn sm ${n ? 'pri' : ''}" data-conc="${esc(e._id)}">${n ? n + ' divergência(s)' : 'Conciliado'}</button>`; })() : ''}${e.link ? `<a class="btn ghost sm" href="${esc(e.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div></div>`).join('') : '<p class="empty">Nenhum extrato neste trimestre.</p>'}</div></div>
@@ -66,7 +68,8 @@
     el.querySelectorAll('[data-conc]').forEach(b => b.onclick = () => conciliar(b.dataset.conc));
     const on = (id, fn) => { const x = el.querySelector(id); if (x) x.onclick = fn; };
     on('#fnota', novaNota); on('#fext', novoExtrato); on('#fcfg', configurar);
-    on('#fenv', () => { const e = Object.assign({}, cfg().entregas, { [tri]: { em: new Date().toISOString(), por: eu() } }); H.db.hubPainel._fiscal = Object.assign({}, cfg(), { entregas: e }); H.salvar(); H.toast('Trimestre enviado ao contador. Ele vê tudo no acesso dele.'); H.render(); });
+    if (fe) ligarFechamento(el, fe);
+    on('#frec', () => { const ent = (cfg().entregas || {})[tri] || {}; H.db.hubPainel._fiscalContador = Object.assign({}, H.db.hubPainel._fiscalContador, { [tri]: Object.assign({}, (H.db.hubPainel._fiscalContador || {})[tri], { recebidoEm: new Date().toISOString(), por: eu(), hash: ent.hash || '' }) }); H.salvar(); H.toast('Recebimento do pacote confirmado'); H.render(); });
     on('#fapu', () => { H.db.hubPainel._fiscalContador = Object.assign({}, H.db.hubPainel._fiscalContador, { [tri]: { apuradoEm: new Date().toISOString(), por: eu() } }); H.salvar(); H.toast('Apuração registrada'); H.render(); });
     on('#fsefaz', async () => {
       const r = await H.api('/api/fiscal/sefaz', { method: 'POST' }); const j = await r.json().catch(() => ({}));
@@ -79,6 +82,12 @@
      banco fica apontado para conferir. */
   function conciliar(id) {
     const e = H.db.hubExtratos.find(x => x && x._id === id); if (!e) return H.render();
+    if (Array.isArray(e.transacoes)) {
+      const usados = new Set(H.db.hubExtratos.flatMap(x => (x && x.transacoes) || []).map(t => t.lancId).filter(Boolean)), livres = H.db.fin.filter(l => l && !usados.has(l._id));
+      const novos = W.conciliar({ fin: livres }, e.transacoes.filter(t => !t.lancId && t.decisao !== 'ignorado'), e.empresa);
+      let mudou = 0; novos.forEach(n => { if (n.lancId) { const t = e.transacoes.find(x => x.id === n.id && x.data === n.data && x.valor === n.valor && !x.lancId); if (t) { t.lancId = n.lancId; mudou++; } } });
+      if (mudou) { H.salvar(); H.toast(mudou + ' movimento(s) casado(s) com lançamentos feitos depois do extrato'); }
+    }
     const dv = W.divergencias(H.db, e);
     const m = H.modal(`Conciliação · ${e.banco || ''} ${e.mes.split('-').reverse().join('/')}`, `
       <p class="note" style="margin-bottom:10px">${e.transacoes.filter(t => t.lancId).length} de ${e.transacoes.length} movimentos batem com o Financeiro (mesmo valor, até 3 dias de diferença).</p>
@@ -98,9 +107,100 @@
       H.db.fin.unshift({ _id: lid, data: t.data, vencimento: t.data, liquidadoEm: t.data, op, tipo: t.valor < 0 ? 'Despesa' : 'Receita', categoria: '', fixo: false, desc: (t.memo || 'Movimento do banco').slice(0, 120),
         valor: Math.abs(t.valor), valorPago: Math.abs(t.valor), valorPrevisto: null, status: 'Realizado', empresa: e.empresa || 'WindGate', comp: '', nf: '', por: eu(), criadoEm: agora, origem: 'conciliacao', aprovacaoPendente: true, extratoId: e._id });
       t.lancId = lid; t.decisao = 'proposto';
-      H.salvar(); H.toast('Lançamento proposto: aguarda aprovação na Torre do Samir/Davi'); H.fecharModal(); conciliar(id);
+      H.salvar(); H.toast('Lançamento proposto: aguarda aprovação na Torre. Complete a contraparte e a nota (ou o motivo).'); H.fecharModal();
+      const nl = H.db.fin.find(x => x && x._id === lid); if (nl && H.editarLanc) H.editarLanc(nl); else conciliar(id);
     });
     m.querySelectorAll('[data-ign]').forEach(b => b.onclick = () => { const t = achar(b.dataset.ign); if (!t) return; t.decisao = 'ignorado'; t.ignoradoPor = eu(); H.salvar(); H.fecharModal(); conciliar(id); });
+  }
+
+  /* ---------- Fechamento do trimestre (quem confere) ---------- */
+  const nomeConta = c => `${c.empresa === 'JeT' ? 'JeT' : 'SF'} · ${c.banco || ''} ${c.nome || ''}`.trim();
+  const mesBR = m => m.split('-').reverse().join('/');
+  const brl = v => v == null ? '—' : W.fmtBRL(v);
+  function descPend(k, it) {
+    if (it.memo != null && it.valor != null && it.data) return `${W.dataBR(it.data)} · ${esc(it.memo || it.desc || '')}${it.desc && it.memo ? ' → ' + esc(it.desc) : ''} · <b class="${it.valor < 0 ? 'neg' : ''}">${W.fmtBRL(it.valor)}</b>${it.ignorado ? ' <span class="pill warn">ignorado</span>' : ''}${it.notaLink ? ' <span class="pill info">nota só por link</span>' : ''}`;
+    if (it.lancId) return `${W.dataBR(it.data)} · ${esc(it.desc || '')} ${it.op ? '<span class="note mono">' + esc(it.op) + '</span>' : ''} · <b>${W.fmtBRL(it.valor)}</b>`;
+    if (it.notaId) return `NF ${esc(it.numero || '')} · ${esc(it.emitente || '')} → ${esc(it.destinatario || '')} · ${W.fmtBRL(it.valor)} · ${W.dataBR(it.data)}`;
+    if (it.dif != null) return `${esc(it.banco || '')} ${esc(it.conta || '')} · ${mesBR(it.mes)}: extrato ${brl(it.extrato)} × sistema ${brl(it.sistema)} (<b class="neg">${W.fmtBRL(it.dif)}</b>)`;
+    if (it.esperado != null) return `${esc(it.banco || '')} ${esc(it.conta || '')} · ${mesBR(it.mes)} começa em ${W.fmtBRL(it.veio)}, mas o mês anterior fechou em ${W.fmtBRL(it.esperado)}`;
+    return `${esc(it.banco || '')} ${esc(it.conta || '')}${it.mes ? ' · ' + mesBR(it.mes) : ''}`;
+  }
+  function painelFechamento(fe) {
+    if (!fe) return '';
+    const P = fe.pendencias, diretoria = H.pode('fin.autorizar'), ent = fe.entrega, pac = ent && ent.pacotes ? Object.values(ent.pacotes) : [];
+    const rec = (H.db.hubPainel._fiscalContador || {})[tri];
+    const saldos = fe.porConta.map(pc => pc.meses.map((m, i) => `<tr><td>${i ? '' : esc(nomeConta(pc.conta))}</td><td class="mono">${mesBR(m.mes)}</td><td class="num">${brl(m.saldoInicial)}</td><td class="num">${brl(m.saldoFinal)}</td><td class="num">${brl(m.sistema)}</td>
+      <td class="num">${m.dif == null ? '<span class="note">sem extrato</span>' : m.dif ? `<b class="neg">${W.fmtBRL(m.dif)}</b>` : '<span class="pill ok">0,00</span>'}</td></tr>`).join('')).join('');
+    const blocos = W.PENDENCIAS.filter(([k]) => P[k].length).map(([k, l]) => `<div style="margin-top:10px"><b>${esc(l)}</b> <span class="pill warn">${P[k].length}</span><div class="list">
+      ${P[k].slice(0, 8).map((it, i) => `<div class="row"><span>${descPend(k, it)}</span><button class="btn sm" data-res="${k}:${i}">Resolver</button></div>`).join('')}${P[k].length > 8 ? `<p class="note">e mais ${P[k].length - 8}</p>` : ''}</div></div>`).join('');
+    return `<div class="box"><div class="box-h"><h2>Fechamento do trimestre · ${Math.round(fe.pct * 100)}% pronto para o contador</h2><div class="btns"><span class="note">${fe.completos} de ${fe.total} movimentos completos · ${fe.qtdPendencias} pendência(s)</span>
+        <button class="btn ${fe.pronto ? 'pri' : ''}" id="fpac" ${fe.pronto || diretoria ? '' : 'disabled title="Zere as pendências: só a diretoria libera com pendências"'}>${fe.pronto ? 'Gerar pacote para o contador' : diretoria ? 'Liberar pacote com pendências' : 'Gerar pacote (zere as pendências)'}</button></div></div>
+      <div class="box-b">${fe.contas.length ? `<div class="tw"><table><thead><tr><th>Conta</th><th>Mês</th><th class="num">Saldo inicial</th><th class="num">Saldo final do extrato</th><th class="num">Saldo do sistema</th><th class="num">Diferença</th></tr></thead><tbody>${saldos}</tbody></table></div>` : '<p class="banner">Cadastre as contas bancárias em Configurar: sem elas o trimestre não fecha.</p>'}
+        ${blocos || '<p class="note" style="margin-top:10px">Nenhuma pendência: todo movimento tem lançamento, classificação, contraparte, nota (ou motivo) e comprovante, e os saldos batem.</p>'}
+        ${pac.length ? `<h3 class="h3" style="margin-top:12px">Pacotes gerados</h3><div class="list">${pac.map(p => `<div class="row"><span>${p.empresa === 'todas' ? 'SF + JeT' : p.empresa === 'JeT' ? 'JeT' : 'SF'} · por ${esc(p.por)} em ${W.dataBR(p.em)} · ${Math.round(((p.resumo || {}).pct || 0) * 100)}% · <span class="mono" title="SHA-256">${esc(String(p.hash || '').slice(0, 12))}…</span>${p.liberadoComPendencias ? ` · <span class="pill warn">liberado com pendências por ${esc(p.liberadoComPendencias.por)}: ${esc(p.liberadoComPendencias.motivo)}</span>` : ''}${p.faltou ? ` · ${p.faltou} arquivo(s) não baixado(s)` : ''}</span><a class="btn sm" href="${esc(p.link)}" target="_blank" rel="noopener">Baixar</a></div>`).join('')}</div>
+          <p class="note">${rec && rec.recebidoEm ? 'O contador confirmou o recebimento em ' + W.dataBR(rec.recebidoEm) + '.' : 'O contador ainda não confirmou o recebimento.'}</p>` : ''}</div></div>`;
+  }
+  function ligarFechamento(el, fe) {
+    el.querySelectorAll('[data-res]').forEach(b => b.onclick = () => { const [k, i] = b.dataset.res.split(':'); resolver(k, fe.pendencias[k][+i]); });
+    const bp = el.querySelector('#fpac'); if (!bp) return;
+    bp.onclick = () => {
+      if (fe.pronto) return gerarPacote(bp, false, '');
+      const m = H.modal('Liberar o pacote com pendências', `<p class="banner" style="margin-bottom:10px">Ainda faltam ${fe.qtdPendencias} item(ns). O pacote sai com uma aba das pendências e fica registrado quem liberou e por quê.</p>
+        <div class="list">${W.PENDENCIAS.filter(([k]) => fe.pendencias[k].length).map(([k, l]) => `<div class="row"><span>${esc(l)}</span><b>${fe.pendencias[k].length}</b></div>`).join('')}</div>
+        <div class="fields" style="margin-top:10px"><div class="f w4"><label class="lbl" for="lbm">Motivo da liberação</label><input id="lbm"></div></div>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="lbok">Liberar e gerar</button>');
+      m.querySelector('#lbok').onclick = e => { const mo = m.querySelector('#lbm').value.trim(); if (!mo) { H.toast('Escreva o motivo'); return; } gerarPacote(e.target, true, mo); };
+    };
+  }
+  async function gerarPacote(btn, liberar, motivo) {
+    btn.disabled = true; const txt0 = btn.textContent; btn.textContent = 'Montando o pacote…';
+    try {
+      const r = await H.api('/api/fiscal/pacote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tri, empresa, liberar, motivo }) });
+      const j = await r.json().catch(() => ({}));
+      if (!j.success) { H.toast(esc(j.message || 'Não consegui gerar o pacote.')); btn.disabled = false; btn.textContent = txt0; return; }
+      H.aplicarObjetoDoServidor('hubPainel', '_fiscal', j.fiscal); H.fecharModal();
+      H.toast(`Pacote gerado: ${j.entrega.arquivos} arquivo(s)${j.entrega.faltou ? ', ' + j.entrega.faltou + ' não baixado(s) (ver LEIA-ME)' : ''}. O contador baixa pelo acesso dele.`);
+      window.open(j.entrega.link, '_blank'); H.render();
+    } catch (e) { btn.disabled = false; btn.textContent = txt0; H.toast('Não consegui gerar o pacote agora.'); }
+  }
+  function resolver(k, it) {
+    if (!it) return H.render();
+    if (k === 'semLancamento') return conciliar(it.extratoId);
+    if (k === 'saldoDiferente' || k === 'extratoQuebrado') { const e = H.db.hubExtratos.find(x => x && x.contaId === it.contaId && x.mes === it.mes); return e ? conciliar(e._id) : novoExtrato(); }
+    if (it.lancId) { const l = H.db.fin.find(x => x && x._id === it.lancId); if (l && H.editarLanc) return H.editarLanc(l); }
+    if (k === 'notasOrfas') return resolverNota(it.notaId);
+    if (k === 'faltaExtrato' || k === 'extratoSemMovimentos') return novoExtrato();
+    if (k === 'contaSemCadastro') return configurar();
+    H.render();
+  }
+  /* Nota sem lançamento: vincular a um lançamento (parcela) ou registrar o motivo. */
+  function resolverNota(id) {
+    const n = H.db.hubNotas.find(x => x && x._id === id); if (!n) return H.render();
+    const cands = H.db.fin.filter(l => l && (l.empresa || 'WindGate') === (n.empresa || 'WindGate') && !W.transferencia(l))
+      .map(l => ({ l, d: Math.abs((+l.valor || 0) - (+n.valor || 0)) + (n.op && l.op === n.op ? 0 : 1e9) })).sort((a, b) => a.d - b.d).slice(0, 80).map(x => x.l);
+    const m = H.modal(`Nota ${n.numero || ''} sem lançamento`, `<p class="note" style="margin-bottom:10px">${esc(n.emitente || '')} → ${esc(n.destinatario || '')} · ${W.fmtBRL(n.valor)} · ${W.dataBR(n.data)}${n.op ? ' · ' + esc(n.op) : ''}</p>
+      <div class="fields"><div class="f w3"><label class="lbl" for="rnl">Vincular ao lançamento</label><select id="rnl">${cands.map(l => `<option value="${esc(l._id)}">${W.dataBR(W.vencDe(l))} · ${esc(l.desc || l.categoria || '')} · ${esc(l.op || '')} · ${W.fmtBRL(l.valor)}${W.realizado(l) ? '' : ' (previsto)'}</option>`).join('')}</select></div>
+      <div class="f"><label class="lbl" for="rnv">Valor vinculado</label><input id="rnv" type="number" step="0.01" placeholder="parcela"></div>
+      <div class="f w4"><label class="lbl" for="rnm">Ou: motivo de não ter lançamento no trimestre</label><input id="rnm" value="${esc((n.semLancamento || {}).motivo || '')}" placeholder="ex.: a receber no próximo trimestre"></div></div>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn" id="rnsem">Registrar motivo</button><button class="btn blue" id="rnok">Vincular</button>');
+    m.querySelector('#rnok').onclick = () => {
+      const l = H.db.fin.find(x => x && x._id === m.querySelector('#rnl').value); if (!l) return;
+      const v = +m.querySelector('#rnv').value || Math.min(+n.valor || 0, +l.valor || 0);
+      l.notas = (l.notas || []).concat([{ notaId: n._id, chave: n.chave || '', numero: n.numero || '', valorVinculado: Math.round(v * 100) / 100 }]);
+      l.alteracoes = (l.alteracoes || []).concat([{ em: new Date().toISOString(), por: eu(), acao: 'nota ' + (n.numero || n._id) + ' vinculada' }]);
+      H.salvar(); H.fecharModal(); H.toast('Nota vinculada'); H.render();
+    };
+    m.querySelector('#rnsem').onclick = () => { const mo = m.querySelector('#rnm').value.trim(); if (!mo) { H.toast('Escreva o motivo'); return; } n.semLancamento = { motivo: mo, por: eu(), em: new Date().toISOString() }; H.salvar(); H.fecharModal(); H.render(); };
+  }
+
+  /* ---------- Pacote: o que o contador vê ---------- */
+  function painelPacote(f, contador) {
+    if (H.perfil().id !== 'contador') return '';
+    const pac = f.entrega && f.entrega.pacotes ? Object.values(f.entrega.pacotes) : [];
+    return `<div class="box"><div class="box-h"><h2>Pacote do fechamento</h2>${pac.length && !(contador && contador.recebidoEm) ? '<button class="btn pri" id="frec">Confirmar recebimento</button>' : ''}</div><div class="box-b list">
+      ${pac.length ? pac.map(p => `<div class="row"><span>${p.empresa === 'todas' ? 'SF + JeT' : p.empresa === 'JeT' ? 'JeT' : 'SF'} · gerado por ${esc(p.por)} em ${W.dataBR(p.em)} · planilha, notas, extratos e comprovantes${p.liberadoComPendencias ? ' · <span class="pill warn">com pendências (ver a aba na planilha)</span>' : ''}</span><a class="btn sm" href="${esc(p.link)}" target="_blank" rel="noopener">Baixar</a></div>`).join('')
+        + (contador && contador.recebidoEm ? `<p class="note">Recebimento confirmado em ${W.dataBR(contador.recebidoEm)}.</p>` : '')
+        : '<p class="empty">O pacote deste trimestre ainda não foi gerado.</p>'}</div></div>`;
   }
 
   function marcar(id, st) {
@@ -160,7 +260,8 @@
     if (!contas.length) { H.toast('Cadastre antes as contas bancárias em Configurar'); return configurar(); }
     const mesPad = (() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 7); })();
     const m = H.modal('Novo extrato', `<div class="fields"><div class="f w2"><label class="lbl" for="xc">Conta</label><select id="xc">${contas.map(c => `<option value="${esc(c.id)}">${esc((c.empresa === 'JeT' ? 'JeT' : 'SF') + ' · ' + c.banco + ' ' + (c.nome || ''))}</option>`).join('')}</select></div>
-      <div class="f"><label class="lbl" for="xm">Mês</label><input id="xm" type="month" value="${mesPad}"></div><div class="f w4"><label class="lbl" for="xa">Arquivo (OFX de preferência; PDF também vale)</label><input id="xa" type="file" accept=".ofx,.pdf,.csv"></div></div>
+      <div class="f"><label class="lbl" for="xm">Mês</label><input id="xm" type="month" value="${mesPad}"></div><div class="f w4"><label class="lbl" for="xa">Arquivo (OFX de preferência; PDF também vale)</label><input id="xa" type="file" accept=".ofx,.pdf,.csv"></div>
+      <div class="f w2"><label class="lbl" for="xsi">Saldo inicial do mês (PDF)</label><input id="xsi" type="number" step="0.01"></div><div class="f w2"><label class="lbl" for="xsf">Saldo final do mês (PDF)</label><input id="xsf" type="number" step="0.01"></div></div>
       <p class="note" style="margin-top:8px">Com OFX, o sistema confere cada movimento com o Financeiro e mostra o que não tem lançamento.</p><p class="note" id="xlido"></p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="xok">Guardar extrato</button>');
     let ofx = null;
@@ -172,7 +273,7 @@
       let link = ''; try { link = await subir(f); } catch (e) { H.toast('Arquivo não enviado (' + esc(e.message) + ').'); return; }
       const trans = ofx ? W.conciliar(H.db, ofx.transacoes, conta.empresa) : null;
       H.db.hubExtratos.unshift({ _id: W.novoId(), contaId: conta.id, empresa: conta.empresa, banco: conta.banco, contaNome: conta.nome || '', mes, link, formato: ofx ? 'OFX' : (f.name.split('.').pop() || '').toUpperCase(),
-        saldo: ofx ? ofx.saldo : null, transacoes: trans, por: eu(), em: new Date().toISOString() });
+        saldo: ofx ? ofx.saldo : (m.querySelector('#xsf').value !== '' ? +m.querySelector('#xsf').value : null), saldoInicial: !ofx && m.querySelector('#xsi').value !== '' ? +m.querySelector('#xsi').value : undefined, transacoes: trans, por: eu(), em: new Date().toISOString() });
       H.salvar(); H.fecharModal(); H.toast(trans ? `Extrato guardado: ${trans.filter(t => t.lancId).length} de ${trans.length} movimentos batem com o Financeiro.` : 'Extrato guardado'); H.render();
     };
   }
@@ -182,6 +283,7 @@
     const pedro = (H.db.users || {}).pedro || {};
     const m = H.modal('Configurar Fiscal & Contabilidade', `<h3 class="h3">CNPJs do grupo</h3><div class="fields"><div class="f w2"><label class="lbl" for="cs">SF Trading</label><input id="cs" value="${esc(cnpjs.WindGate)}"></div><div class="f w2"><label class="lbl" for="cj">JeT Import</label><input id="cj" value="${esc(cnpjs.JeT)}"></div></div>
       <h3 class="h3" style="margin-top:14px">Contas bancárias</h3><div class="list" id="cl"></div><div class="fields"><div class="f"><label class="lbl" for="cbe">Empresa</label><select id="cbe"><option value="WindGate">SF</option><option value="JeT">JeT</option></select></div><div class="f"><label class="lbl" for="cbb">Banco</label><input id="cbb" placeholder="Ex.: Itaú"></div><div class="f"><label class="lbl" for="cbn">Agência/conta</label><input id="cbn"></div><div class="f" style="align-self:end"><button class="btn" id="cba" type="button">Adicionar</button></div></div>
+      ${H.pode('fin.autorizar') ? `<h3 class="h3" style="margin-top:14px">Fechamento trimestral</h3><div class="fields"><div class="f w2"><label class="lbl" for="cmot">Motivos de lançamento sem nota (um por linha)</label><textarea id="cmot" rows="6">${esc(W.motivosSemNota(H.db).map(x => x[1]).join('\n'))}</textarea></div><div class="f w2"><label class="lbl" for="cnat">Naturezas das despesas da empresa (uma por linha)</label><textarea id="cnat" rows="6">${esc(W.naturezas(H.db).join('\n'))}</textarea></div></div>` : ''}
       <h3 class="h3" style="margin-top:14px">E-mail de notas</h3><div class="fields"><div class="f w4"><label class="lbl" for="ce">Endereço que encaminha para o sistema</label><input id="ce" value="${esc(c.emailNotas || '')}" placeholder="notas@windgate.com.br"></div></div>
       ${H.pode('torre.outros') ? `<h3 class="h3" style="margin-top:14px">Acesso do contador</h3><div class="fields"><div class="f w2"><label class="lbl" for="pn">Nome</label><input id="pn" value="${esc(pedro.nome || 'Pedro')}"></div><div class="f w2"><label class="lbl" for="pp">PIN de acesso</label><input id="pp" inputmode="numeric" maxlength="8" placeholder="${pedro.pin ? 'manter o atual' : '4 a 8 números'}"></div></div>
       <p class="note">O contador vê só esta área: notas e extratos. O servidor não envia a ele operações, financeiro, CRM nem cotações.</p>` : ''}`,
@@ -191,7 +293,13 @@
     desenhar();
     m.querySelector('#cba').onclick = () => { const b = m.querySelector('#cbb').value.trim(); if (!b) return; contas.push({ id: W.novoId(), empresa: m.querySelector('#cbe').value, banco: b, nome: m.querySelector('#cbn').value.trim(), ativa: true }); m.querySelector('#cbb').value = m.querySelector('#cbn').value = ''; desenhar(); };
     m.querySelector('#cok').onclick = () => {
-      H.db.hubPainel._fiscal = Object.assign({}, c, { cnpjs: { WindGate: m.querySelector('#cs').value.trim(), JeT: m.querySelector('#cj').value.trim() }, contas, emailNotas: m.querySelector('#ce').value.trim() });
+      const extra = {};
+      if (m.querySelector('#cmot')) {
+        const ant = W.motivosSemNota(H.db), slug = l => l.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+        extra.motivosSemNota = m.querySelector('#cmot').value.split('\n').map(x => x.trim()).filter(Boolean).map(l => { const a = ant.find(x => x[1] === l); return [a ? a[0] : slug(l), l]; });
+        extra.naturezas = m.querySelector('#cnat').value.split('\n').map(x => x.trim()).filter(Boolean);
+      }
+      H.db.hubPainel._fiscal = Object.assign({}, c, { cnpjs: { WindGate: m.querySelector('#cs').value.trim(), JeT: m.querySelector('#cj').value.trim() }, contas, emailNotas: m.querySelector('#ce').value.trim() }, extra);
       const pp = m.querySelector('#pp');
       if (pp && (pp.value.trim() || !pedro.pin)) {
         const pin = pp.value.trim(); if (!/^\d{4,8}$/.test(pin)) { H.toast('PIN do contador com 4 a 8 números'); return; }

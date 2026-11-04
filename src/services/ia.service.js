@@ -128,4 +128,22 @@ async function conferirDocumentos(arquivos, contexto, fetchImpl) {
   return { documentos: Array.isArray(d.documentos) ? d.documentos : [], divergencias: Array.isArray(d.divergencias) ? d.divergencias : [], alertas: Array.isArray(d.alertas) ? d.alertas.map(String) : [] };
 }
 
-module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, extrairJSON, blocoImagem, MODELO };
+/* ---------- Comprovante de pagamento → dados para o lançamento ----------
+   A IA só LÊ: o servidor monta a sugestão e uma pessoa confirma antes de gravar. */
+const SISTEMA_COMPROVANTE = `Você lê comprovantes bancários brasileiros (Pix, TED, DOC, boleto pago, transferência entre contas, tarifa, câmbio) para o financeiro de uma trading (SF Trading e JeT Import).
+Responda SOMENTE com um objeto JSON, sem comentários:
+{"tipo":"pix|ted|doc|boleto|transferência entre contas|tarifa|câmbio|outro","data":"AAAA-MM-DD (data em que o dinheiro saiu ou entrou)","valor":número em reais,
+ "banco":"banco da conta de origem","conta":"agência/conta de origem","pagador":{"nome":"","documento":"CNPJ ou CPF só com números"},
+ "favorecido":{"nome":"","documento":"CNPJ ou CPF só com números","banco":""},"idTransacao":"ID end-to-end do Pix, número de autenticação ou de controle",
+ "linhaDigitavel":"só números, se for boleto","descricao":"texto livre/identificação que aparece no comprovante",
+ "confianca":{"tipo":0-1,"data":0-1,"valor":0-1,"pagador":0-1,"favorecido":0-1,"idTransacao":0-1}}
+Regras: copie exatamente o que está no comprovante. O que não aparecer fica vazio ("" ou null) e com confiança 0. Nunca invente CNPJ, data, valor nem identificador.`;
+async function lerComprovante({ base64, mime }, fetchImpl) {
+  if (!ativa()) { const e = new Error('IA desligada: falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  if (!base64 || !MIME_OK.test(mime || '')) throw new Error('Envie o comprovante em PDF ou imagem (PNG, JPG, WEBP).');
+  const bloco = /pdf/i.test(mime) ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: String(mime).toLowerCase().replace('jpg', 'jpeg'), data: base64 } };
+  return extrairJSON(await chamar([bloco, { type: 'text', text: 'Leia este comprovante.' }], SISTEMA_COMPROVANTE, fetchImpl, { max_tokens: 1500 }));
+}
+
+module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, lerComprovante, extrairJSON, blocoImagem, MODELO };

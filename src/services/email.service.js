@@ -55,4 +55,35 @@ async function lerCaixa({ cnpjs, novaNota, salvarAnexo, limite }) {
   return { lidas, notas };
 }
 
-module.exports = { configurado, lerCaixa, notasDaMensagem };
+/* Comprovantes por e-mail (opcional, desligado): lê só a pasta IMAP_PASTA_COMPROVANTES e devolve
+   os anexos PDF/imagem. Quem decide o que fazer é o Financeiro: viram sugestões pendentes, nunca lançamento. */
+const ANEXO_COMPROVANTE = /^(application\/pdf|image\/(png|jpe?g|webp))$/i;
+function comprovantesDaMensagem(msg) {
+  const de = (msg.from && msg.from.text) || '';
+  return (msg.attachments || []).filter(a => ANEXO_COMPROVANTE.test(a.contentType || '') || /\.(pdf|png|jpe?g|webp)$/i.test(a.filename || ''))
+    .map(a => ({ nome: a.filename || 'comprovante', mime: /pdf/i.test(a.contentType || a.filename) ? 'application/pdf' : (a.contentType || 'image/jpeg'), base64: a.content.toString('base64'), conteudo: a.content, de,
+      hash: require('crypto').createHash('sha256').update(a.content).digest('hex') }));
+}
+async function lerComprovantes({ salvarAnexo, limite }) {
+  if (!configurado() || !process.env.IMAP_PASTA_COMPROVANTES) return [];
+  const { ImapFlow } = require('imapflow');
+  const { simpleParser } = require('mailparser');
+  const cliente = new ImapFlow({ host: process.env.IMAP_HOST, port: +(process.env.IMAP_PORTA || 993), secure: (process.env.IMAP_SEGURO || '1') !== '0',
+    auth: { user: process.env.IMAP_USUARIO, pass: process.env.IMAP_SENHA }, logger: false });
+  await cliente.connect();
+  const out = [];
+  const trava = await cliente.getMailboxLock(process.env.IMAP_PASTA_COMPROVANTES);
+  try {
+    const uids = (await cliente.search({ seen: false })) || [];
+    for (const uid of uids.slice(0, limite || 20)) {
+      const m = await cliente.fetchOne(uid, { source: true }, { uid: true });
+      for (const a of comprovantesDaMensagem(await simpleParser(m.source))) {
+        a.link = salvarAnexo ? await salvarAnexo(a.nome, a.conteudo, a.mime).catch(() => '') : ''; delete a.conteudo; out.push(a);
+      }
+      await cliente.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+    }
+  } finally { trava.release(); await cliente.logout().catch(() => {}); }
+  return out;
+}
+
+module.exports = { configurado, lerCaixa, notasDaMensagem, comprovantesDaMensagem, lerComprovantes };

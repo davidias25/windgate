@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe', 'hubComprovantes'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();

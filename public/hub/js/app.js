@@ -94,6 +94,13 @@
     H.conhecidos = W.fotografarIds(H.db);
   };
 
+  /* Mesma ideia para uma chave de objeto (ex.: hubPainel._fiscal gravado pelo pacote do contador). */
+  H.aplicarObjetoDoServidor = function (objeto, chave, valor) {
+    if (!H.db) return;
+    H.db[objeto] = H.db[objeto] || {}; H.db[objeto][chave] = valor;
+    if (base) W.absorver(base, { [objeto]: { [chave]: valor } });
+  };
+
   /* Cópia de segurança do que não subiu (queda de rede, sessão expirada). */
   const CHAVE_PEND = 'wg_hub_pendente';
   function guardarPendente(db) {

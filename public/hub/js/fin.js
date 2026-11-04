@@ -8,12 +8,13 @@
   function filtrosTopo() {
     return `<div class="btns"><input class="inp" type="month" id="fMes" value="${F.mes}" aria-label="Mês">
       <div class="seg">${[['todas', 'SF + JeT'], ['WindGate', 'WindGate/SF'], ['JeT', 'JeT']].map(([k, l]) => `<button data-emp="${k}" class="${F.empresa === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <button class="btn pri" data-novo>+ Lançamento</button></div>`;
+      ${H.pode('fin.lancar') ? '<button class="btn blue" data-comp>Enviar comprovante</button>' : ''}<button class="btn pri" data-novo>+ Lançamento</button></div>`;
   }
   function ligarTopo(el) {
     const m = el.querySelector('#fMes'); if (m) m.onchange = () => { F.mes = m.value || F.mes; H.render(); };
     el.querySelectorAll('[data-emp]').forEach(b => b.onclick = () => { F.empresa = b.dataset.emp; H.render(); });
     el.querySelectorAll('[data-novo]').forEach(b => b.onclick = () => editarLanc(null, {}));
+    el.querySelectorAll('[data-comp]').forEach(b => b.onclick = () => H.enviarComprovante && H.enviarComprovante({}));
   }
 
   /* ================= PAINEL & DRE ================= */
@@ -147,7 +148,7 @@
         const aut = contas ? '<td>' + (l.autorizadoEm ? `<span class="pill ok">Autorizado · ${esc(l.autorizadoPor || '')}</span>` : W.ehReceita(l) ? '<span class="note">—</span>' : aprova ? `<button class="btn sm blue" data-aut="${esc(l._id)}">Autorizar</button>` : '<span class="pill warn">Aguardando Samir</span>') + '</td>' : '';
         return `<tr><td class="mono">${W.dataBR(v)}</td><td>${esc(l.desc || '—')}${l.recId ? ` <span class="note">(fixa ${l.recIdx}/${l.recTot})</span>` : ''}${l.categoria ? `<br><small class="note">${esc(l.categoria)}</small>` : ''}</td>
           <td class="mono">${esc(l.op || '—')}</td><td>${esc(l.empresa || 'WindGate')}</td><td><span class="pill ${W.ehReceita(l) ? 'ok' : 'crit'}">${esc(l.tipo || 'Despesa')}</span></td>
-          <td class="num"><b>${W.fmtBRL(l.valor)}</b></td><td>${sit}</td>${aut}
+          <td class="num"><b>${W.fmtBRL(l.valor)}</b></td><td>${sit}${W.realizado(l) ? (() => { const s = W.situacaoLanc(l), falta = [!s.classificado && 'classificação', !s.contraparte && 'contraparte', !s.nota && 'nota', !s.comprovante && 'comprovante'].filter(Boolean); return falta.length ? `<br><small class="note" title="Para o fechamento do trimestre">falta: ${falta.join(', ')}</small>` : ''; })() : ''}</td>${aut}
           <td class="num" style="white-space:nowrap">${l.comp ? `<a class="btn ghost sm" href="${esc(l.comp)}" target="_blank" rel="noopener">Comprovante</a>` : ''}${!W.realizado(l) ? `<button class="btn sm" data-baixa="${esc(l._id)}">Dar baixa</button>` : ''}<button class="btn ghost sm" data-ed="${esc(l._id)}">Editar</button></td></tr>`; }).join('')}
     </tbody></table></div>`;
   }
@@ -199,15 +200,17 @@
       <div class="f w2"><label class="lbl" for="es">Situação</label><select id="es"><option ${sel(d.status, 'Previsto')}>Previsto</option><option ${sel(d.status, 'Realizado')}>Realizado</option></select></div>
       <div class="f w2"><label class="lbl" for="ecp">Link do comprovante</label><input id="ecp" type="url" value="${esc(d.comp || '')}"></div>
       ${novo ? `<div class="f w4"><label class="lbl"><input type="checkbox" id="efx" style="width:auto"> Conta fixa mensal (gera 12 meses)</label></div>` : ''}
+      ${blocoFiscal(d)}
       ${l && l.recId ? '<p class="note f w4">Lançamento de conta fixa: esta edição muda só este mês (o vencimento continua dentro do mês dele).</p>' : ''}</div>`,
       `${!novo && H.pode('fin.excluir') ? '<button class="btn" id="edel" style="margin-right:auto;color:var(--crit)">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="eok">Salvar</button>`);
     // Quem só lança não altera o que outra pessoa já baixou: só anexa o comprovante.
     const restrito = !novo && !H.pode('fin.excluir') && W.realizado(l) && l.por !== H.nomeUsuario(H.userKey);
-    if (restrito) { m.querySelectorAll('input,select').forEach(x => { if (x.id !== 'ecp') x.disabled = true; }); m.querySelector('.box-b').insertAdjacentHTML('afterbegin', '<p class="banner" style="margin-bottom:10px">Lançamento já baixado por outra pessoa: você pode anexar o comprovante. Outras mudanças, peça ao Davi.</p>'); }
+    const fisc = ligarFiscal(m, d);
+    if (restrito) { m.querySelectorAll('input,select,button').forEach(x => { if (x.id !== 'ecp' && !x.closest('[data-fiscal]') && x.tagName !== 'BUTTON') x.disabled = true; }); m.querySelector('.box-b').insertAdjacentHTML('afterbegin', '<p class="banner" style="margin-bottom:10px">Lançamento já baixado por outra pessoa: você pode anexar o comprovante e completar os dados fiscais. Outras mudanças, peça ao Davi.</p>'); }
     m.querySelector('#eok').onclick = () => {
       if (restrito) {
         const atual = H.db.fin.find(x => x && x._id === l._id); if (!atual) { H.fecharModal(); H.render(); return; }
-        atual.comp = m.querySelector('#ecp').value.trim(); H.salvar(); H.fecharModal(); H.toast('Comprovante anexado'); H.render(); return;
+        atual.comp = m.querySelector('#ecp').value.trim(); fisc.gravar(atual); H.salvar(); H.fecharModal(); H.toast('Comprovante e dados fiscais gravados'); H.render(); return;
       }
       if (!novo) { l = H.db.fin.find(x => x && x._id === l._id); if (!l) { H.fecharModal(); H.toast('Este lançamento foi removido por outra pessoa. Nada foi gravado.'); H.render(); return; } }
       const valor = +m.querySelector('#ev').value;
@@ -224,10 +227,10 @@
         const s = W.novaSerie(H.db, Object.assign({ por: eu }, campos), 12, status === 'Realizado');
         H.salvar(); H.fecharModal(); H.toast(`Conta fixa criada: <b>${s.total} meses</b>`); H.render(); return;
       }
-      if (novo) H.db.fin.unshift(Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '', criadoEm: new Date().toISOString() }, campos));
+      if (novo) { const nl = Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '', criadoEm: new Date().toISOString() }, campos); fisc.gravar(nl); H.db.fin.unshift(nl); }
       else {
         // Pagamento autorizado que muda de valor, vencimento ou destino volta para autorização.
-        if (l.autorizadoEm && (+l.valor !== +campos.valor || W.vencDe(l) !== campos.vencimento || (l.op || '') !== campos.op)) { campos.autorizadoEm = null; campos.autorizadoPor = null; H.toast('Valor ou vencimento mudou: o pagamento volta para autorização do Samir.'); } if (l.recId) { campos.fixo = true; campos.data = venc; } Object.assign(l, campos); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
+        if (l.autorizadoEm && (+l.valor !== +campos.valor || W.vencDe(l) !== campos.vencimento || (l.op || '') !== campos.op)) { campos.autorizadoEm = null; campos.autorizadoPor = null; H.toast('Valor ou vencimento mudou: o pagamento volta para autorização do Samir.'); } if (l.recId) { campos.fixo = true; campos.data = venc; } Object.assign(l, campos); fisc.gravar(l); if (status !== 'Realizado') { l.valorPago = null; l.valorPrevisto = null; } }
       H.salvar(); H.fecharModal(); H.toast(novo ? 'Lançamento registrado' : 'Lançamento atualizado'); H.render();
     };
     const del = m.querySelector('#edel');
@@ -238,4 +241,53 @@
     };
   }
   H.editarLanc = editarLanc;
+
+  /* ---------- Dados fiscais do lançamento (fechamento trimestral) ----------
+     Contraparte, notas vinculadas (uma nota pode cobrir várias parcelas) ou o
+     motivo de não ter nota, natureza e conta bancária. Tudo em campos novos. */
+  function blocoFiscal(d) {
+    const cp = d.contraparte || {}, cli = (() => { const o = (H.db.ops || []).find(x => x && x.id === d.op); return o ? (H.db.crm || []).find(c => c && (c.empresa === o.cliente || c.nome === o.cliente)) : null; })();
+    const nome = cp.nome || (cli && W.ehReceita(d) ? cli.empresa || cli.nome : ''), doc = cp.documento || (cli && W.ehReceita(d) ? String(cli.cnpj || '').replace(/\D/g, '') : '');
+    const sel = (a, b) => String(a || '') === String(b) ? 'selected' : '';
+    const contas = W.contasAtivas(H.db).filter(c => (c.empresa || 'WindGate') === (d.empresa || 'WindGate'));
+    return `<div class="f w4" data-fiscal><h3 class="h3" style="margin-top:6px">Dados fiscais <small class="note">(para o fechamento do trimestre)</small></h3></div>
+      <div class="f w2" data-fiscal><label class="lbl" for="fcn">Cliente/fornecedor</label><input id="fcn" value="${esc(nome)}"></div>
+      <div class="f" data-fiscal><label class="lbl" for="fcd">CNPJ/CPF</label><input id="fcd" value="${esc(doc)}"></div>
+      <div class="f" data-fiscal><label class="lbl" for="fct">Tipo</label><select id="fct">${W.TIPOS_CONTRAPARTE.map(([k, l]) => `<option value="${k}" ${sel(cp.tipo || (W.ehReceita(d) ? 'cliente' : 'fornecedor'), k)}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="f w2" data-fiscal><label class="lbl" for="fnz">Natureza (despesa da empresa)</label><select id="fnz"><option value="">—</option>${W.naturezas(H.db).map(n => `<option ${sel(d.naturezaContabil, n)}>${esc(n)}</option>`).join('')}</select></div>
+      ${contas.length > 1 ? `<div class="f w2" data-fiscal><label class="lbl" for="fcc">Conta bancária</label><select id="fcc"><option value="">—</option>${contas.map(c => `<option value="${esc(c.id)}" ${sel(d.contaId, c.id)}>${esc(c.banco + ' ' + (c.nome || ''))}</option>`).join('')}</select></div>` : ''}
+      <div class="f w4" data-fiscal><label class="lbl">Notas fiscais vinculadas</label><div id="fnl" class="list"></div>
+        <div style="display:flex;gap:6px;margin-top:6px"><select id="fna" class="inp" style="flex:1"></select><input id="fnv" type="number" step="0.01" placeholder="valor" style="width:120px"><button class="btn sm" id="fnb" type="button">Vincular</button></div>
+        ${d.nf && !(d.notas || []).length ? `<p class="note" style="margin-top:4px">Nota anexada (link): <a href="${esc(d.nf)}" target="_blank" rel="noopener">abrir</a> — vincule ao registro da nota acima.</p>` : ''}</div>
+      <div class="f w2" data-fiscal><label class="lbl" for="fsm">Sem nota? (motivo)</label><select id="fsm"><option value="">—</option>${W.motivosSemNota(H.db).map(([k, l]) => `<option value="${esc(k)}" ${sel((d.semNota || {}).motivo, k)}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="f w2" data-fiscal><label class="lbl" for="fso">Complemento do motivo</label><input id="fso" value="${esc((d.semNota || {}).obs || '')}" placeholder="obrigatório em câmbio e outro"></div>`;
+  }
+  function ligarFiscal(m, d) {
+    const notas = (d.notas || []).map(n => Object.assign({}, n)), g = id => m.querySelector(id);
+    const todas = () => (H.db.hubNotas || []).filter(n => n && (n.empresa || 'WindGate') === (g('#ee') ? g('#ee').value : d.empresa || 'WindGate') && !notas.some(x => x.notaId === n._id));
+    const desenhar = () => {
+      g('#fnl').innerHTML = notas.map((n, i) => `<div class="row"><span>NF ${esc(n.numero || '')} ${n.chave ? '<small class="note mono">' + esc(n.chave.slice(0, 10)) + '…</small>' : ''}</span><span>${W.fmtBRL(n.valorVinculado)} <button class="btn ghost sm" data-rmn="${i}" type="button">Tirar</button></span></div>`).join('') || '<p class="note">Nenhuma nota vinculada.</p>';
+      g('#fnl').querySelectorAll('[data-rmn]').forEach(b => b.onclick = () => { notas.splice(+b.dataset.rmn, 1); desenhar(); });
+      const base = Object.assign({}, d, { notas, contraparte: { documento: g('#fcd').value.replace(/\D/g, '') }, op: g('#eo') ? g('#eo').value : d.op, valor: +(g('#ev') ? g('#ev').value : d.valor) || d.valor });
+      const sug = W.sugerirNotas(H.db, base).map(x => x.nota), ids = new Set(sug.map(n => n._id));
+      g('#fna').innerHTML = '<option value="">Escolha a nota…</option>' + sug.map(n => `<option value="${esc(n._id)}">★ sugerida · NF ${esc(n.numero || '')} · ${esc(n.emitente || n.destinatario || '')} · ${W.fmtBRL(n.valor)} · ${W.dataBR(n.data)}</option>`).join('')
+        + todas().filter(n => !ids.has(n._id)).slice(0, 200).map(n => `<option value="${esc(n._id)}">NF ${esc(n.numero || n.arquivo || '')} · ${esc(n.emitente || '')} → ${esc(n.destinatario || '')} · ${W.fmtBRL(n.valor)} · ${W.dataBR(n.data)}</option>`).join('');
+    };
+    desenhar();
+    g('#fnb').onclick = () => {
+      const n = (H.db.hubNotas || []).find(x => x && x._id === g('#fna').value); if (!n) { H.toast('Escolha a nota'); return; }
+      const v = +g('#fnv').value || Math.min(+n.valor || 0, +(g('#ev') ? g('#ev').value : d.valor) || 0);
+      notas.push({ notaId: n._id, chave: n.chave || '', numero: n.numero || '', valorVinculado: Math.round(v * 100) / 100 }); g('#fnv').value = ''; desenhar();
+    };
+    return { gravar(l) {
+      const antes = JSON.stringify([l.contraparte, l.notas, l.semNota, l.naturezaContabil, l.contaId]);
+      const cn = g('#fcn').value.trim(), cd = g('#fcd').value.replace(/\D/g, '');
+      if (cn || cd) l.contraparte = { nome: cn, documento: cd, tipo: g('#fct').value };
+      if (notas.length || (l.notas || []).length) l.notas = notas;
+      if (g('#fsm').value) l.semNota = { motivo: g('#fsm').value, obs: g('#fso').value.trim() }; else delete l.semNota;
+      if (g('#fnz').value) l.naturezaContabil = g('#fnz').value; else delete l.naturezaContabil;
+      if (g('#fcc')) { if (g('#fcc').value) l.contaId = g('#fcc').value; else delete l.contaId; }
+      if (JSON.stringify([l.contraparte, l.notas, l.semNota, l.naturezaContabil, l.contaId]) !== antes) l.alteracoes = (l.alteracoes || []).concat([{ em: new Date().toISOString(), por: H.nomeUsuario(H.userKey), acao: 'dados fiscais' }]);
+    } };
+  }
 })();

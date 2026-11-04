@@ -798,6 +798,12 @@ async function salvarArquivoNFe(nome, conteudo, tipo) {
 }
 const nfeRotas = require('./routes/nfe.routes')(app, { auth, acesso, gravarParcial, quemChat, pronto: () => bancoPronto, db: () => memoryDB, salvarArquivo: salvarArquivoNFe });
 
+/* ---------- Comprovante → lançamento (IA) e pacote trimestral do contador ---------- */
+const finRotas = require('./routes/fin.routes')(app, { auth, gravarParcial, quemChat, ia, pronto: () => bancoPronto, db: () => memoryDB, salvarArquivo: salvarArquivoNFe });
+/* Opcional e desligado: comprovantes de uma pasta do e-mail viram sugestões pendentes (nunca lançamento automático). */
+if (process.env.WINDGATE_COMPROVANTES_EMAIL === '1' && email.configurado() && process.env.NODE_ENV !== 'test')
+  setInterval(() => email.lerComprovantes({ salvarAnexo: (n, c, t) => salvarArquivoNFe(n, c, t) }).then(a => finRotas.comprovantesDoEmail(a)).catch(e => console.warn('⚠️ Comprovantes do e-mail:', e.message)), 15 * 60 * 1000);
+
 /* ---------- Integrações: o que está ligado (sem nunca mostrar a chave) ---------- */
 app.get('/api/integracoes', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto;

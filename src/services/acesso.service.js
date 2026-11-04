@@ -14,7 +14,7 @@ function perfil(db, k) { return W.perfilDe(db || {}, k).id; }
 const ehContador = (db, k) => !!k && perfil(db, k) === 'contador';
 
 /* RH vê a equipe e o andamento, nunca dinheiro: sem financeiro, cotações (custos e margens), notas nem extratos. */
-const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos', 'hubCambio', 'hubNFe'];
+const SEM_DINHEIRO = ['fin', 'finRec', 'quotes', 'qindex', 'hubNotas', 'hubExtratos', 'hubCambio', 'hubNFe', 'hubComprovantes'];
 
 /* NF-e emitidas: só leem Davi, o contador e a diretoria (nfe.ver). O registro é
    do SERVIDOR — status, chave, protocolo e o JSON da nota só mudam pelas rotas

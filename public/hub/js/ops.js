@@ -209,9 +209,10 @@
 
   function abaFin(box, o) {
     const ls = H.db.fin.filter(l => l && l.op === o.id).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
-    box.innerHTML = `<div class="box"><div class="box-h"><h2>Lançamentos da operação</h2><div class="btns"><button class="btn sm" data-novo>+ Lançamento</button></div></div>
+    box.innerHTML = `<div class="box"><div class="box-h"><h2>Lançamentos da operação</h2><div class="btns"><button class="btn sm blue" data-comp>Enviar comprovante</button><button class="btn sm" data-novo>+ Lançamento</button></div></div>
       ${H.tabelaLanc ? H.tabelaLanc(ls) : ''}</div>`;
     box.querySelector('[data-novo]').onclick = () => H.editarLanc(null, { op: o.id });
+    box.querySelector('[data-comp]').onclick = () => H.enviarComprovante && H.enviarComprovante({ op: o.id });
     if (H.ligarLanc) H.ligarLanc(box);
   }
 
