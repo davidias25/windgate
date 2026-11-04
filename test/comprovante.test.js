@@ -68,6 +68,9 @@ const arquivo = k => ({ nome: k.toLowerCase() + '.pdf', mime: 'application/pdf',
   const dbL = banco(); dbL.fin.push({ _id: 'f4', tipo: 'Despesa', desc: 'Frete marítimo OP20 - outro', op: 'OP20', valor: 5000, vencimento: '2026-10-11', data: '2026-10-11', empresa: 'WindGate', status: 'Previsto', por: 'Davi' });
   dbL.fin.find(l => l._id === 'f1').op = 'OP21'; dbL.fin.find(l => l._id === 'f1').desc = 'Frete marítimo - XYZ Logística';
   ok(F.sugerirComprovante(dbL, Object.assign({}, LEITURAS.PIX, { descricao: '' }), { legenda: 'frete op20' }).alvoId === 'f4', 'dois previstos com o mesmo valor: a OP da legenda escolhe o da OP20');
+  const sIA = F.sugerirComprovante(db, Object.assign({}, pixAbigail, { legenda: 'Captação abigail Op20' }));
+  ok(sIA.campos.desc === 'Captação abigail Op20' && sIA.campos.op === 'OP20', 'legenda escrita embaixo do print (lida pela IA): descrição e OP20, sem digitar nada');
+  ok(F.sugerirComprovante(db, Object.assign({}, pixAbigail, { legenda: 'Captação abigail Op20' }), { legenda: 'captação abigail' }).campos.desc === 'captação abigail', 'texto digitado no campo vale mais que o lido na imagem');
   ok(F.legendaDoComprovante(db, 'Op-20 adiantamento').op === 'OP20' && F.legendaDoComprovante(db, '').desc === '', 'reconhece "Op-20" e aceita texto vazio');
   ok(F.normalizarLeitura({ valor: '1.234', pagador: {}, favorecido: {} }).data === '' && F.normalizarLeitura({}).idTransacao === '', 'campo que não veio fica vazio (a regra não inventa data nem identificador)');
 

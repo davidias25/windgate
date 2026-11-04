@@ -113,7 +113,7 @@
     return { tipo, data: W.ehISO(x.data) ? W.soData(x.data) : '', valor: Math.abs(r2(String(x.valor == null ? '' : x.valor).replace(',', '.'))) || null,
       banco: txt(x.banco), conta: txt(x.conta), pagador: { nome: txt(p.nome), documento: dig(p.documento || p.cnpj || p.cpf) },
       favorecido: { nome: txt(f.nome), documento: dig(f.documento || f.cnpj || f.cpf), banco: txt(f.banco) },
-      idTransacao: txt(x.idTransacao), linhaDigitavel: dig(x.linhaDigitavel), descricao: txt(x.descricao).slice(0, 300), confianca: conf };
+      idTransacao: txt(x.idTransacao), linhaDigitavel: dig(x.linhaDigitavel), descricao: txt(x.descricao).slice(0, 300), legenda: txt(x.legenda).slice(0, 120), confianca: conf };
   }
   function empresaDoDoc(db, doc) {
     const d = dig(doc); if (d.length < 8) return '';
@@ -149,7 +149,7 @@
    * Só sugere: quem grava é aplicarComprovante, depois da confirmação.
    */
   function sugerirComprovante(db, leitura, opts) {
-    const o = opts || {}, lt = normalizarLeitura(leitura), avisos = [], leg = legendaDoComprovante(db, o.legenda);
+    const o = opts || {}, lt = normalizarLeitura(leitura), avisos = [], leg = legendaDoComprovante(db, txt(o.legenda) || lt.legenda);
     if (leg.opCitada && !leg.op) avisos.push(`O texto cita ${leg.opCitada}, que não está nas operações: confira a operação.`);
     const eP = empresaDoDoc(db, lt.pagador.documento), eF = empresaDoDoc(db, lt.favorecido.documento);
     const transf = !!(eP && eF) || lt.tipo === 'transferência entre contas';
