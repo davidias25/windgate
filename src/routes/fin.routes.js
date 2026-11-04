@@ -35,12 +35,12 @@ module.exports = function registrar(app, ctx) {
   /* ---------- 1. Leitura: devolve a sugestão, não grava ---------- */
   app.post('/api/ia/comprovante', auth.exigirTokenSeAtiva, async (req, res) => {
     const b = await base(req, res, 'fin.lancar', 'Só quem lança no Financeiro envia comprovante.'); if (!b) return;
-    const { arquivo, empresa } = req.body || {};
+    const { arquivo, empresa, legenda } = req.body || {};
     if (!ia.ativa()) return res.json({ success: false, semIA: true, message: 'IA desligada: falta a chave no servidor. Preencha à mão; o arquivo fica anexado.' });
     if (!arquivo || !arquivo.base64) return res.status(400).json({ success: false, message: 'Envie o comprovante (PDF ou imagem).' });
     try {
       const lido = await ia.lerComprovante({ base64: arquivo.base64, mime: arquivo.mime });
-      const sugestao = W.sugerirComprovante(b.d, lido, { empresa });
+      const sugestao = W.sugerirComprovante(b.d, lido, { empresa, legenda });
       res.json({ success: true, sugestao, modelo: ia.MODELO() });
     } catch (e) { res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message }); }
   });
@@ -48,7 +48,7 @@ module.exports = function registrar(app, ctx) {
   /* Sugestão para leitura digitada à mão (sem IA): mesmas regras de baixa e duplicidade. */
   app.post('/api/fin/comprovante/sugerir', auth.exigirTokenSeAtiva, async (req, res) => {
     const b = await base(req, res, 'fin.lancar'); if (!b) return;
-    res.json({ success: true, sugestao: W.sugerirComprovante(b.d, (req.body || {}).leitura || {}, { empresa: (req.body || {}).empresa }) });
+    res.json({ success: true, sugestao: W.sugerirComprovante(b.d, (req.body || {}).leitura || {}, { empresa: (req.body || {}).empresa, legenda: (req.body || {}).legenda }) });
   });
 
   /* ---------- 2. Confirmação humana: só aqui o lançamento é gravado ---------- */

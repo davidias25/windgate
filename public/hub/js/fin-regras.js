@@ -128,6 +128,13 @@
     return emps.length === 1 ? emps[0] : '';
   }
   const opDoTexto = (db, s) => { const m = /\bOP\s*-?\s*(\d{1,4})\b/i.exec(String(s || '')); if (!m) return ''; const id = 'OP' + m[1]; return (db.ops || []).some(o => o && o.id === id) ? id : ''; };
+  /** Texto que acompanha o print (a legenda do WhatsApp, por exemplo "captação abgail op20"):
+      vira a descrição do lançamento novo, e a OP citada liga o lançamento à operação. */
+  function legendaDoComprovante(db, texto) {
+    const t = txt(texto).replace(/\s+/g, ' ').slice(0, 120);
+    const m = /\bOP\s*-?\s*(\d{1,4})\b/i.exec(t);
+    return { desc: t, op: opDoTexto(db, t), opCitada: m ? 'OP' + m[1] : '' };
+  }
   const clienteDaOp = (db, op) => { const o = (db.ops || []).find(x => x && x.id === op); if (!o) return null; return (db.crm || []).find(c => c && (c.empresa === o.cliente || c.nome === o.cliente)) || { empresa: o.cliente }; };
 
   /** Comprovante já lançado? Mesmo idTransacao, ou mesmo valor + data + favorecido. */
@@ -142,7 +149,8 @@
    * Só sugere: quem grava é aplicarComprovante, depois da confirmação.
    */
   function sugerirComprovante(db, leitura, opts) {
-    const o = opts || {}, lt = normalizarLeitura(leitura), avisos = [];
+    const o = opts || {}, lt = normalizarLeitura(leitura), avisos = [], leg = legendaDoComprovante(db, o.legenda);
+    if (leg.opCitada && !leg.op) avisos.push(`O texto cita ${leg.opCitada}, que não está nas operações: confira a operação.`);
     const eP = empresaDoDoc(db, lt.pagador.documento), eF = empresaDoDoc(db, lt.favorecido.documento);
     const transf = !!(eP && eF) || lt.tipo === 'transferência entre contas';
     let tipo = eF && !eP ? 'Receita' : 'Despesa';
@@ -163,8 +171,8 @@
       .map(l => { const cli = clienteDaOp(db, l.op); const sim = Math.max(parecido(outro.nome, l.desc), parecido(outro.nome, (l.contraparte || {}).nome), cli ? parecido(outro.nome, cli.empresa || cli.nome) : 0,
         outro.documento && (dig((l.contraparte || {}).documento) === outro.documento || (cli && dig(cli.cnpj) === outro.documento)) ? 1 : 0);
         return { l, sim, dias: Math.abs(W.diasEntre(W.vencDe(l), lt.data || W.vencDe(l)) || 0) }; })
-      .sort((a, b) => b.sim - a.sim || a.dias - b.dias);
-    const alvo = cand.length === 1 ? cand[0] : cand.find(c => c.sim > 0);
+      .sort((a, b) => (leg.op ? (b.l.op === leg.op) - (a.l.op === leg.op) : 0) || b.sim - a.sim || a.dias - b.dias);
+    const alvo = cand.length === 1 ? cand[0] : (leg.op && cand.find(c => c.l.op === leg.op)) || cand.find(c => c.sim > 0);
     const contraparte = { nome: outro.nome, documento: outro.documento,
       tipo: transf ? 'interno' : lt.tipo === 'tarifa' ? 'banco' : /darf|gnre|\bdae\b|receita federal|sefaz|secretaria da fazenda/i.test(outro.nome + ' ' + lt.descricao) ? 'governo' : tipo === 'Receita' ? 'cliente' : 'fornecedor' };
     const comprov = { tipo: lt.tipo, idTransacao: lt.idTransacao, linhaDigitavel: lt.linhaDigitavel, confianca: lt.confianca };
@@ -178,7 +186,7 @@
     }
     /* Lançamento novo. */
     const textoTodo = [lt.descricao, outro.nome, lt.favorecido.nome, lt.pagador.nome].join(' ');
-    let op = opDoTexto(db, textoTodo);
+    let op = leg.op || opDoTexto(db, textoTodo);
     if (!op && outro.documento) {
       const cli = (db.crm || []).find(c => c && dig(c.cnpj) === outro.documento);
       const ops = cli ? (db.ops || []).filter(x => x && x.cliente === (cli.empresa || cli.nome) && W.ativa(x)) : [];
@@ -186,13 +194,13 @@
     }
     const imposto = contraparte.tipo === 'governo';
     const categoria = transf ? 'Transferência' : imposto ? (op ? 'Imposto importação' : 'Imposto geral') : '';
-    const desc = (lt.descricao || [lt.tipo ? lt.tipo.toUpperCase() : '', outro.nome].filter(Boolean).join(' · ') || 'Comprovante').slice(0, 120);
+    const desc = (leg.desc || lt.descricao || [lt.tipo ? lt.tipo.toUpperCase() : '', outro.nome].filter(Boolean).join(' · ') || 'Comprovante').slice(0, 120);
     const campos = { tipo, valor: lt.valor, data: lt.data || W.hojeISO(), empresa: empresa || 'WindGate', op: op || 'WindGate', categoria, desc, contraparte, comprovante: comprov,
       custo: op ? W.classeDe({ desc, categoria }) : '', naturezaContabil: !op && lt.tipo === 'tarifa' ? 'Tarifas e juros bancários' : '', transf };
     if (lt.tipo === 'tarifa') campos.semNota = { motivo: 'tarifa', obs: '' };
     else if (transf) campos.semNota = { motivo: 'transferencia', obs: '' };
     else if (imposto) campos.semNota = { motivo: 'imposto', obs: '' };
-    if (!op && !transf && lt.tipo !== 'tarifa') avisos.push('Operação não identificada: escolha a operação ou deixe como despesa da empresa.');
+    if (!op && !transf && lt.tipo !== 'tarifa' && !leg.opCitada) avisos.push('Operação não identificada: escolha a operação ou deixe como despesa da empresa.');
     return { acao: 'novo', alvoId: null, leitura: lt, avisos, campos };
   }
 
@@ -384,6 +392,6 @@
 
   return { MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
     situacaoLanc: situacao, contraparteOk, notaOk, comprovanteOk, classificado, somaNotas, contasAtivas, contaDoLanc, saldosExtrato, parecido,
-    normalizarLeitura, empresaDoDoc, sugerirComprovante, aplicarComprovante, sugerirNotas, casarTransferencias, fechamento, PENDENCIAS,
+    normalizarLeitura, empresaDoDoc, sugerirComprovante, legendaDoComprovante, aplicarComprovante, sugerirNotas, casarTransferencias, fechamento, PENDENCIAS,
     notaTexto, COLUNAS_PACOTE, linhasPacote };
 });

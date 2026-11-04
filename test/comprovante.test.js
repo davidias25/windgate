@@ -57,6 +57,18 @@ const arquivo = k => ({ nome: k.toLowerCase() + '.pdf', mime: 'application/pdf',
   ok(sTar.acao === 'novo' && sTar.campos.semNota.motivo === 'tarifa' && sTar.campos.contraparte.tipo === 'banco', 'tarifa: sem nota com o motivo "tarifa" e contraparte banco');
   const sTr = F.sugerirComprovante(db, { tipo: 'ted', data: '2026-10-06', valor: 10000, pagador: { nome: 'SF', documento: '58762606000144' }, favorecido: { nome: 'JET IMPORT', documento: '11222333000181' } });
   ok(sTr.campos.transf && sTr.campos.categoria === 'Transferência' && sTr.campos.semNota.motivo === 'transferencia', 'SF → JeT: transferência entre empresas, fora do resultado');
+  /* Texto que veio com o print (legenda): descrição do lançamento novo e operação citada. */
+  const pixAbigail = { tipo: 'pix', data: '2026-10-31', valor: 120, banco: 'Santander', pagador: { nome: 'SF TRADING LTDA', documento: '58762606000144' },
+    favorecido: { nome: 'Abigail Rodrigues da Silva', documento: '' }, idTransacao: 'E90400888202610311311730300' };
+  const sL = F.sugerirComprovante(db, pixAbigail, { legenda: '  captação abgail   op20 ' });
+  ok(sL.acao === 'novo' && sL.campos.desc === 'captação abgail op20' && sL.campos.op === 'OP20' && !sL.avisos.some(a => /Operação não identificada/.test(a)), 'legenda "captação abgail op20": vira a descrição e liga o lançamento à OP20');
+  ok(F.sugerirComprovante(db, pixAbigail).campos.op === 'WindGate', 'sem a legenda, o mesmo Pix fica sem operação (nada é adivinhado)');
+  const sL99 = F.sugerirComprovante(db, pixAbigail, { legenda: 'captação OP 99' });
+  ok(sL99.campos.op === 'WindGate' && sL99.avisos.some(a => /OP99.*não está nas operações/.test(a)), 'OP citada que não existe: não inventa a operação e avisa');
+  const dbL = banco(); dbL.fin.push({ _id: 'f4', tipo: 'Despesa', desc: 'Frete marítimo OP20 - outro', op: 'OP20', valor: 5000, vencimento: '2026-10-11', data: '2026-10-11', empresa: 'WindGate', status: 'Previsto', por: 'Davi' });
+  dbL.fin.find(l => l._id === 'f1').op = 'OP21'; dbL.fin.find(l => l._id === 'f1').desc = 'Frete marítimo - XYZ Logística';
+  ok(F.sugerirComprovante(dbL, Object.assign({}, LEITURAS.PIX, { descricao: '' }), { legenda: 'frete op20' }).alvoId === 'f4', 'dois previstos com o mesmo valor: a OP da legenda escolhe o da OP20');
+  ok(F.legendaDoComprovante(db, 'Op-20 adiantamento').op === 'OP20' && F.legendaDoComprovante(db, '').desc === '', 'reconhece "Op-20" e aceita texto vazio');
   ok(F.normalizarLeitura({ valor: '1.234', pagador: {}, favorecido: {} }).data === '' && F.normalizarLeitura({}).idTransacao === '', 'campo que não veio fica vazio (a regra não inventa data nem identificador)');
 
   console.log('\nAplicar (só depois da confirmação):');

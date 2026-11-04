@@ -20,7 +20,9 @@
     opPadrao = (opts && opts.op) || '';
     const pend = (H.db.hubComprovantes || []).filter(x => x && x.status === 'pendente');
     const m = H.modal('Enviar comprovante', `<p class="note" style="margin-bottom:10px">PDF ou imagem, vários de uma vez, ou cole um print aqui (Ctrl+V). A IA lê e sugere: dar baixa num lançamento previsto ou lançar um novo. <b>Nada é gravado até você confirmar.</b></p>
-      <div class="fields"><div class="f w4"><label class="lbl" for="cpa">Comprovantes</label><input id="cpa" type="file" multiple accept=".pdf,image/*"></div></div>
+      <div class="fields"><div class="f w4"><label class="lbl" for="cpa">Comprovantes</label><input id="cpa" type="file" multiple accept=".pdf,image/*"></div>
+        <div class="f w4"><label class="lbl" for="cpl">Texto do lançamento</label><input id="cpl" placeholder="o que vem escrito com o print, ex.: captação abgail op20"></div></div>
+      <p class="note" style="margin-top:4px">O texto vira a descrição do lançamento novo; se citar a operação (op20, OP 20), o lançamento já vai para ela.</p>
       <div id="cpcola" tabindex="0" style="margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center" class="note">Clique aqui e cole o print (Ctrl+V)</div>
       <p class="note" id="cpst" style="margin-top:8px"></p>
       ${pend.length ? `<p style="margin-top:10px"><button class="btn sm" id="cppend" type="button">${pend.length} comprovante(s) do e-mail aguardando conferência</button></p>` : ''}`,
@@ -30,6 +32,9 @@
     m.querySelector('#cpcola').addEventListener('paste', e => {
       const fs = [...(e.clipboardData || {}).items || []].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
       fs.forEach((f, i) => colados.push(new File([f], `print-${Date.now()}-${i}.png`, { type: f.type || 'image/png' })));
+      // Print copiado junto com a legenda: o texto vem no mesmo Ctrl+V.
+      const tx = (e.clipboardData && e.clipboardData.getData('text/plain')) || '', cpl = m.querySelector('#cpl');
+      if (tx.trim() && cpl && !cpl.value.trim()) cpl.value = tx.trim().replace(/\s+/g, ' ').slice(0, 120);
       st.textContent = `${colados.length} print(s) colado(s).`; e.preventDefault();
     });
     const bp = m.querySelector('#cppend'); if (bp) bp.onclick = () => { fila.length = 0; pos = 0; pend.forEach(x => fila.push({ link: x.link, url: x.link, nome: x.nome, sugestao: x.sugestao, pendenteId: x._id, lidoPorIA: true })); H.fecharModal(); mostrar(); };
@@ -37,18 +42,21 @@
       const arqs = [...m.querySelector('#cpa').files].concat(colados);
       if (!arqs.length) { H.toast('Escolha ou cole ao menos um comprovante'); return; }
       e.target.disabled = true; fila.length = 0; pos = 0;
+      const legenda = m.querySelector('#cpl').value.trim(), leg = W.legendaDoComprovante(H.db, legenda);
+      const manual = () => ({ acao: 'novo', campos: { tipo: 'Despesa', empresa: 'WindGate', op: leg.op || opPadrao || 'WindGate', data: W.hojeISO(), desc: leg.desc, contraparte: {} }, leitura: {},
+        avisos: leg.opCitada && !leg.op ? [`O texto cita ${leg.opCitada}, que não está nas operações: confira a operação.`] : [] });
       for (let i = 0; i < arqs.length; i++) {
         const f = arqs[i]; st.textContent = `Lendo ${i + 1} de ${arqs.length}: ${f.name}…`;
-        const item = { arquivo: f, nome: f.name, url: URL.createObjectURL(f) };
+        const item = { arquivo: f, nome: f.name, url: URL.createObjectURL(f), legenda };
         try {
           item.link = await subir(f);
-          const r = await H.api('/api/ia/comprovante', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arquivo: { nome: f.name, mime: f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : 'image/png'), base64: await paraBase64(f) } }) });
+          const r = await H.api('/api/ia/comprovante', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arquivo: { nome: f.name, mime: f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : 'image/png'), base64: await paraBase64(f) }, legenda }) });
           const j = await r.json().catch(() => ({}));
           if (j.success) { item.sugestao = j.sugestao; item.lidoPorIA = true; }
-          else if (j.semIA) { item.semIA = j.message; item.sugestao = { acao: 'novo', campos: { tipo: 'Despesa', empresa: 'WindGate', op: opPadrao || 'WindGate', data: W.hojeISO(), contraparte: {} }, leitura: {}, avisos: [] }; }
-          else { item.erro = j.message || 'não consegui ler'; item.sugestao = { acao: 'novo', campos: { tipo: 'Despesa', empresa: 'WindGate', op: opPadrao || 'WindGate', data: W.hojeISO(), contraparte: {} }, leitura: {}, avisos: [] }; }
+          else if (j.semIA) { item.semIA = j.message; item.sugestao = manual(); }
+          else { item.erro = j.message || 'não consegui ler'; item.sugestao = manual(); }
           if (opPadrao && item.sugestao.acao === 'novo' && (!item.sugestao.campos.op || item.sugestao.campos.op === 'WindGate')) item.sugestao.campos.op = opPadrao;
-        } catch (x) { item.erro = 'arquivo não enviado: ' + x.message; }
+        } catch (x) { item.erro = 'arquivo não enviado: ' + x.message; item.sugestao = manual(); }
         fila.push(item);
       }
       H.fecharModal(); mostrar();
@@ -100,7 +108,7 @@
       const x = ler(), cnpjEmp = ((H.db.hubPainel._fiscal || {}).cnpjs || {})[x.campos.empresa] || (x.campos.empresa === 'WindGate' ? '58762606000144' : '');
       const leitura = { tipo: 'outro', data: x.campos.data, valor: x.campos.valor, descricao: x.campos.desc,
         pagador: x.campos.tipo === 'Receita' ? x.campos.contraparte : { documento: cnpjEmp }, favorecido: x.campos.tipo === 'Receita' ? { documento: cnpjEmp } : x.campos.contraparte };
-      const r = await H.api('/api/fin/comprovante/sugerir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leitura, empresa: x.campos.empresa }) });
+      const r = await H.api('/api/fin/comprovante/sugerir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leitura, empresa: x.campos.empresa, legenda: it.legenda || '' }) });
       const j = await r.json().catch(() => ({}));
       if (j.success) { it.sugestao = j.sugestao; H.fecharModal(); mostrar(); } else H.toast(esc(j.message || 'Não consegui procurar.'));
     };
