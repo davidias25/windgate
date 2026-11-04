@@ -701,6 +701,15 @@ function triCalcular(e){
     }
     return { negocio: n, criado };
   }
+  /* ==== Taxas do dólar a partir da PTAX de compra do Banco Central ====
+     Regra WindGate: despesas/FOB = PTAX compra + 1%; frete = taxa de despesas + 2% (o mesmo
+     fator 1,02 da triangular). Quatro casas, como o Banco Central publica. */
+  const SPREAD_DESP = 0.01, FATOR_FRETE = 1.02;
+  function taxasDaPtax(compra) {
+    const c = +compra; if (!(c > 0)) return null;
+    const txDesp = +(c * (1 + SPREAD_DESP)).toFixed(4);
+    return { txDesp, txFrete: +(txDesp * FATOR_FRETE).toFixed(4) };
+  }
   /** Cotações aprovadas que ainda não passaram pelo funil (aprovadas antes desta regra ou no sistema antigo).
       Marca `funilEm` no índice: negócio excluído depois não volta. Devolve quantas entraram. */
   function funilDasCotacoes(db, opts) {
@@ -753,5 +762,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

@@ -108,7 +108,7 @@
           <p class="note" style="margin-bottom:8px">Até 6 fotos numa página da proposta. Sem foto, a proposta sai sem essa página.</p>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">${(ed.fotos || []).map((f, i) => `<div style="position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;aspect-ratio:1;background:var(--surface-2)"><img src="${esc(f.url)}" alt="${esc(f.nome || 'Foto ' + (i + 1))}" loading="lazy" style="width:100%;height:100%;object-fit:contain">${bloq ? '' : `<button class="btn ghost sm" data-foto="${esc(f._id)}" style="position:absolute;top:4px;right:4px" title="Tirar da cotação">✕</button>`}</div>`).join('')}${Array.from({ length: subindo }, () => '<div class="note" style="display:grid;place-items:center;border:1px dashed var(--line);border-radius:6px;aspect-ratio:1">enviando…</div>').join('')}</div>
           ${bloq ? '' : `<input type="file" id="cfotos" accept="image/*" multiple hidden><button class="btn sm" id="cfotob" style="margin-top:8px" ${(ed.fotos || []).length + subindo >= 6 ? 'disabled' : ''}>+ Adicionar fotos</button>`}</div></div>
-        <div class="box"><div class="box-h"><h2>Câmbio & regras fiscais</h2></div><div class="box-b fields">
+        <div class="box"><div class="box-h"><h2>Câmbio & regras fiscais</h2><span id="cptax" class="note"></span></div><div class="box-b fields">
           ${inp('txFrete', 'Taxa USD: frete')}${inp('txDesp', 'Taxa USD: despesas/FOB')}${inp('pctInv', '% Invoice (base impostos)')}${inp('icmsEnt', 'ICMS entrada AL (%)')}
           ${inp('icmsDest', 'ICMS destacado saída (%)')}${inp('pisS', 'PIS saída (%)')}${inp('cofS', 'COFINS saída (%)')}${inp('ipiS', 'IPI saída (%)', { titulo: 'IPI destacado na nota de saída: entra por fora, sobre o valor da NF' })}
           ${inp('mkp', 'Mark-up NF (%)')}${inp('mkSF', 'Mark-up SF → JeT (R$)', { hidden: !tri })}${inp('mkJT', 'Mark-up JeT → cliente (R$)', { hidden: !tri })}
@@ -208,6 +208,7 @@
     on('#cop', () => criarOperacao());
     on('#csug', () => { if (!(R && R.preco > 0)) return H.toast('Complete a cotação primeiro.'); Object.assign(ed.fields, W.desemSugerir(ed, R)); [1, 2, 3].forEach(n => { el.querySelector('#cf_desR' + n).value = ed.fields['desR' + n]; }); atualizar(el); H.toast('Distribuição sugerida: 35% da margem já nas parcelas 1 e 2.'); });
     on('#citem', () => { ed.items.push(W.ITEM_PADRAO()); editor(el); });
+    ptaxNaCotacao(el, bloq);
     on('#cexp', () => { ed.exps.push({ l: '', v: 0 }); editor(el); });
     on('#cfotob', () => el.querySelector('#cfotos').click());
     const fi = el.querySelector('#cfotos'); if (fi) fi.onchange = () => enviarFotos(fi, el);
@@ -290,6 +291,30 @@
       H.salvar(); H.toast(`NCM ${ncm} salva no Catálogo: passa a valer para toda a equipe.`);
       el.querySelector('#cncm').innerHTML = dicaNCM(ncm, W.aliquotasNCM(H.db, ncm), i);
     });
+  }
+
+  /* ================= DÓLAR PELA PTAX ================= */
+  /* PTAX de compra do Banco Central (a mesma consulta do Câmbio). Cotação nova já abre com as taxas
+     do dia; nas demais o botão aplica. Aprovada e travada só mostra a referência. */
+  let ptaxAutoEm = null;
+  function ptaxNaCotacao(el, bloq) {
+    const alvo = el.querySelector('#cptax'); if (!alvo || !H.carregarPtax) return;
+    const aplicar = (t, aviso) => {
+      ed.fields.txDesp = String(t.txDesp); ed.fields.txFrete = String(t.txFrete);
+      ['txDesp', 'txFrete'].forEach(k => { const i = el.querySelector('#cf_' + k); if (i) i.value = ed.fields[k]; });
+      atualizar(el); if (aviso) H.toast(`Taxas pela PTAX de compra: despesas/FOB ${t.txDesp.toFixed(4)} · frete ${t.txFrete.toFixed(4)}.`);
+    };
+    const mostrar = p => {
+      if (!el.contains(alvo)) return;
+      const t = p && W.taxasDaPtax(p.compra);
+      if (!t) { alvo.textContent = 'PTAX indisponível agora: informe as taxas à mão.'; return; }
+      const dia = W.dataBR(String(p.em || '').slice(0, 10)), igual = +F('txDesp') === t.txDesp && +F('txFrete') === t.txFrete;
+      alvo.innerHTML = `PTAX compra <b>${(+p.compra).toFixed(4).replace('.', ',')}</b> (${esc(dia)}) → despesas ${t.txDesp.toFixed(4).replace('.', ',')} · frete ${t.txFrete.toFixed(4).replace('.', ',')}`
+        + (bloq || igual ? '' : ' <button class="btn sm" id="cptaxok">Aplicar</button>');
+      const b = alvo.querySelector('#cptaxok'); if (b) b.onclick = () => { aplicar(t, true); mostrar(p); };
+      if (!bloq && !ed.id && ptaxAutoEm !== ed && !igual && F('txDesp') === W.PADRAO.txDesp && F('txFrete') === W.PADRAO.txFrete) { ptaxAutoEm = ed; aplicar(t, false); mostrar(p); }
+    };
+    if (H.ptax) mostrar(H.ptax); else { alvo.textContent = 'Buscando PTAX no Banco Central…'; H.carregarPtax().then(mostrar); }
   }
 
   /* ================= GRAVAÇÃO E APROVAÇÃO ================= */

@@ -171,6 +171,13 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   const r2 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   ok(r2.jaLancado && !r2.op && r2.lancamentos.length === 0, 'aprovar de novo não duplica a operação nem o cronograma');
 
+  console.log('\nTaxas do dólar pela PTAX de compra:');
+  {
+    const t = C.taxasDaPtax(5.4321);
+    ok(t.txDesp === 5.4864 && t.txFrete === 5.5961, 'despesas = PTAX compra + 1% (5,4321 → 5,4864); frete = despesas + 2% (5,5961)');
+    ok(C.taxasDaPtax(0) === null && C.taxasDaPtax(undefined) === null, 'sem PTAX não inventa taxa');
+  }
+
   console.log('\nCotação aprovada no funil do CRM:');
   {
     const T = '2026-11-04T10:00:00Z';
