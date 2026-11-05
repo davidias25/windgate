@@ -9234,6 +9234,8 @@ function saveQuote(silent){
 }
 function loadQuote(id){
   const s=DB.quotes[id]; if(!s){ toast('⚠ Cotação não encontrada'); return; }
+  // Este sistema não conhece clientes[]: salvar aqui apagaria os clientes da cotação.
+  if(Array.isArray(s.clientes)&&s.clientes.length>1){ toast('⚠ Cotação com vários clientes: abra pelo Hub 2.0'); return; }
   montarUFDestino();
   Object.entries(s.fields).forEach(([k,v])=>{ const el=$(k); if(el) el.value=v; });
   // Cotação salva antes de um campo existir não traz esse campo. Sem zerar,
@@ -9264,7 +9266,7 @@ function refreshSaved(){
       : '';
     return `<tr><td><b>${esc((s.fields||{}).opNum||'—')}</b></td><td>${esc(q.cliente||'—')}</td><td>${esc((s.fields||{}).mercadoria||'—')}</td>
       <td class="r num">${fmt(q.preco||0)}</td><td>${pill}${marca}</td><td>${esc(q.criadoPor||'—')}</td>
-      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="loadQuote('${q.id}')">Abrir</button>${q.status==='ok'?` <button class="btn btn-blue btn-sm" onclick="loadQuote('${q.id}');editarCotacao()">Editar</button>`:''} <button class="del" onclick="delQuote('${q.id}')">✕</button></td></tr>`;
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="loadQuote('${q.id}')">Abrir</button>${q.status==='ok'&&!(Array.isArray(s.clientes)&&s.clientes.length>1)?` <button class="btn btn-blue btn-sm" onclick="loadQuote('${q.id}');editarCotacao()">Editar</button>`:''} <button class="del" onclick="delQuote('${q.id}')">✕</button></td></tr>`;
   }).join('');
 }
 function newQuote(){

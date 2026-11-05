@@ -29,7 +29,8 @@
     editando = false; modo = 'pct';
     return true;
   }
-  const travada = () => ed && ed.status === 'ok' && !editando;
+  const semFlag = () => !!ed && W.ehMultiCliente(ed) && !W.multiClienteLigado(H.db);
+  const travada = () => ed && ((ed.status === 'ok' && !editando) || semFlag());
 
   /* ================= LISTA ================= */
   H.telas.cotacoes = function (el, param) {
@@ -47,6 +48,7 @@
       <div class="head"><div><h1>Cotações & Propostas</h1><p class="sub">Cotação → aprovação do Samir → proposta em PDF no padrão WindGate. Nada sai sem aprovação.</p></div>
         <div class="btns"><input type="search" class="inp" id="cqb" placeholder="Buscar cliente, OP, mercadoria…" value="${esc(busca)}">
           <div class="seg">${[['', 'Todas'], ['draft', 'Rascunho'], ['wait', 'Aguardando'], ['ok', 'Aprovadas']].map(([k, l]) => `<button data-st="${k}" class="${filtro === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+          ${H.pode('fin.autorizar') ? `<button class="btn" id="cflag" title="Cotação com vários clientes no mesmo contêiner">Vários clientes: ${W.multiClienteLigado(H.db) ? 'ligado' : 'desligado'}</button>` : ''}
           <button class="btn pri" id="cqn">+ Nova cotação</button></div></div>
       <div class="kpis">
         <div class="kpi"><span class="lbl">Cotações</span><span class="v">${H.db.qindex.length}</span><span class="d">na lista</span></div>
@@ -57,13 +59,15 @@
       <div class="box"><div class="box-h"><h2>Cotações salvas</h2><span class="note">${lista.length} de ${H.db.qindex.length}</span></div>
         ${lista.length ? `<div class="tw"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Mercadoria</th><th>Tipo</th><th class="num">Preço</th><th>Situação</th><th>Criada por</th><th></th></tr></thead><tbody>
         ${lista.map(({ q, s }) => { const f = s.fields || {}; return `<tr class="click" data-q="${esc(q.id)}"><td class="mono"><b>${esc(f.opNum || '—')}</b></td><td>${esc(q.cliente || f.cliente || '—')}</td><td>${esc(f.mercadoria || '—')}</td>
-          <td>${f.tipoOp === 'triangular' ? pill('triangular', 'info') : 'direta'}</td><td class="num">${fmt(+q.preco || 0)}</td>
+          <td>${W.ehMultiCliente(s) ? pill(s.clientes.length + ' clientes', 'info') : f.tipoOp === 'triangular' ? pill('triangular', 'info') : 'direta'}</td><td class="num">${fmt(+q.preco || 0)}</td>
           <td>${stPill(q.status)}${s.editadoEm ? `<br><small class="note">editada ${W.dataBR(s.editadoEm)}${s.editadoPor ? ' · ' + esc(s.editadoPor) : ''}</small>` : ''}${q.status === 'ok' && s.aprovadoPor ? `<br><small class="note">por ${esc(s.aprovadoPor)}</small>` : ''}</td>
           <td>${esc(q.criadoPor || '—')}</td><td class="num" style="white-space:nowrap"><button class="btn ghost sm" data-del="${esc(q.id)}" title="Tirar da lista (a cotação continua guardada)">Arquivar</button></td></tr>`; }).join('')}</tbody></table></div>`
         : `<p class="empty">Nenhuma cotação${busca || filtro ? ' com esse filtro' : ' salva ainda'}.</p>`}</div>`;
     el.querySelector('#cqb').addEventListener('keydown', e => { if (e.key === 'Enter') { busca = e.target.value; H.render(); } });
     el.querySelector('#cqb').addEventListener('search', e => { busca = e.target.value; H.render(); });
     el.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { filtro = b.dataset.st; H.render(); });
+    const fl = el.querySelector('#cflag');
+    if (fl) fl.onclick = () => { const p = H.db.hubPainel = H.db.hubPainel || {}; p._flags = Object.assign({}, p._flags, { multiCliente: !W.multiClienteLigado(H.db) }); H.salvar(); H.toast(W.multiClienteLigado(H.db) ? 'Vários clientes: <b>ligado</b>.' : 'Vários clientes: <b>desligado</b>. As cotações com vários clientes ficam só para leitura.'); H.render(); };
     el.querySelector('#cqn').onclick = () => { ed = nova(); editando = false; modo = 'pct'; H.ir('cotacoes', 'nova'); };
     el.querySelectorAll('tr[data-q]').forEach(r => r.onclick = e => { if (e.target.closest('[data-del]')) return; H.ir('cotacoes', r.dataset.q); });
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => arquivar(b.dataset.del));
@@ -84,23 +88,24 @@
   const sel = (k, l, ops, o) => { o = o || {}; return `<div class="f ${o.w || ''}"><label class="lbl" for="cf_${k}">${esc(l)}</label><select id="cf_${k}" data-f="${k}" class="inp">${ops.map(([v, t]) => `<option value="${esc(v)}" ${String(F(k)) === String(v) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>`; };
 
   function editor(el) {
-    const tri = F('tipoOp') === 'triangular', bloq = travada();
+    const multi = W.ehMultiCliente(ed), tri = !multi && F('tipoOp') === 'triangular', bloq = travada();
     const ufs = [[W.SEM_DIFAL, '— sem DIFAL —']].concat(Object.keys(W.ICMS_INTERNO).sort().map(uf => [uf, `${uf} · interna ${W.ICMS_INTERNO[uf].toLocaleString('pt-BR')}%`]));
     const clientes = [...new Set((H.db.crm || []).map(c => c && (c.empresa || c.nome)).filter(Boolean))];
     el.innerHTML = `
       <div class="head"><div><button class="btn ghost sm" id="cvolta">← Cotações</button><h1 style="margin-top:6px">${ed.id ? 'Cotação ' + esc(F('opNum') || 'sem nº') : 'Nova cotação'}${F('cliente') ? ' · ' + esc(F('cliente')) : ''}</h1>
         <p class="sub">${stPill(ed.status)} ${ed.aprovadoPor && ed.status === 'ok' ? 'aprovada por ' + esc(ed.aprovadoPor) : ed.status === 'wait' ? 'aguardando o Samir aprovar a margem' : 'Davi monta → envia → Samir aprova a margem → proposta liberada'}</p></div>
-        <div class="btns"><button class="btn" id="cnova">+ Nova</button>${bloq ? '<button class="btn blue" id="cedit">Editar cotação</button>' : '<button class="btn" id="csalva">Salvar</button>'}
+        <div class="btns"><button class="btn" id="cnova">+ Nova</button>${bloq ? (semFlag() ? '' : '<button class="btn blue" id="cedit">Editar cotação</button>') : '<button class="btn" id="csalva">Salvar</button>'}
           <button class="btn pri" id="cprop" ${ed.status === 'ok' ? '' : 'disabled title="Liberada depois da aprovação do Samir"'}>Gerar proposta (PDF)</button></div></div>
-      ${bloq ? `<div class="banner">Cotação <b>aprovada</b>${ed.aprovadoPor ? ' por <b>' + esc(ed.aprovadoPor) + '</b>' : ''}: somente leitura. Para corrigir, clique em <b>Editar cotação</b>. Se o preço mudar, ela volta para a aprovação.</div>`
+      ${semFlag() ? '<div class="banner">Cotação com <b>vários clientes</b>: somente leitura enquanto a função estiver desligada.</div>' : bloq ? `<div class="banner">Cotação <b>aprovada</b>${ed.aprovadoPor ? ' por <b>' + esc(ed.aprovadoPor) + '</b>' : ''}: somente leitura. Para corrigir, clique em <b>Editar cotação</b>. Se o preço mudar, ela volta para a aprovação.</div>`
         : ed.status === 'ok' ? '<div class="banner">Editando uma cotação já aprovada. Se o <b>preço ao cliente</b> mudar, ela volta para a aprovação do Samir; o resto pode ser corrigido sem refazer o fluxo.</div>' : ''}
       <div class="g2 larga" style="align-items:start"><fieldset id="cform" ${bloq ? 'disabled' : ''} style="border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:16px">
+        ${blocoClientes(bloq, ufs, clientes)}
         <div class="box"><div class="box-h"><h2>Dados da operação</h2></div><div class="box-b fields">
-          ${sel('tipoOp', 'Tipo de operação', [['direta', 'Direta: cliente CONTRIBUINTE (SF/AL → cliente)'], ['triangular', 'Triangular via JeT: cliente NÃO contribuinte (SF/AL → JeT/ES → cliente)']], { w: 'w2' })}
+          ${multi ? '' : `${sel('tipoOp', 'Tipo de operação', [['direta', 'Direta: cliente CONTRIBUINTE (SF/AL → cliente)'], ['triangular', 'Triangular via JeT: cliente NÃO contribuinte (SF/AL → JeT/ES → cliente)']], { w: 'w2' })}
           ${inp('opNum', 'Nº da operação', { tipo: 'text' })}${sel('ufDestino', 'UF destino', ufs)}
           <div class="f w2"><label class="lbl" for="cf_cliente">Cliente</label><input id="cf_cliente" data-f="cliente" class="inp" list="cdlcli" value="${esc(F('cliente'))}"><datalist id="cdlcli">${clientes.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
           ${inp('servFora', 'Serviço WindGate por fora (R$)', { hidden: !tri })}
-          ${inp('mercadoria', 'Mercadoria', { tipo: 'text', w: 'w2' })}${inp('origem', 'Origem', { tipo: 'text' })}${inp('destino', 'Destino', { tipo: 'text' })}
+          ${inp('mercadoria', 'Mercadoria', { tipo: 'text', w: 'w2' })}`}${inp('origem', 'Origem', { tipo: 'text' })}${inp('destino', 'Destino', { tipo: 'text' })}
           ${sel('incoterm', 'Incoterm', [['FOB', 'FOB'], ['CIF', 'CIF'], ['EXW', 'EXW'], ['CFR', 'CFR']])}${sel('modalCntr', 'Contêiner', [['FCL', 'FCL: contêiner completo'], ['LCL', 'LCL: compartilhado']])}
           ${inp('qtdCntr', 'Qtd. contêineres')}${inp('prazo', 'Prazo estimado (dias)')}${inp('validade', 'Validade da proposta (dias)')}${inp('validadeFrete', 'Validade do frete', { tipo: 'date' })}
           ${tri ? '<p class="note w4">Triangular: a SF importa com o benefício de AL, vende à <b>JeT (ES)</b> com o mark-up mínimo, e a JeT vende ao cliente e recolhe o <b>DIFAL</b>.</p>' : ''}</div></div>
@@ -112,14 +117,14 @@
           ${inp('txFrete', 'Taxa USD: frete')}${inp('txDesp', 'Taxa USD: despesas/FOB')}${inp('pctInv', '% Invoice (base impostos)')}${inp('icmsEnt', 'ICMS entrada AL (%)')}
           ${inp('icmsDest', 'ICMS destacado saída (%)')}${inp('pisS', 'PIS saída (%)')}${inp('cofS', 'COFINS saída (%)')}${inp('ipiS', 'IPI saída (%)', { titulo: 'IPI destacado na nota de saída: entra por fora, sobre o valor da NF' })}
           ${inp('mkp', 'Mark-up NF (%)')}${inp('mkSF', 'Mark-up SF → JeT (R$)', { hidden: !tri })}${inp('mkJT', 'Mark-up JeT → cliente (R$)', { hidden: !tri })}
-          ${inp('outrasAdu', 'Outras desp. aduaneiras (R$)', { titulo: 'Armazenagem, scanner, THC e demais despesas aduaneiras: entram na base do ICMS de importação' })}${inp('aliqST', 'Alíq. efetiva DIFAL (%)')}
+          ${inp('outrasAdu', 'Outras desp. aduaneiras (R$)', { titulo: 'Armazenagem, scanner, THC e demais despesas aduaneiras: entram na base do ICMS de importação' })}${multi ? '' : inp('aliqST', 'Alíq. efetiva DIFAL (%)')}
           <p class="note w4" id="cnotadifal"></p>
           <p class="note w4" id="cavisoinv" style="color:var(--warn)"></p></div></div>
         <div class="box"><div class="box-h"><h2>Itens da invoice</h2>${bloq ? '' : '<button class="btn sm" id="citem">+ Item</button>'}</div>
-          <div class="tw"><table><thead><tr><th style="min-width:180px">Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Unit. USD</th><th class="num">Peso (kg)</th><th class="num">II %</th><th class="num">IPI %</th><th class="num">PIS %</th><th class="num">COFINS %</th><th title="Convênio 52/91">52/91</th><th title="PIS/COFINS monofásico">Mono</th><th class="num">FOB R$</th><th></th></tr></thead><tbody>
+          <div class="tw"><table><thead><tr>${multi ? '<th>Cliente</th>' : ''}<th style="min-width:180px">Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Unit. USD</th><th class="num">Peso (kg)</th>${multi ? '<th class="num" title="Por unidade, como o peso">CBM (m³)</th>' : ''}<th class="num">II %</th><th class="num">IPI %</th><th class="num">PIS %</th><th class="num">COFINS %</th><th title="Convênio 52/91">52/91</th><th title="PIS/COFINS monofásico">Mono</th><th class="num">FOB R$</th><th></th></tr></thead><tbody>
           ${ed.items.map((it, i) => { const n = (k, w, step) => `<input class="inp" data-it="${i}" data-c="${k}" value="${esc(it[k] == null ? (k === 'pis' ? 2.1 : k === 'cofins' ? 9.65 : '') : it[k])}" inputmode="decimal" style="width:${w}px;text-align:right">`;
-            return `<tr><td><textarea class="inp" data-it="${i}" data-c="d" rows="1" style="width:100%;min-width:170px;resize:vertical">${esc(it.d || '')}</textarea></td><td><input class="inp mono" data-it="${i}" data-c="ncm" value="${esc(it.ncm || '')}" style="width:100px" maxlength="10"></td>
-            <td>${n('q', 70)}</td><td>${n('u', 90)}</td><td>${n('p', 80)}</td><td>${n('ii', 60)}</td><td>${n('ipi', 60)}</td><td>${n('pis', 60)}</td><td>${n('cofins', 66)}</td>
+            return `<tr>${multi ? `<td><select class="inp" data-it="${i}" data-c="clienteId" style="min-width:110px"><option value="">— cliente —</option>${ed.clientes.map((c, k) => `<option value="${esc(c.id)}" ${it.clienteId === c.id ? 'selected' : ''}>${esc(c.nome || 'Cliente ' + (k + 1))}</option>`).join('')}</select></td>` : ''}<td><textarea class="inp" data-it="${i}" data-c="d" rows="1" style="width:100%;min-width:170px;resize:vertical">${esc(it.d || '')}</textarea></td><td><input class="inp mono" data-it="${i}" data-c="ncm" value="${esc(it.ncm || '')}" style="width:100px" maxlength="10"></td>
+            <td>${n('q', 70)}</td><td>${n('u', 90)}</td><td>${n('p', 80)}</td>${multi ? `<td>${n('cbm', 70)}</td>` : ''}<td>${n('ii', 60)}</td><td>${n('ipi', 60)}</td><td>${n('pis', 60)}</td><td>${n('cofins', 66)}</td>
             <td style="text-align:center"><input type="checkbox" data-it="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td style="text-align:center"><input type="checkbox" data-it="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
             <td class="num" id="cfob_${i}">—</td><td>${bloq ? '' : `<button class="btn ghost sm" data-rmit="${i}" title="Remover item">✕</button>`}</td></tr>`; }).join('')}</tbody></table></div>
           <div class="box-b"><p class="note" id="cncm"></p><p class="note" id="cncmcurto" style="color:var(--warn)"></p></div></div>
@@ -129,25 +134,25 @@
           <p class="lbl" style="margin-top:12px">Demais despesas (porto · agente de carga · bancárias)</p>
           <div class="list">${ed.exps.map((e, i) => `<div class="row"><input class="inp" data-ex="${i}" data-c="l" value="${esc(e.l || '')}" placeholder="Descrição" style="flex:1"><input class="inp" data-ex="${i}" data-c="v" value="${esc(e.v)}" inputmode="decimal" style="width:120px;text-align:right">${bloq ? '' : `<button class="btn ghost sm" data-rmex="${i}">✕</button>`}</div>`).join('')}</div>
           ${bloq ? '' : '<button class="btn sm" id="cexp" style="margin-top:8px">+ Despesa</button>'}</div></div>
-        <div class="box"><div class="box-h"><h2>Cronograma de desembolso: cliente × fábrica</h2>${bloq ? '' : '<button class="btn blue sm" id="csug">Sugerir distribuição</button>'}</div><div class="box-b">
+        ${multi ? blocoRateio() + blocoDesembolso(bloq) : `<div class="box"><div class="box-h"><h2>Cronograma de desembolso: cliente × fábrica</h2>${bloq ? '' : '<button class="btn blue sm" id="csug">Sugerir distribuição</button>'}</div><div class="box-b">
           <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}<p class="note w3">Padrão das fábricas: 30% para iniciar a produção e 70% na finalização. A regra WindGate: o recebimento do cliente em cada etapa SEMPRE cobre a nossa saída.</p></div>
           <div class="tw" style="margin-top:10px"><table><thead><tr><th>Etapa</th><th class="num">Nossa saída</th><th class="num">% do total</th><th class="num">Recebimento do cliente (R$)</th><th>Situação</th></tr></thead><tbody>
             ${[[1, '1 · Assinatura', 'sinal à fábrica → produção'], [2, '2 · Produto pronto', 'saldo à fábrica · pré-embarque'], [3, '3 · Chegada ao porto', 'frete · impostos · despesas · entrega']].map(([n, t, d]) => `<tr><td><b>${t}</b><br><small class="note">${d}</small></td><td class="num" id="cdo${n}">—</td>
               <td class="num"><input class="inp" id="cdp${n}" data-pct="${n}" inputmode="decimal" style="width:80px;text-align:right"></td><td class="num"><input class="inp" id="cf_desR${n}" data-f="desR${n}" value="${esc(F('desR' + n))}" inputmode="decimal" style="width:130px;text-align:right"></td><td id="cds${n}"></td></tr>`).join('')}</tbody></table></div>
-          <p class="note" id="cdbase" style="margin-top:6px"></p><div id="cderr"></div></div></div>
+          <p class="note" id="cdbase" style="margin-top:6px"></p><div id="cderr"></div></div></div>`}
       </fieldset>
       <div class="box" style="position:sticky;top:12px"><div class="box-h"><h2>Custo da operação</h2>${stPill(ed.status)}</div><div class="box-b" id="cresumo"></div>
-        <div class="box-b" style="border-top:1px solid var(--line)"><h3 class="h3">Margem WindGate</h3>
+        <div class="box-b" style="border-top:1px solid var(--line)">${multi ? '' : `<h3 class="h3">Margem WindGate</h3>
           <div class="seg" style="margin:6px 0 10px">${[20, 25, 30].map(p => `<button data-mp="${p}" ${bloq ? 'disabled' : ''}>${p}%</button>`).join('')}</div>
           <div class="fields" style="grid-template-columns:1fr 1fr"><div class="f"><label class="lbl" for="cf_margemPct">Margem (% s/ custo)</label><input id="cf_margemPct" class="inp" data-marg="pct" value="${esc(F('margemPct'))}" inputmode="decimal" ${bloq ? 'disabled' : ''}></div>
             <div class="f"><label class="lbl" for="cf_margemBRL">Margem (R$)</label><input id="cf_margemBRL" class="inp" data-marg="brl" value="${esc(F('margemBRL'))}" inputmode="decimal" ${bloq ? 'disabled' : ''}></div></div>
-          <p class="note" style="margin-top:8px">Referência histórica (mai/25–jul/26): margem líquida mediana ≈26% s/ receita · faixa 10%–50%. Aço/escoras 13%–43% · Máquinas 10%–18% · cotações pequenas 45%+.</p>
+          <p class="note" style="margin-top:8px">Referência histórica (mai/25–jul/26): margem líquida mediana ≈26% s/ receita · faixa 10%–50%. Aço/escoras 13%–43% · Máquinas 10%–18% · cotações pequenas 45%+.</p>`}
           <div id="cpreco" style="margin-top:10px"></div>
           <div class="btns" style="margin-top:10px;flex-direction:column;align-items:stretch">
-            ${ed.status === 'draft' ? '<button class="btn blue" id="cenvia">Enviar para aprovação · Samir</button>' : ''}
+            ${ed.status === 'draft' && !multi ? '<button class="btn blue" id="cenvia">Enviar para aprovação · Samir</button>' : ''}
             ${ed.status === 'wait' && podeAprovar() ? '<button class="btn pri" id="caprova">Aprovar margem e liberar proposta</button><button class="btn" id="cdevolve">Devolver para ajuste</button>' : ''}
             ${ed.status === 'ok' ? `<button class="btn" id="cop">Criar operação + previsto no Financeiro</button>` : ''}</div>
-          <p class="note" style="margin-top:8px">${ed.status === 'wait' && !podeAprovar() ? 'Enviada. Aguardando o Samir aprovar a margem; o PDF é liberado em seguida.' : ed.status === 'ok' ? 'Proposta liberada: gere o PDF no padrão WindGate.' : 'Nada sai sem aprovação.'}</p></div></div></div>`;
+          <p class="note" style="margin-top:8px">${multi ? 'Com vários clientes, a aprovação por cliente e as propostas ainda não estão disponíveis: por enquanto a cotação fica em rascunho.' : ed.status === 'wait' && !podeAprovar() ? 'Enviada. Aguardando o Samir aprovar a margem; o PDF é liberado em seguida.' : ed.status === 'ok' ? 'Proposta liberada: gere o PDF no padrão WindGate.' : 'Nada sai sem aprovação.'}</p></div></div></div>`;
     ligar(el);
     atualizar(el);
   }
@@ -155,6 +160,7 @@
   /* Recalcula e reescreve só os números — os campos não são redesenhados,
      para não tirar o cursor de quem está digitando. */
   function atualizar(el) {
+    if (W.ehMultiCliente(ed)) return atualizarMulti(el);
     R = W.calcular(ed, { modo, usuario: eu() });
     const tri = F('tipoOp') === 'triangular';
     // A margem que não está sendo digitada acompanha a outra (marginFromPct/marginFromBRL).
@@ -195,7 +201,103 @@
     el.querySelector('#cderr').innerHTML = errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? '<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> em todas as etapas o recebimento cobre a saída e a soma fecha com o valor a receber.</div>' : '';
   }
 
+  /* ================= VÁRIOS CLIENTES ================= */
+  const clienteEd = id => (ed.clientes || []).find(c => c.id === id);
+  const inpCli = (c, k, w, o) => { o = o || {}; return `<input class="inp" id="ccl_${esc(c.id)}_${k}" data-cli="${esc(c.id)}" data-cc="${k}" value="${esc(c[k] == null ? '' : c[k])}" ${o.lista ? `list="${o.lista}"` : ''} ${o.num ? 'inputmode="decimal"' : ''} style="width:${w}px${o.num ? ';text-align:right' : ''}">`; };
+  function blocoClientes(bloq, ufs, nomes) {
+    const ligado = W.multiClienteLigado(H.db);
+    if (!W.ehMultiCliente(ed)) {
+      if (!ligado || bloq || ed.status !== 'draft') return '';
+      return `<div class="box"><div class="box-h"><h2>Clientes deste contêiner</h2><button class="btn sm" id="cladd">+ Outro cliente no contêiner</button></div><div class="box-b"><p class="note">Esta cotação tem um cliente. Se outro cliente dividir o contêiner, adicione aqui: cada um passa a ter seu cálculo e seu cronograma.</p></div></div>`;
+    }
+    const opt = (lista, v) => lista.map(([k, l]) => `<option value="${esc(k)}" ${String(v) === String(k) ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    return `<div class="box"><div class="box-h"><h2>Clientes deste contêiner</h2>${bloq ? '' : '<button class="btn sm" id="cladd">+ Cliente</button>'}</div>
+      <datalist id="cdlcli">${nomes.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <div class="tw"><table><thead><tr><th>Cliente</th><th>UF</th><th>Tipo</th><th>Nº op.</th><th>Mercadoria</th><th class="num">DIFAL %</th><th class="num">Margem %</th><th class="num">Margem R$</th><th></th></tr></thead><tbody>
+      ${ed.clientes.map(c => `<tr><td>${inpCli(c, 'nome', 130, { lista: 'cdlcli' })}</td>
+        <td><select class="inp" id="ccl_${esc(c.id)}_ufDestino" data-cli="${esc(c.id)}" data-cc="ufDestino" style="width:66px">${opt(ufs.map(([k]) => [k, k === W.SEM_DIFAL ? 'sem DIFAL' : k]), c.ufDestino)}</select></td>
+        <td><select class="inp" data-cli="${esc(c.id)}" data-cc="tipoOperacao" style="width:96px">${opt([['direta', 'Direta'], ['triangular', 'Triangular']], c.tipoOperacao)}</select></td>
+        <td>${inpCli(c, 'opNum', 70)}</td><td>${inpCli(c, 'mercadoria', 110)}</td><td>${inpCli(c, 'aliqST', 50, { num: true })}</td><td>${inpCli(c, 'margemPct', 50, { num: true })}</td><td>${inpCli(c, 'margemRS', 88, { num: true })}</td>
+        <td>${bloq ? '' : `<button class="btn ghost sm" data-clrm="${esc(c.id)}" title="Tirar este cliente">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+  function blocoRateio() {
+    const rg = ed.regraRateio || {}, manual = W.GRUPOS_RATEIO.some(([g]) => rg[g] === 'manual');
+    return `<div class="box"><div class="box-h"><h2>Rateio dos custos comuns</h2></div>
+      <div class="box-b"><p class="note">A regra decide quem paga cada custo. Os impostos continuam calculados por item, com frete, seguro e capatazia pelo FOB, como na DI.</p></div>
+      <div class="tw"><table><thead><tr><th>Custo</th><th>Regra</th><th>Quanto fica com cada cliente</th></tr></thead><tbody>
+      ${W.GRUPOS_RATEIO.map(([g, l]) => `<tr><td>${esc(l)}</td><td><select class="inp" data-rg="${g}" style="width:150px">${W.REGRAS_RATEIO.map(([k, t]) => `<option value="${k}" ${(rg[g] || W.RATEIO_PADRAO[g]) === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td><td class="note" id="crv_${g}">—</td></tr>`).join('')}</tbody></table></div>
+      ${manual ? `<div class="box-b fields"><p class="lbl w4">Percentual manual por cliente (soma 100%)</p>${ed.clientes.map((c, k) => `<div class="f"><label class="lbl" for="cpc_${esc(c.id)}">${esc(c.nome || 'Cliente ' + (k + 1))}</label><input class="inp" id="cpc_${esc(c.id)}" data-pc="${esc(c.id)}" value="${esc(((rg.percentuais || {})[c.id]) == null ? '' : rg.percentuais[c.id])}" inputmode="decimal"></div>`).join('')}</div>` : ''}
+      <div class="box-b" id="cravisos"></div></div>`;
+  }
+  function blocoDesembolso(bloq) {
+    return `<div class="box"><div class="box-h"><h2>Cronograma de desembolso por cliente</h2></div><div class="box-b">
+      <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}<p class="note w3">A fábrica é paga uma vez; a saída de cada cliente é proporcional ao FOB dele. O recebimento de cada cliente em cada etapa cobre a saída dele.</p></div>
+      ${ed.clientes.map((c, k) => `<div style="margin-top:14px"><div class="row"><h3 class="h3">${esc(c.nome || 'Cliente ' + (k + 1))}</h3>${bloq ? '' : `<button class="btn blue sm" data-sugc="${esc(c.id)}">Sugerir distribuição</button>`}</div>
+        <div class="tw"><table><thead><tr><th>Etapa</th><th class="num">Saída dele</th><th class="num">Recebimento (R$)</th><th>Situação</th></tr></thead><tbody>
+        ${[[1, '1 · Assinatura'], [2, '2 · Produto pronto'], [3, '3 · Chegada ao porto']].map(([n, t]) => `<tr><td><b>${t}</b></td><td class="num" id="cmo_${esc(c.id)}_${n}">—</td><td class="num">${inpCli(c, 'desR' + n, 130, { num: true })}</td><td id="cms_${esc(c.id)}_${n}"></td></tr>`).join('')}</tbody></table></div>
+        <div id="cme_${esc(c.id)}"></div></div>`).join('')}</div></div>`;
+  }
+  function atualizarMulti(el) {
+    const rm = W.calcularPorCliente(ed, { usuario: eu() });
+    R = { preco: rm.total ? rm.total.preco : 0 };
+    const txD = parseFloat(F('txDesp')) || 0;
+    ed.items.forEach((it, i) => { const c = el.querySelector('#cfob_' + i); if (c) c.textContent = fmt((+it.q || 0) * (+it.u || 0) * txD); });
+    const nome = (c, k) => esc(c.nome || 'Cliente ' + (k + 1));
+    const av = el.querySelector('#cravisos');
+    if (av) av.innerHTML = rm.erros.map(x => `<p class="note" style="color:var(--crit);font-weight:700">⛔ ${esc(x)}</p>`).join('') + rm.travas.map(x => `<p class="note" style="color:var(--crit);font-weight:700">⛔ ${esc(x.msg)}</p>`).join('') + rm.avisos.map(x => `<p class="note" style="color:var(--warn)">⚠ ${esc(x)}</p>`).join('');
+    const resumo = el.querySelector('#cresumo'), preco = el.querySelector('#cpreco');
+    if (rm.erros.length) { resumo.innerHTML = `<p class="note">Falta completar a cotação: ${esc(rm.erros[0])}</p>`; preco.innerHTML = ''; W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = '—'; }); return; }
+    const lin = (a, b, forte) => `<div style="display:flex;justify-content:space-between;gap:8px${forte ? ';font-weight:700' : ''}"><span${forte ? '' : ' class="note"'}>${a}</span><span class="num">${b}</span></div>`;
+    resumo.innerHTML = `${rm.clientes.map((c, k) => `<div style="padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><b>${nome(c, k)}</b>${c.R.tri ? pill('triangular', 'info') : ''}</div>
+        ${lin('FOB', fmt(c.R.fob))}${lin('Custo', fmt(c.custo))}${lin('DIFAL', fmt(c.R.tri ? c.R.tri.difal : c.R.st))}${lin('Margem s/ custo', pct(c.R.margemPctCampo) + ' · ' + fmt(c.R.margem))}${lin('Preço', fmt(c.R.preco), true)}
+        ${c.R.warnMargem ? '<p class="note" style="color:var(--warn);margin-top:4px">⚠ Margem abaixo de 10%.</p>' : ''}</div>`).join('')}
+      ${lin('Total FOB', fmt(rm.total.fob))}${lin('Total de custo', fmt(rm.total.custo), true)}`;
+    preco.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:18px"><b>Soma dos preços</b><b class="num">${fmt(rm.total.preco)}</b></div>`;
+    W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = rm.clientes.map((c, k) => (c.nome || 'Cliente ' + (k + 1)) + ': ' + fmt(c.R.custoPor[g])).join(' · '); });
+    rm.clientes.forEach(cc => {
+      const c = clienteEd(cc.id), id = c.id, cm = el.querySelector(`#ccl_${id}_${c.margemModo === 'brl' ? 'margemPct' : 'margemRS'}`);
+      // A margem que não está sendo digitada acompanha a outra, como na cotação de um cliente.
+      if (c.margemModo === 'brl') c.margemPct = String(cc.R.margemPctCampo); else c.margemRS = cc.R.margemBRLCampo.toFixed(2);
+      if (cm && document.activeElement !== cm) cm.value = c.margemModo === 'brl' ? c.margemPct : c.margemRS;
+      const o = W.desemOuts(cc.q, cc.R), os = [o.o1, o.o2, o.o3], rs = [1, 2, 3].map(n => parseFloat(c['desR' + n]) || 0);
+      [1, 2, 3].forEach((n, i) => { const s = el.querySelector(`#cmo_${id}_${n}`); if (s) s.textContent = fmt(os[i]);
+        const t = el.querySelector(`#cms_${id}_${n}`); if (t) t.innerHTML = !rs[i] ? pill('—') : rs[i] >= os[i] - 0.01 ? pill('cobre (+' + fmt(rs[i] - os[i]) + ')', 'ok') : pill('NÃO cobre', 'crit'); });
+      const errs = W.desemErros(cc.q, cc.R), box = el.querySelector('#cme_' + id);
+      if (box) box.innerHTML = errs.length && rs.some(Boolean) ? `<div class="banner crit" style="margin-top:8px">⛔ ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px">Recebimento cobre a saída em todas as etapas. A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</div>` : `<p class="note" style="margin-top:6px">A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</p>`;
+    });
+  }
+  function ligarMulti(el) {
+    const add = el.querySelector('#cladd'); if (add) add.onclick = () => { W.adicionarCliente(ed); editor(el); };
+    el.querySelectorAll('[data-clrm]').forEach(b => b.onclick = () => {
+      const id = b.dataset.clrm, c = clienteEd(id), n = W.itensDoCliente(ed, id).length;
+      if (!n) { W.removerCliente(ed, id); return editor(el); }
+      const m = H.modal('Tirar cliente', `<p>${esc(c.nome || 'Este cliente')} tem <b>${n} item(ns)</b>. Eles ficam sem dono até você escolher outro cliente.</p>`, '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="clrmok">Tirar</button>');
+      m.querySelector('#clrmok').onclick = () => { H.fecharModal(); W.removerCliente(ed, id); editor(el); };
+    });
+    el.querySelectorAll('[data-sugc]').forEach(b => b.onclick = () => {
+      const c = clienteEd(b.dataset.sugc), cc = W.calcularPorCliente(ed, { usuario: eu() }).clientes.find(x => x.id === c.id);
+      if (!cc || !(cc.R.preco > 0)) return H.toast('Complete a cotação primeiro.');
+      Object.assign(c, W.desemSugerir(cc.q, cc.R));
+      [1, 2, 3].forEach(n => { const i = el.querySelector(`#ccl_${c.id}_desR${n}`); if (i) i.value = c['desR' + n]; });
+      atualizarMulti(el);
+    });
+    el.querySelectorAll('[data-rg]').forEach(s => s.onchange = () => { ed.regraRateio = Object.assign({}, ed.regraRateio, { [s.dataset.rg]: s.value }); editor(el); });
+  }
+  /* Digitação nos campos de cliente. Devolve true se o campo era deste bloco. */
+  function digitouMulti(t, el) {
+    if (t.dataset.pc) { const r = ed.regraRateio = Object.assign({}, ed.regraRateio); r.percentuais = Object.assign({}, r.percentuais, { [t.dataset.pc]: parseFloat(t.value) || 0 }); atualizar(el); return true; }
+    if (!t.dataset.cli) return false;
+    const c = clienteEd(t.dataset.cli), k = t.dataset.cc; if (!c) return true;
+    c[k] = t.value;
+    if (k === 'margemPct') c.margemModo = 'pct';
+    if (k === 'margemRS') c.margemModo = 'brl';
+    if (k === 'tipoOperacao') c.clienteContribuinte = t.value !== 'triangular';
+    if (k === 'ufDestino') { const interna = W.ICMS_INTERNO[t.value]; if (interna != null) { c.aliqST = String(+Math.max(interna - (parseFloat(F('icmsDest')) || 0), 0).toFixed(2)); const a = el.querySelector(`#ccl_${c.id}_aliqST`); if (a) a.value = c.aliqST; } }
+    atualizar(el); return true;
+  }
+
   function ligar(el) {
+    ligarMulti(el);
     const on = (s, fn) => { const x = el.querySelector(s); if (x) x.onclick = fn; };
     on('#cvolta', () => { ed = null; H.ir('cotacoes'); });
     on('#cnova', () => { ed = nova(); editando = false; modo = 'pct'; H.ir('cotacoes', 'nova'); });
@@ -219,12 +321,13 @@
     const form = el.querySelector('#cform');
     form.addEventListener('input', e => {
       const t = e.target;
+      if (digitouMulti(t, el)) return;
       if (t.dataset.f) {
         ed.fields[t.dataset.f] = t.value;
         if (t.dataset.f === 'tipoOp') return editor(el);
       } else if (t.dataset.it != null) {
         const it = ed.items[+t.dataset.it], c = t.dataset.c;
-        if (t.type === 'checkbox') it[c] = t.checked; else if (c === 'd' || c === 'ncm') it[c] = t.value; else it[c] = parseFloat(t.value) || 0;
+        if (t.type === 'checkbox') it[c] = t.checked; else if (c === 'd' || c === 'ncm' || c === 'clienteId') it[c] = t.value; else it[c] = parseFloat(t.value) || 0;
         if (c === 'ncm') return ncmDigitada(+t.dataset.it, t.value, el);
       } else if (t.dataset.ex != null) {
         const e2 = ed.exps[+t.dataset.ex]; if (t.dataset.c === 'v') e2.v = parseFloat(t.value) || 0; else e2.l = t.value;
@@ -320,7 +423,8 @@
   /* ================= GRAVAÇÃO E APROVAÇÃO ================= */
   function salvar(silencioso, forcar) {
     garantir();
-    R = W.calcular(ed, { modo, usuario: eu() });
+    if (W.ehMultiCliente(ed)) { W.resumirClientes(ed); const rm = W.calcularPorCliente(ed, { usuario: eu() }); R = { preco: rm.total ? rm.total.preco : 0 }; }
+    else R = W.calcular(ed, { modo, usuario: eu() });
     const anterior = ed.id ? H.db.quotes[ed.id] : null;
     const r = W.prepararGravacao(ed, R, forcar && anterior && anterior.status === 'ok' && ed.status !== 'ok' ? Object.assign({}, anterior, { status: 'x' }) : anterior, editando, eu());
     if (!r.ok) { H.toast(esc(r.msg)); return false; }
@@ -344,6 +448,7 @@
     H.salvar();
   }
   function enviar(el) {
+    if (W.ehMultiCliente(ed)) return H.toast('Com vários clientes, a aprovação por cliente ainda não está disponível.');
     if (!ed.items.length || !(R.custoReal > 0)) return H.toast('Preencha a cotação antes de enviar.');
     const errs = W.desemErros(ed, R);
     if (errs.length) { H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(errs[0])); return; }

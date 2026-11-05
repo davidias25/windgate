@@ -744,6 +744,42 @@ function triCalcular(e){
     return { multi: true, clientes, total, travas, avisos: conf.avisos, erros: [] };
   }
 
+  /* Ligado pela diretoria na lista de cotações. Desligado, cotação com vários clientes abre só para leitura. */
+  const multiClienteLigado = db => !!(db && db.hubPainel && db.hubPainel._flags && db.hubPainel._flags.multiCliente);
+  /** Acrescenta um cliente. A 1ª vez, os campos de hoje viram o cliente 1 e todos os itens ficam dele. */
+  function adicionarCliente(q) {
+    if (!Array.isArray(q.clientes) || !q.clientes.length) {
+      const c1 = Object.assign({}, clientesDe(q)[0], { margemModo: 'pct' });
+      q.clientes = [c1];
+      (q.items || []).forEach(it => { if (it) it.clienteId = c1.id; });
+      q.regraRateio = Object.assign({}, RATEIO_PADRAO, { percentuais: {} });
+    }
+    const usados = new Set(q.clientes.map(c => c.id)); let n = q.clientes.length + 1;
+    while (usados.has('c' + n)) n++;
+    const base = q.clientes[0];
+    const novo = { id: 'c' + n, nome: '', ufDestino: base.ufDestino, tipoOperacao: base.tipoOperacao, clienteContribuinte: base.clienteContribuinte, margemPct: base.margemPct, margemRS: '0', margemModo: 'pct', aliqST: base.aliqST, opNum: '', mercadoria: '', desR1: '', desR2: '', desR3: '', status: 'draft', aprovadoPor: null };
+    q.clientes.push(novo);
+    return novo;
+  }
+  /** Tira um cliente. Os itens dele ficam sem dono; se sobrar um cliente só, a cotação volta ao formato de sempre. */
+  function removerCliente(q, id) {
+    if (!Array.isArray(q.clientes)) return;
+    q.clientes = q.clientes.filter(c => c.id !== id);
+    (q.items || []).forEach(it => { if (it && it.clienteId === id) it.clienteId = ''; });
+    if (q.regraRateio && q.regraRateio.percentuais) delete q.regraRateio.percentuais[id];
+    if (q.clientes.length > 1) return;
+    const c = q.clientes[0];
+    if (c) Object.assign(q.fields, { cliente: c.nome || '', ufDestino: c.ufDestino || '', tipoOp: c.tipoOperacao === 'triangular' ? 'triangular' : 'direta', opNum: c.opNum || '', mercadoria: c.mercadoria || '', margemPct: String(c.margemPct != null ? c.margemPct : ''), margemBRL: String(c.margemRS != null ? c.margemRS : '0'), aliqST: String(c.aliqST != null ? c.aliqST : ''), desR1: c.desR1 != null ? String(c.desR1) : '', desR2: c.desR2 != null ? String(c.desR2) : '', desR3: c.desR3 != null ? String(c.desR3) : '' });
+    delete q.clientes; delete q.regraRateio;
+    (q.items || []).forEach(it => { if (it) delete it.clienteId; });
+  }
+  /** Nomes juntos nos campos da cotação: é o que a lista e o sistema antigo mostram. */
+  function resumirClientes(q) {
+    if (!ehMultiCliente(q)) return;
+    const junta = k => q.clientes.map(c => String(c[k] || '').trim()).filter(Boolean).join(' + ');
+    q.fields = Object.assign({}, q.fields, { cliente: junta('nome'), opNum: junta('opNum'), mercadoria: junta('mercadoria') });
+  }
+
   /* ==== Lista (qindex) e gravação ==== */
   /** Monta o registro de quotes[id] e a entrada de qindex — mesmo formato do saveQuote. */
   function snapshot(q, R) {
@@ -903,5 +939,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

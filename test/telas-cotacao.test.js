@@ -1,36 +1,96 @@
 /**
  * Tela de cotações monta sem erro (lista, aprovada, rascunho e nova), com um DOM de mentira.
  * Pega erro de variável fora de escopo, como o "bloq is not defined" que travou a abertura das cotações.
+ * Confere também a tela com vários clientes: a flag, os blocos por cliente e a digitação.
  */
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const raiz = path.join(__dirname, '..');
-const no = () => new Proxy(function () {}, {
-  get(t, k) {
-    if (k === 'querySelectorAll') return () => [];
-    if (k === 'querySelector' || k === 'closest' || k === 'getElementById') return () => no();
-    if (k === 'addEventListener' || k === 'appendChild' || k === 'remove' || k === 'focus' || k === 'setSelectionRange' || k === 'click') return () => {};
-    if (k === 'classList') return { add() {}, remove() {}, toggle() {}, contains() { return false; } };
-    if (k === 'contains') return () => true;
-    if (k === 'dataset' || k === 'style') return {};
-    if (k === 'value' || k === 'textContent' || k === 'innerHTML') return t[k] || '';
-    if (k === Symbol.toPrimitive) return () => '';
-    return t[k];
-  },
-  set(t, k, v) { t[k] = v; return true; }
-});
+let passou = 0, falhou = 0;
+const ok = (c, m) => { if (c) { passou++; console.log('  ✅ ' + m); } else { falhou++; console.error('  ❌ ' + m); } };
+
+/* Nó de mentira: o mesmo seletor devolve o mesmo nó, para ler o que a tela escreveu nele. */
+function criarNo() {
+  const nos = {}, ouvintes = {};
+  return new Proxy(function () {}, {
+    get(t, k) {
+      if (k === 'querySelectorAll') return () => [];
+      if (k === 'querySelector' || k === 'closest' || k === 'getElementById') return s => (nos[s] = nos[s] || criarNo());
+      if (k === 'addEventListener') return (ev, fn) => { (ouvintes[ev] = ouvintes[ev] || []).push(fn); };
+      if (k === 'disparar') return (ev, e) => (ouvintes[ev] || []).forEach(fn => fn(e));
+      if (k === 'appendChild' || k === 'remove' || k === 'focus' || k === 'setSelectionRange' || k === 'click') return () => {};
+      if (k === 'classList') return { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+      if (k === 'contains') return () => true;
+      if (k === 'dataset' || k === 'style') return {};
+      if (k === 'value' || k === 'textContent' || k === 'innerHTML') return t[k] || '';
+      if (k === Symbol.toPrimitive) return () => '';
+      return t[k];
+    },
+    set(t, k, v) { t[k] = v; return true; }
+  });
+}
 const W = Object.assign({}, require(path.join(raiz, 'public/hub/js/regras.js')), require(path.join(raiz, 'public/hub/js/cotacao-regras.js')));
-const erros = [];
 const H = { W, telas: {}, estado: { param: null, tela: 'cotacoes' }, db: null, userKey: 'samir', user: { aprova: true },
-  esc: s => String(s == null ? '' : s), nomeUsuario: k => k, pode: () => true, toast: m => {}, render() {}, salvar() {}, ir() {}, modal: () => no(), fecharModal() {},
+  esc: s => String(s == null ? '' : s), nomeUsuario: k => k, pode: () => true, toast: () => {}, render() {}, salvar() {}, ir() {}, modal: () => criarNo(), fecharModal() {},
   api: async () => ({ json: async () => ({}) }), ptax: { compra: 5.4772, venda: 5.4778, em: '2026-11-04 13:05' }, carregarPtax: () => Promise.resolve(H.ptax) };
-const ctx = { window: { HUB: H, WG: W }, document: { activeElement: null, getElementById: () => no(), createElement: () => no(), body: no() }, console, setTimeout, clearTimeout, URL, Promise };
+const ctx = { window: { HUB: H, WG: W }, document: { activeElement: null, getElementById: () => criarNo(), createElement: () => criarNo(), body: criarNo() }, console, setTimeout, clearTimeout, URL, Promise };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(raiz, 'public/hub/js/cotacoes.js'), 'utf8'), ctx);
+
 const base = { fields: Object.assign({}, W.PADRAO, { opNum: 'OP90', cliente: 'Lima' }), items: [W.ITEM_PADRAO()], exps: [], fotos: [], blocos: {}, status: 'ok', aprovadoPor: 'samir', id: 'q1' };
-H.db = { quotes: { q1: base, q2: Object.assign({}, base, { id: 'q2', status: 'draft' }) }, qindex: [{ _id: 'i1', id: 'q1', status: 'ok' }, { _id: 'i2', id: 'q2', status: 'draft' }], crm: [], crmOps: [], ops: [], fin: [], users: {}, hubRecados: [] };
-for (const p of [null, 'q1', 'q2', 'nova']) {
-  try { H.telas.cotacoes(no(), p); console.log('  ✅ tela monta: ' + (p || 'lista')); } catch (e) { erros.push(p + ': ' + e.message); console.error('  ❌ tela ' + (p || 'lista') + ': ' + e.message); }
+const item = (clienteId, q, u, cbm) => Object.assign(W.ITEM_PADRAO(), { d: 'Item ' + clienteId, q, u, p: 100, cbm, clienteId });
+const multi = { id: 'q3', status: 'draft', fields: Object.assign({}, W.PADRAO, { cliente: 'Márcio + Bruno', txDesp: '5.5', freteUSD: '1000' }), exps: [], fotos: [], blocos: {}, items: [item('c1', 2, 1000, 10), item('c2', 1, 1000, 5)],
+  regraRateio: Object.assign({}, W.RATEIO_PADRAO, { percentuais: {} }),
+  clientes: [{ id: 'c1', nome: 'Márcio', ufDestino: 'RN', tipoOperacao: 'direta', margemPct: '25', aliqST: '16', opNum: 'OP91', mercadoria: 'Escoras', margemModo: 'pct' }, { id: 'c2', nome: 'Bruno', ufDestino: 'CE', tipoOperacao: 'direta', margemPct: '30', aliqST: '16', opNum: 'OP92', mercadoria: 'Betoneiras', margemModo: 'pct' }] };
+const banco = flag => ({ quotes: { q1: base, q2: Object.assign({}, base, { id: 'q2', status: 'draft' }), q3: JSON.parse(JSON.stringify(multi)) },
+  qindex: [{ _id: 'i1', id: 'q1', status: 'ok' }, { _id: 'i2', id: 'q2', status: 'draft' }, { _id: 'i3', id: 'q3', status: 'draft' }], crm: [], crmOps: [], ops: [], fin: [], users: {}, hubRecados: [], hubPainel: { _flags: { multiCliente: flag } } });
+const abrir = (p, flag) => { H.db = banco(flag); H.telas.cotacoes(criarNo(), null); const el = criarNo(); H.telas.cotacoes(el, p); return el; };
+
+console.log('\nTela de cotações:');
+for (const p of [null, 'q1', 'q2', 'nova', 'q3']) {
+  for (const flag of [false, true]) {
+    try { abrir(p, flag); ok(true, `monta: ${p || 'lista'}, função ${flag ? 'ligada' : 'desligada'}`); } catch (e) { ok(false, `${p || 'lista'}, função ${flag ? 'ligada' : 'desligada'}: ${e.message}`); }
+  }
 }
-console.log(`
-${4 - erros.length} verificações passaram, ${erros.length} falharam.`);
-process.exit(erros.length ? 1 : 0);
+
+console.log('\nFunção desligada:');
+{
+  const html = abrir('q2', false).innerHTML;
+  ok(!html.includes('Clientes deste contêiner') && !html.includes('CBM') && !html.includes('Rateio dos custos'), 'cotação de 1 cliente não mostra nada novo');
+  const m = abrir('q3', false).innerHTML;
+  ok(m.includes('somente leitura') && m.includes('<fieldset id="cform" disabled') && !m.includes('id="csalva"'), 'cotação com vários clientes abre só para leitura, sem Salvar');
+}
+
+console.log('\nFunção ligada:');
+{
+  const q2 = abrir('q2', true).innerHTML;
+  ok(q2.includes('id="cladd"') && !q2.includes('Rateio dos custos'), 'rascunho de 1 cliente oferece adicionar outro');
+  ok(!abrir('q1', true).innerHTML.includes('id="cladd"'), 'cotação aprovada não vira de vários clientes');
+  const el = abrir('q3', true), h = el.innerHTML;
+  ok(h.includes('Márcio') && h.includes('Bruno') && h.includes('Rateio dos custos comuns') && h.includes('CBM (m³)') && h.includes('Cronograma de desembolso por cliente'), 'mostra clientes, CBM, rateio e cronograma por cliente');
+  ok(!h.includes('id="cf_cliente"') && !h.includes('id="cf_margemPct"') && !h.includes('id="cenvia"'), 'sem os campos de um cliente só e sem Enviar para aprovação');
+  const resumo = el.querySelector('#cresumo').innerHTML;
+  ok(resumo.includes('Márcio') && resumo.includes('Bruno') && resumo.includes('Total'), 'resumo com uma linha por cliente e o total');
+  ok(el.querySelector('#crv_frete').textContent.includes('Márcio:'), 'o rateio mostra quanto fica com cada cliente');
+
+  const form = el.querySelector('#cform');
+  const digita = (dataset, value) => form.disparar('input', { target: { dataset, value, type: 'text' } });
+  const antes = el.querySelector('#cresumo').innerHTML;
+  digita({ cli: 'c2', cc: 'margemPct' }, '40');
+  ok(el.querySelector('#cresumo').innerHTML !== antes, 'digitar a margem de um cliente recalcula');
+  digita({ cli: 'c2', cc: 'margemRS' }, '5000');
+  ok(el.querySelector('#ccl_c2_margemPct').value !== '', 'margem em reais atualiza o percentual');
+  digita({ cli: 'c2', cc: 'ufDestino' }, 'SP');
+  ok(el.querySelector('#ccl_c2_aliqST').value === '14', 'trocar a UF sugere a alíquota: 18% − 4%');
+  digita({ it: '0', c: 'clienteId' }, '');
+  ok(el.querySelector('#cravisos').innerHTML.includes('sem cliente'), 'item sem dono mostra o erro');
+}
+
+console.log('\nSistema antigo:');
+{
+  const html = fs.readFileSync(path.join(raiz, 'public/index.html'), 'utf8');
+  const i = html.indexOf('function loadQuote(id){'), trecho = html.slice(i, i + 400);
+  ok(/s\.clientes\.length>1/.test(trecho) && /return;/.test(trecho), 'recusa abrir cotação com vários clientes, que seria apagada ao salvar');
+}
+
+console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
+process.exit(falhou ? 1 : 0);
