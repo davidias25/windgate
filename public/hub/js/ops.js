@@ -166,7 +166,7 @@
           <td class="note">${esc([it.coletadoPor, it.revisadoPor].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="empty">Esta operação ainda não tem checklist.</p>'}</div>
       <div class="box"><div class="box-h"><h2>Arquivos da operação</h2><span class="note">${docs.length}</span></div><div class="box-b list">
-        ${docs.length ? docs.map(d => `<div class="row"><div><b>${esc(d.nome)}</b><br><small class="note">${esc(d.grupo || d.cat || '')} · ${W.dataBR(d.data)} · ${esc(d.por || '')}</small></div>${d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div>`).join('') : '<p class="empty">Nenhum arquivo.</p>'}
+        ${docs.length ? docs.map(d => `<div class="row"><div><b>${esc(d.nome)}</b><br><small class="note">${esc(d.grupo || d.cat || '')} · ${W.dataBR(d.data)} · ${esc(d.por || '')}</small></div>${W.linkPerdido(d.link) ? `<span class="pill crit" title="O arquivo ficou no disco do servidor e foi apagado numa publicação. Envie de novo.">arquivo perdido</span>` : d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div>`).join('') : '<p class="empty">Nenhum arquivo.</p>'}
       </div></div></div>`;
     box.querySelectorAll('[data-chk]').forEach(s => s.onchange = () => {
       const lista = H.db.checklists[o.id], ref = chk[+s.dataset.chk];

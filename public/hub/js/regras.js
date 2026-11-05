@@ -161,6 +161,18 @@
     return { dias, alvo, sit, atraso: dias != null && alvo ? Math.max(0, dias - alvo) : 0 };
   }
 
+  /* Arquivo em /uploads ficou só no disco do servidor, que é apagado a cada publicação: o link não abre mais. */
+  const linkPerdido = v => /(^|\/)uploads\//.test(String(v || '')) && !/supabase\.co/.test(String(v || ''));
+  /** Tudo o que aponta para um arquivo perdido e ainda precisa ser enviado de novo. */
+  function arquivosPerdidos(db) {
+    const quando = v => { const m = /-(\d{13})-/.exec(String(v || '')); return m ? new Date(+m[1]).toISOString().slice(0, 10) : ''; };
+    const out = [];
+    (db.docs || []).forEach(d => { if (d && linkPerdido(d.link) && !d.substituidoPor && !d.removidoEm) out.push({ onde: 'Documentos', _id: d._id, op: d.op || '', nome: d.nome || d.cat || '', por: d.por || '', quando: quando(d.link) }); });
+    (db.fin || []).forEach(l => { if (l && linkPerdido(l.comp)) out.push({ onde: 'Financeiro', _id: l._id, op: l.op || '', nome: l.desc || 'Comprovante', por: l.baixaPor || l.por || '', quando: quando(l.comp) }); });
+    (db.crmDocs || []).forEach(d => { if (d && linkPerdido(d.link) && !d.removidoEm) out.push({ onde: 'CRM', _id: d._id, op: '', nome: d.nome || '', por: d.enviadoPor || '', quando: quando(d.link) }); });
+    return out.sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  }
+
   /** % do checklist documental (aprovado ou N/A contam como feito). */
   function checklistPct(db, opId) {
     const l = (db.checklists || {})[opId];
@@ -914,7 +926,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    linkPerdido, arquivosPerdidos, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

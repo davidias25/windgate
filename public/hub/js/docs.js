@@ -27,9 +27,11 @@
     const pendConf = docs.filter(d => ['novo', 'meia'].includes(W.situacaoDoc(d).k)).length;
     const contagem = k => (porOp[pasta] || []).filter(d => W.tipoDoc(d) === k && !d.substituidoPor).length;
 
+    const perdidos = W.arquivosPerdidos(db);
     el.innerHTML = `
       <div class="head"><div><h1>Documentos</h1><p class="sub">Uma pasta por processo, com versão, quem enviou e quem conferiu. ${docs.length} arquivo(s) · ${pendConf} aguardando conferência.</p></div>
         <div class="btns"><button class="btn pri" data-enviar>+ Enviar arquivo</button></div></div>
+      ${perdidos.length ? `<div class="banner crit" style="margin-bottom:12px"><b>${perdidos.length} arquivo(s) perdido(s):</b> ficaram só no disco do servidor e precisam ser enviados de novo. <button class="btn sm" id="dperd">Ver a lista</button></div>` : ''}
       <div class="ged">
         <aside class="box ged-l"><input type="search" class="inp" id="dq" placeholder="Buscar em todos os processos" value="${esc(qDoc)}">
           ${pastas.map(p => { const op = ops.find(x => x.id === p), c = op ? W.completudeDocs(db, op) : null;
@@ -46,12 +48,15 @@
               return `<tr><td><b>${esc(d.nome || '—')}</b>${d.obs ? `<br><small class="note">${esc(d.obs)}</small>` : ''}</td>${q ? `<td class="mono">${esc(d.op || '—')}</td>` : ''}<td>${esc(W.docTipoMeta(W.tipoDoc(d)).l)}</td>
                 <td class="mono">${d.rascunho ? 'draft' : 'v' + (d.versao || 1)}</td><td class="note">${dataTxt(d.dataUpload || d.data)}${d.por || d.enviadoPor ? ' · ' + esc(d.por || d.enviadoPor) : ''}</td>
                 <td>${esc(conf.join(' · ') || '—')}</td><td><span class="pill ${s.c}">${esc(s.l)}</span></td>
-                <td class="num" style="white-space:nowrap">${d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}${!d.substituidoPor ? `<button class="btn sm" data-conf="${esc(d._id)}">Conferir</button><button class="btn ghost sm" data-mais="${esc(d._id)}" aria-label="Mais ações">⋯</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+                <td class="num" style="white-space:nowrap">${W.linkPerdido(d.link) ? `<span class="pill crit" title="O arquivo ficou no disco do servidor e foi apagado numa publicação. Envie de novo.">arquivo perdido</span>` : d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}${!d.substituidoPor ? `<button class="btn sm" data-conf="${esc(d._id)}">Conferir</button><button class="btn ghost sm" data-mais="${esc(d._id)}" aria-label="Mais ações">⋯</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
             : '<p class="empty">Nenhum documento aqui. Use “+ Enviar arquivo”.</p>'}
           <p class="note box-b">Dupla conferência: duas pessoas diferentes de quem enviou, sendo pelo menos uma do Davi ou do Samir. Ao enviar Invoice, Packing list, BL ou DUIMP, o item do checklist da operação é marcado sozinho. Leitura automática por IA (itens, pesos, contêineres e lacres comparados com a cotação) entra com a chave da API do Claude.</p>
         </section></div>`;
 
     el.querySelector('[data-enviar]').onclick = () => enviar({ op: o && o.id });
+    const bp = el.querySelector('#dperd');
+    if (bp) bp.onclick = () => { const m = H.modal('Arquivos perdidos', `<p class="note" style="margin-bottom:8px">Em Documentos, abra <b>Conferir</b> no próprio arquivo e use <b>Nova versão</b>. No Financeiro, edite o lançamento e anexe o comprovante. Propostas do CRM podem ser geradas de novo pela cotação.</p>
+      <div class="tw"><table><thead><tr><th>Onde</th><th>Operação</th><th>Arquivo</th><th>Enviado por</th><th>Em</th></tr></thead><tbody>${perdidos.map(x => `<tr><td>${esc(x.onde)}</td><td class="mono">${esc(x.op || '—')}</td><td>${esc(x.nome)}</td><td>${esc(x.por || '—')}</td><td class="mono">${x.quando ? W.dataBR(x.quando) : '—'}</td></tr>`).join('')}</tbody></table></div>`, '<button class="btn" data-x>Fechar</button>'); const ml = m.querySelector('.modal'); if (ml) ml.classList.add('larga'); };
     el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { pasta = b.dataset.p; qDoc = ''; filtroTipo = ''; H.render(); });
     el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { filtroTipo = filtroTipo === b.dataset.t ? '' : b.dataset.t; H.render(); });
     el.querySelectorAll('[data-falta]').forEach(b => b.onclick = () => enviar({ op: o && o.id, tipo: b.dataset.falta }));

@@ -22,6 +22,20 @@ console.log('\nNome no Storage:');
 ok(!ACEITO.test('documentos/1_Sebastião.pdf') && !ACEITO.test('documentos/1_INVOICE 50%.pdf'), 'os nomes originais são os que o Storage recusa');
 ok(nomeParaStorage('') === 'arquivo' && nomeParaStorage(null) === 'arquivo', 'sem nome: "arquivo"');
 
+console.log('\nArquivos perdidos:');
+{
+  const W = require('../public/hub/js/regras.js');
+  const url = 'https://windgate.onrender.com/uploads/arquivo-1791470516783-635429860.pdf', bom = 'https://x.supabase.co/storage/v1/object/public/windgate-docs/documentos/1_a.pdf';
+  ok(W.linkPerdido(url) && W.linkPerdido('/uploads/nf.xml') && !W.linkPerdido(bom) && !W.linkPerdido('') && !W.linkPerdido('https://drive.google.com/x'), 'só o que aponta para /uploads é perdido');
+  const db = { docs: [{ _id: 'd1', op: 'OP26', nome: 'OP26 - INVOICE 50%', link: url, por: 'Ívina' }, { _id: 'd2', op: 'OP3', nome: 'Velho', link: url, substituidoPor: 'd9' }, { _id: 'd3', op: 'OP3', nome: 'Removido', link: url, removidoEm: '2026-10-01' }, { _id: 'd4', op: 'OP1', nome: 'Certo', link: bom }],
+    fin: [{ _id: 'f1', op: 'OP23', desc: 'Pagamento fábrica', comp: url, por: 'Operador' }, { _id: 'f2', op: 'OP1', comp: bom }], crmDocs: [{ _id: 'c1', nome: 'Proposta.pdf', link: url, enviadoPor: 'Samir' }] };
+  const l = W.arquivosPerdidos(db);
+  ok(l.length === 3 && l.map(x => x._id).join() === 'c1,f1,d1', 'lista documento, comprovante e proposta, ordenados por operação');
+  ok(!l.some(x => x._id === 'd2' || x._id === 'd3'), 'documento já reenviado (nova versão) ou removido sai da lista');
+  ok(l.find(x => x._id === 'd1').quando === '2026-10-08' && l.find(x => x._id === 'f1').por === 'Operador', 'mostra quem enviou e quando');
+  ok(W.arquivosPerdidos({}).length === 0, 'banco sem essas coleções não quebra');
+}
+
 (async () => {
   const app = require('../src/server');
   const srv = app.listen(0), base = `http://127.0.0.1:${srv.address().port}`;
