@@ -36,6 +36,19 @@ console.log('\nArquivos perdidos:');
   ok(W.arquivosPerdidos({}).length === 0, 'banco sem essas coleções não quebra');
 }
 
+console.log('\nExcluir documento:');
+{
+  const W = require('../public/hub/js/regras.js');
+  const db = W.prepararBanco({ docs: [{ _id: 'v1', op: 'OP1', nome: 'Invoice', substituidoPor: 'v2' }, { _id: 'v2', op: 'OP1', nome: 'Invoice' }, { _id: 'o', op: 'OP2', nome: 'BL' }] });
+  const conhecidos = W.fotografarIds(db);
+  const fora = W.excluirDocumento(db, 'v2');
+  ok(fora && fora._id === 'v2' && db.docs.length === 2, 'tira só o documento escolhido');
+  ok(!db.docs.find(d => d._id === 'v1').substituidoPor, 'a versão anterior volta a aparecer');
+  ok(db.docs.find(d => d._id === 'o').nome === 'BL' && W.excluirDocumento(db, 'nao-existe') === null, 'o resto fica como está');
+  W.registrarRemocoes(db, conhecidos);
+  ok(db._removidos && db._removidos.v2, 'a exclusão fica registrada: o documento não volta com a gravação de outra pessoa');
+}
+
 (async () => {
   const app = require('../src/server');
   const srv = app.listen(0), base = `http://127.0.0.1:${srv.address().port}`;

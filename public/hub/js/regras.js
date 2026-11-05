@@ -173,6 +173,14 @@
     return out.sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   }
 
+  /** Tira o documento da lista. Se ele era a versão nova de outro, a versão anterior volta a aparecer. */
+  function excluirDocumento(db, id) {
+    const d = (db.docs || []).find(x => x && x._id === id); if (!d) return null;
+    db.docs = db.docs.filter(x => x !== d);
+    db.docs.forEach(x => { if (x && x.substituidoPor === id) delete x.substituidoPor; });
+    return d;
+  }
+
   /** % do checklist documental (aprovado ou N/A contam como feito). */
   function checklistPct(db, opId) {
     const l = (db.checklists || {})[opId];
@@ -926,7 +934,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    linkPerdido, arquivosPerdidos, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    linkPerdido, arquivosPerdidos, excluirDocumento, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
