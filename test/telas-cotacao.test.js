@@ -96,7 +96,7 @@ console.log('\nRelançar no Financeiro:');
   H.db.fin = [{ _id: 'a', origem: marca, tipo: 'Receita', desc: '1º recebimento do cliente — parcela 1', data: '2026-10-01', valor: 10, status: 'Realizado' }];
   el.querySelector('#cop').onclick();
   ok(modal && H.db.fin.length === 1, 'parte excluída: pergunta antes e ainda não lança nada');
-  ok(corpo.includes('1º pagamento') && !corpo.includes('1º recebimento') && corpo.includes('1 lançamento(s)'), 'a janela lista o que falta e diz quantos ficam como estão');
+  ok(corpo.includes('3º pagamento') && !corpo.includes('1º recebimento') && corpo.includes('1 lançamento(s)'), 'a janela lista o que falta e diz quantos ficam como estão');
   modal.querySelector('#rlok').onclick();
   ok(H.db.fin.length > 1 && H.db.fin.filter(l => /^1º recebimento/.test(l.desc)).length === 1 && /relançado/.test(toast), 'confirmando, lança o que falta e não duplica o que ficou');
   const n = H.db.fin.length; modal = null;
