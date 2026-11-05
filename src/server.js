@@ -7,7 +7,7 @@ const uploadMiddleware = require('./middlewares/upload.middleware');
 const cotacoesRoutes = require('./routes/cotacoes.routes');
 const { criarTarefaOperacao, listarOperacoes } = require('./integrations/clickup.service');
 const { uploadParaGoogleDrive } = require('./integrations/drive.service');
-const { uploadParaSupabase, deletarDoSupabase, listarArquivos } = require('./integrations/supabase.service');
+const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo } = require('./integrations/supabase.service');
 
 const app = express();
 
@@ -512,6 +512,14 @@ app.post('/api/upload', auth.exigirTokenSeAtiva, uploadMiddleware.single('arquiv
       supabaseResult = await uploadParaSupabase(req.file.path, req.file.originalname, req.file.mimetype);
     } catch (supaErr) {
       console.warn('⚠️ Supabase Storage desativado ou sem credenciais.');
+    }
+
+    /* O disco do servidor é apagado a cada publicação. Com o Storage ligado, arquivo que não chegou
+       lá é falha: dizer "armazenado" aqui foi como documentos sumiram semanas depois. */
+    if (storageAtivo() && !(supabaseResult && supabaseResult.publicUrl)) {
+      fs.unlink(req.file.path, () => {});
+      console.error('❌ Upload recusado: o arquivo não foi para o Storage:', req.file.originalname);
+      return res.status(502).json({ success: false, message: 'O arquivo não foi guardado no Storage. Tente de novo; se continuar, renomeie o arquivo.' });
     }
 
     const finalUrl = (supabaseResult && supabaseResult.publicUrl) || localUrl;

@@ -18,6 +18,17 @@ function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseKey);
 }
 
+/* O Storage recusa no caminho acento, º, %, # e outros ("Invalid key"). Era assim que "Sebastião.pdf"
+   ou "INVOICE 50%.pdf" deixavam de ir para o Storage. O nome de exibição continua em quem chamou. */
+function nomeParaStorage(nome) {
+  let n = String(nome || 'arquivo');
+  // O upload entrega o nome em latin1: "ã" chega como "Ã£". Volta para UTF-8 antes de tirar o acento.
+  if (/[ÃÂ]/.test(n)) { const d = Buffer.from(n, 'latin1').toString('utf8'); if (!d.includes('\uFFFD')) n = d; }
+  n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\- ()]/g, '_').replace(/\s+/g, ' ').trim();
+  return n || 'arquivo';
+}
+const storageAtivo = () => !!getSupabaseClient();
+
 async function uploadParaSupabase(filePath, fileName, mimeType = 'application/pdf') {
   const supabase = getSupabaseClient();
   const bucketName = process.env.SUPABASE_BUCKET || 'windgate-docs';
@@ -29,7 +40,7 @@ async function uploadParaSupabase(filePath, fileName, mimeType = 'application/pd
 
   try {
     const fileBuffer = fs.readFileSync(filePath);
-    const destinationPath = `documentos/${Date.now()}_${fileName}`;
+    const destinationPath = `documentos/${Date.now()}_${nomeParaStorage(fileName)}`;
 
     const { data, error } = await supabase.storage
       .from(bucketName)
@@ -161,4 +172,4 @@ async function enviarArquivo(caminho, buffer, contentType = 'application/octet-s
   return true;
 }
 
-module.exports = { uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };
+module.exports = { nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };
