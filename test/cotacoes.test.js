@@ -171,6 +171,22 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   const r2 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   ok(r2.jaLancado && !r2.op && r2.lancamentos.length === 0, 'aprovar de novo não duplica a operação nem o cronograma');
 
+  console.log('\nRelançar no Financeiro o que foi excluído:');
+  {
+    const fin = () => r1.lancamentos.map(l => Object.assign({}, l, { data: '2026-10-01' }));
+    const semUm = fin().filter(l => !l.desc.startsWith('2º pagamento'));
+    const r3 = C.operacaoDaCotacao({ ops: [r1.op], fin: semUm }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(r3.relancar && !r3.jaLancado && r3.lancamentos.length === 1 && r3.lancamentos[0].desc.startsWith('2º pagamento') && r3.lancamentos[0].tipo === 'Despesa', 'excluído o 2º pagamento: volta só ele');
+    ok(r3.lancamentos[0].vencimento === '2026-11-05' && r3.lancamentos[0].status === 'Previsto' && r3.lancamentos[0].origem === r1.lancamentos[0].origem, 'com a data do cronograma original (35 dias do lançamento), como previsto');
+    const pago = fin().map((l, i) => i === 0 ? Object.assign(l, { status: 'Realizado' }) : l).filter(l => !l.desc.startsWith('3º'));
+    const r4 = C.operacaoDaCotacao({ ops: [r1.op], fin: pago }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(r4.lancamentos.length === 2 && r4.lancamentos.every(l => l.desc.startsWith('3º')) && r4.jaExistem === 4, 'o que já foi pago continua e não é relançado; voltam só os 2 excluídos');
+    const r5 = C.operacaoDaCotacao({ ops: [r1.op], fin: [] }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(!r5.relancar && !r5.jaLancado && r5.lancamentos.length === 6 && r5.lancamentos[0].vencimento === '2026-11-25', 'todos excluídos: lança o cronograma inteiro, a partir de hoje');
+    const r6 = C.operacaoDaCotacao({ ops: [], fin: semUm }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(r6.op && r6.relancar && r6.lancamentos.length === 1, 'operação excluída e recriada: volta a operação e só o que falta');
+  }
+
   console.log('\nTaxas do dólar pela PTAX de compra:');
   {
     const t = C.taxasDaPtax(5.4321);

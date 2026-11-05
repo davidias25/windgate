@@ -474,8 +474,16 @@
       '<button class="btn" data-x>Agora não</button><button class="btn pri" id="mop">Criar operação + previsto</button>');
     m.querySelector('#mop').onclick = () => { H.fecharModal(); criarOperacao(); };
   }
-  function criarOperacao() {
+  function criarOperacao(confirmado) {
     const r = W.operacaoDaCotacao(H.db, ed, R, eu(), W.hojeISO());
+    if (r.relancar && confirmado !== true) {
+      const m = H.modal('Relançar no Financeiro', `<p>A operação <b>${esc(r.id)}</b> ainda tem <b>${r.jaExistem} lançamento(s)</b> desta cotação, que ficam como estão. Faltam estes, que serão lançados de novo como previstos:</p>
+        <div class="list" style="margin-top:8px">${r.lancamentos.map(l => `<div class="row"><span>${esc(l.desc)}<br><small class="note">${esc(l.tipo)} · vencimento ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(l.valor)}</span></div>`).join('')}</div>
+        <p class="note" style="margin-top:8px">Os valores saem da cotação como está agora. Confira se algum deles não foi excluído de propósito.</p>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="rlok">Relançar</button>');
+      m.querySelector('#rlok').onclick = () => { H.fecharModal(); criarOperacao(true); };
+      return;
+    }
     const agora = new Date().toISOString();
     if (r.op) {
       Object.assign(r.op, { status: 'contrato', statusEm: agora, statusPor: eu() });
@@ -485,9 +493,10 @@
       if (!H.db.checklists[r.id] && H.CHK_MODELO) H.db.checklists[r.id] = H.CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
     }
     if (H.db.quotes[ed.id]) W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
-    if (r.jaLancado) { H.salvar(); return H.toast(`Operação <b>${esc(r.id)}</b> já tinha o cronograma lançado: nada foi duplicado.`); }
+    if (r.jaLancado) { H.salvar(); return H.toast(`Operação <b>${esc(r.id)}</b> já tem todo o cronograma no Financeiro: nada foi duplicado.`); }
     H.db.fin.unshift(...r.lancamentos);
     H.salvar();
+    if (r.relancar) return H.toast(`<b>${r.lancamentos.length} lançamento(s)</b> relançado(s) no Financeiro para a ${esc(r.id)}.`);
     H.toast(`Operação <b>${esc(r.id)}</b> ${r.op ? 'criada' : 'atualizada'} · cronograma lançado no Financeiro (1ª parcela em ${W.dataBR(r.lancamentos[0] && r.lancamentos[0].vencimento)}).`);
   }
 

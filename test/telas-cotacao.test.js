@@ -85,6 +85,26 @@ console.log('\nFunção ligada:');
   ok(el.querySelector('#cravisos').innerHTML.includes('sem cliente'), 'item sem dono mostra o erro');
 }
 
+console.log('\nRelançar no Financeiro:');
+{
+  let modal = null, corpo = '', toast = ''; const m0 = H.modal, t0 = H.toast;
+  H.modal = (t, b) => { corpo = b; return (modal = criarNo()); }; H.toast = m => { toast = m; };
+  const el = abrir('q1', false);
+  H.db.checklists = {}; H.db.opStatusHist = [];
+  const marca = 'cotacao:q1';
+  H.db.ops = [{ id: 'OP90', quoteId: 'q1' }];
+  H.db.fin = [{ _id: 'a', origem: marca, tipo: 'Receita', desc: '1º recebimento do cliente — parcela 1', data: '2026-10-01', valor: 10, status: 'Realizado' }];
+  el.querySelector('#cop').onclick();
+  ok(modal && H.db.fin.length === 1, 'parte excluída: pergunta antes e ainda não lança nada');
+  ok(corpo.includes('1º pagamento') && !corpo.includes('1º recebimento') && corpo.includes('1 lançamento(s)'), 'a janela lista o que falta e diz quantos ficam como estão');
+  modal.querySelector('#rlok').onclick();
+  ok(H.db.fin.length > 1 && H.db.fin.filter(l => /^1º recebimento/.test(l.desc)).length === 1 && /relançado/.test(toast), 'confirmando, lança o que falta e não duplica o que ficou');
+  const n = H.db.fin.length; modal = null;
+  el.querySelector('#cop').onclick();
+  ok(!modal && H.db.fin.length === n && /nada foi duplicado/.test(toast), 'clicar de novo não lança nada');
+  H.modal = m0; H.toast = t0;
+}
+
 console.log('\nSistema antigo:');
 {
   const html = fs.readFileSync(path.join(raiz, 'public/index.html'), 'utf8');
