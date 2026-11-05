@@ -603,6 +603,147 @@ function triCalcular(e){
     return { d: it.d || 'salvo do uso', ii: +it.ii || 0, ipi: +it.ipi || 0, pis: it.pis != null ? +it.pis : 2.1, cofins: it.cofins != null ? +it.cofins : 9.65, c5291: !!it.c5291, mono: !!it.mono, por: por || '', em: hoje || W.hojeISO() };
   }
 
+  /* ==== Cotação com vários clientes no mesmo contêiner ====
+     Cotação antiga não é reescrita: vira 1 cliente só na leitura (clientesDe) e, com 1 cliente,
+     calcularPorCliente devolve o `calcular` puro, sem nenhuma conta nova.
+
+     Com N clientes há duas divisões, de propósito:
+     - FISCAL: o motor roda para cada cliente com a parte dele pelo FOB (AFRMM pelo peso, como já é
+       por item). É o critério da DI, então II, IPI, PIS, COFINS e ICMS somam o mesmo da cotação inteira.
+     - COMERCIAL: a regra de rateio (CBM, peso...) só decide quem paga cada custo. Entra como ajuste
+       no custo do cliente, sem mudar imposto nenhum.
+     Na triangular com vários clientes não há mark-up fixo: a NF de saída é a de entrada ÷ (1 − 4%). */
+  const GRUPOS_RATEIO = [['frete', 'Frete internacional'], ['seguro', 'Seguro'], ['capatazia', 'Capatazia'], ['terrestre', 'Transporte terrestre'], ['siscomex', 'Taxa Siscomex'], ['afrmm', 'AFRMM'], ['honorarios', 'Honorários do despachante'], ['demais', 'Demais despesas']];
+  const REGRAS_RATEIO = [['fob', 'Valor FOB'], ['peso', 'Peso'], ['cbm', 'CBM'], ['igual', 'Igual por cliente'], ['manual', 'Percentual manual']];
+  const RATEIO_PADRAO = { frete: 'cbm', seguro: 'fob', capatazia: 'fob', terrestre: 'fob', siscomex: 'fob', afrmm: 'fob', honorarios: 'fob', demais: 'fob' };
+  const CAMPO_GRUPO = { frete: 'freteUSD', seguro: 'seguro', capatazia: 'capatazia', terrestre: 'transporte', siscomex: 'siscomex', afrmm: 'afrmm', honorarios: 'honorarios' };
+
+  /** Clientes da cotação. A antiga vira um cliente com os campos de sempre, sem gravar nada. */
+  function clientesDe(q) {
+    if (q && Array.isArray(q.clientes) && q.clientes.length) return q.clientes;
+    const f = camposDe(q), tri = f.tipoOp === 'triangular';
+    return [{ id: 'c1', nome: f.cliente, ufDestino: f.ufDestino, tipoOperacao: tri ? 'triangular' : 'direta', clienteContribuinte: !tri, margemPct: f.margemPct, margemRS: f.margemBRL,
+      aliqST: f.aliqST, opNum: f.opNum, mercadoria: f.mercadoria, desR1: f.desR1, desR2: f.desR2, desR3: f.desR3, status: (q && q.status) || 'draft', aprovadoPor: (q && q.aprovadoPor) || null }];
+  }
+  const ehMultiCliente = q => !!(q && Array.isArray(q.clientes) && q.clientes.length > 1);
+  const donoDoItem = (q, it) => (ehMultiCliente(q) ? it.clienteId : clientesDe(q)[0].id);
+  const itensDoCliente = (q, id) => ((q && q.items) || []).filter(it => it && donoDoItem(q, it) === id);
+  const somaItens = (its, fn) => its.reduce((a, it) => a + (+it.q || 0) * fn(it), 0);
+  const medidas = {
+    fob: it => +it.u || 0,
+    peso: it => +it.p || 0,
+    cbm: it => +it.cbm || 0
+  };
+  /** Uma medida só vale se TODOS os itens a têm: com um item zerado, o dono dele sairia sem pagar nada. */
+  const medidaCompleta = (itens, k) => itens.length > 0 && itens.every(it => (+it.q || 0) * medidas[k](it) > 0);
+  /** Regra que vale de fato: CBM cai para peso e depois FOB; peso cai para FOB. Devolve também o aviso. */
+  function regraEfetiva(q, grupo) {
+    const r = (q.regraRateio && q.regraRateio[grupo]) || RATEIO_PADRAO[grupo];
+    const itens = (q.items || []).filter(Boolean);
+    if (r === 'cbm') {
+      if (medidaCompleta(itens, 'cbm')) return { regra: 'cbm' };
+      if (medidaCompleta(itens, 'peso')) return { regra: 'peso', aviso: 'CBM' };
+      return { regra: 'fob', aviso: 'CBM e peso' };
+    }
+    if (r === 'peso') return medidaCompleta(itens, 'peso') ? { regra: 'peso' } : { regra: 'fob', aviso: 'peso' };
+    return { regra: r };
+  }
+  /** Parte de cada cliente (soma 1) pela regra. */
+  function partes(q, regra) {
+    const cs = clientesDe(q), iguais = () => Object.fromEntries(cs.map(c => [c.id, 1 / cs.length]));
+    if (regra === 'igual') return iguais();
+    if (regra === 'manual') {
+      const pc = (q.regraRateio && q.regraRateio.percentuais) || {}, tot = cs.reduce((a, c) => a + (+pc[c.id] || 0), 0);
+      return tot > 0 ? Object.fromEntries(cs.map(c => [c.id, (+pc[c.id] || 0) / tot])) : iguais();
+    }
+    const fn = medidas[regra] || medidas.fob, tot = somaItens((q.items || []).filter(Boolean), fn);
+    if (!(tot > 0)) return iguais();
+    return Object.fromEntries(cs.map(c => [c.id, somaItens(itensDoCliente(q, c.id), fn) / tot]));
+  }
+  /** Erros que impedem o cálculo por cliente e avisos de rateio que caiu para outra regra. */
+  function conferirClientes(q) {
+    const erros = [], avisos = [], cs = clientesDe(q);
+    if (!ehMultiCliente(q)) return { erros, avisos };
+    const ids = new Set(cs.map(c => c.id));
+    if (ids.size !== cs.length) erros.push('Há clientes com o mesmo código.');
+    cs.forEach(c => { if (!String(c.nome || '').trim()) erros.push('Há cliente sem nome.'); });
+    const semDono = (q.items || []).filter(it => it && !ids.has(it.clienteId));
+    if (semDono.length) erros.push(`${semDono.length} item(ns) sem cliente: todo item precisa de um dono.`);
+    cs.forEach(c => { if (!itensDoCliente(q, c.id).length) erros.push(`${c.nome || c.id} está sem itens.`); });
+    GRUPOS_RATEIO.forEach(([g, rot]) => {
+      const e = regraEfetiva(q, g);
+      if (e.aviso) avisos.push(`${rot}: ${e.aviso} sem preencher em algum item, rateado por ${e.regra === 'peso' ? 'peso' : 'FOB'}.`);
+      if (e.regra === 'manual') {
+        const pc = (q.regraRateio && q.regraRateio.percentuais) || {}, tot = cs.reduce((a, c) => a + (+pc[c.id] || 0), 0);
+        if (Math.abs(tot - 100) > 0.001) erros.push(`${rot}: os percentuais manuais somam ${tot.toLocaleString('pt-BR')}%, e precisam somar 100%.`);
+      }
+    });
+    return { erros: [...new Set(erros)], avisos };
+  }
+  /** Cotação de um cliente só, no formato de sempre: o motor, o desembolso e a proposta a leem sem mudar nada. */
+  function cotacaoDoCliente(q, clienteId) {
+    const c = clientesDe(q).find(x => x.id === clienteId); if (!c) return null;
+    const f = camposDe(q), fob = partes(q, 'fob')[c.id], pesoCompleto = (q.items || []).some(it => it && (+it.q || 0) * (+it.p || 0) > 0);
+    const peso = pesoCompleto ? partes(q, 'peso')[c.id] : fob, fatia = (k, p) => String(N(f, k) * p);
+    const tri = c.tipoOperacao === 'triangular';
+    const fields = Object.assign({}, f, { cliente: c.nome || '', ufDestino: c.ufDestino || '', tipoOp: tri ? 'triangular' : 'direta', opNum: c.opNum || '', mercadoria: c.mercadoria != null ? c.mercadoria : f.mercadoria,
+      margemPct: String(c.margemPct != null ? c.margemPct : f.margemPct), margemBRL: String(c.margemRS != null ? c.margemRS : 0), aliqST: String(c.aliqST != null ? c.aliqST : f.aliqST),
+      desR1: c.desR1 != null ? String(c.desR1) : '', desR2: c.desR2 != null ? String(c.desR2) : '', desR3: c.desR3 != null ? String(c.desR3) : '',
+      mkSF: '0', mkJT: '0', freteUSD: fatia('freteUSD', fob), seguro: fatia('seguro', fob), capatazia: fatia('capatazia', fob), transporte: fatia('transporte', fob), siscomex: fatia('siscomex', fob), honorarios: fatia('honorarios', fob), outrasAdu: fatia('outrasAdu', fob), afrmm: fatia('afrmm', peso) });
+    return Object.assign({}, q, { fields, items: itensDoCliente(q, c.id), exps: (q.exps || []).map(e => Object.assign({}, e, { v: (+e.v || 0) * fob })), fotos: (q.fotos || []).filter(ft => ft && ft.clienteId === c.id),
+      status: c.status || 'draft', aprovadoPor: c.aprovadoPor || null, clienteId: c.id, clientes: undefined, regraRateio: undefined, preco: 0 });
+  }
+  /**
+   * Cálculo da cotação inteira. { multi, clientes: [{ id, nome, R, q }], total, travas, avisos, erros }.
+   * Cada `R` tem o formato do `calcular`; com 1 cliente é exatamente o que ele devolve.
+   */
+  function calcularPorCliente(q, opcoes) {
+    const cs = clientesDe(q);
+    if (!ehMultiCliente(q)) {
+      const R = calcular(q, opcoes);
+      return { multi: false, clientes: [{ id: cs[0].id, nome: cs[0].nome, R, q }], total: { custo: R.tri ? R.tri.custoGrupo : R.custoReal, preco: R.preco, st: R.st, margem: R.margem, fob: R.fob }, travas: [], avisos: [], erros: [] };
+    }
+    const conf = conferirClientes(q);
+    if (conf.erros.length) return { multi: true, clientes: [], total: null, travas: [], avisos: conf.avisos, erros: conf.erros };
+    const f = camposDe(q), txF = N(f, 'txFrete');
+    const expsTot = (q.exps || []).reduce((a, e) => a + (+e.v || 0), 0);
+    const valorGrupo = { frete: N(f, 'freteUSD') * txF, seguro: N(f, 'seguro'), capatazia: N(f, 'capatazia'), terrestre: N(f, 'transporte'), siscomex: N(f, 'siscomex'), afrmm: N(f, 'afrmm'), honorarios: N(f, 'honorarios'), demais: expsTot };
+    const parteFiscal = { fob: partes(q, 'fob'), peso: (q.items || []).some(it => it && (+it.q || 0) * (+it.p || 0) > 0) ? partes(q, 'peso') : partes(q, 'fob') };
+    const parteComercial = Object.fromEntries(GRUPOS_RATEIO.map(([g]) => [g, partes(q, regraEfetiva(q, g).regra)]));
+    const clientes = cs.map(c => {
+      const qc = cotacaoDoCliente(q, c.id), brl = c.margemModo === 'brl';
+      const R = calcular(qc, Object.assign({}, opcoes, { modo: brl ? 'brl' : 'pct' }));
+      const custoPor = {}; let ajuste = 0;
+      GRUPOS_RATEIO.forEach(([g]) => { const fis = (g === 'afrmm' ? parteFiscal.peso : parteFiscal.fob)[c.id], com = parteComercial[g][c.id];
+        custoPor[g] = valorGrupo[g] * com; ajuste += valorGrupo[g] * (com - fis); });
+      const custoBase = R.tri ? R.tri.custoGrupo : R.custoReal, custo = custoBase + ajuste, m = brl ? N(qc.fields, 'margemBRL') : custo * (N(qc.fields, 'margemPct') / 100);
+      R.custoReal = R.custoReal + ajuste;
+      R.compra += custoPor.frete + custoPor.seguro - (valorGrupo.frete * parteFiscal.fob[c.id] + valorGrupo.seguro * parteFiscal.fob[c.id]);
+      R.despesas = custoPor.demais + custoPor.siscomex + custoPor.afrmm + custoPor.honorarios + custoPor.capatazia + custoPor.terrestre;
+      R.comp = { fob: R.fob, freteInt: custoPor.frete, terrestre: custoPor.terrestre, seguro: custoPor.seguro, portuarias: custoPor.capatazia + custoPor.siscomex + custoPor.afrmm + custoPor.demais, honorarios: custoPor.honorarios };
+      R.margem = m; R.margemBRLCampo = +m.toFixed(2); R.margemPctCampo = brl ? (custo > 0 ? +((m / custo) * 100).toFixed(1) : 0) : N(qc.fields, 'margemPct');
+      R.warnMargem = R.margemPctCampo < 10 && custo > 0;
+      if (R.tri) { R.tri.custoGrupo = custo; R.tri.P = custo + m; R.preco = custo + m; }
+      else R.preco = custo + (R.st || 0) + m;
+      R.margemSobrePreco = R.preco > 0 ? (m / R.preco) * 100 : null;
+      R.ajusteRateio = ajuste; R.custoPor = custoPor;
+      return { id: c.id, nome: c.nome, cliente: c, R, q: qc, custo };
+    });
+    const soma = fn => clientes.reduce((a, c) => a + fn(c), 0);
+    const total = { custo: soma(c => c.custo), preco: soma(c => c.R.preco), st: soma(c => c.R.tri ? 0 : c.R.st || 0), margem: soma(c => c.R.margem), fob: soma(c => c.R.fob) };
+    /* TRAVA: cada grupo de custo fecha com o total do contêiner, e os impostos com os da cotação inteira. */
+    const travas = [], cent = v => (Math.round(v * 100) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const confere = (rot, a, b) => { if (Math.abs(a - b) > 0.01) travas.push({ codigo: 'RATEIO_CLIENTES', msg: `${rot}: a soma dos clientes (R$ ${cent(a)}) não bate com o total do contêiner (R$ ${cent(b)}).` }); };
+    GRUPOS_RATEIO.forEach(([g, rot]) => confere(rot, soma(c => c.R.custoPor[g]), valorGrupo[g]));
+    const inteira = calcular(Object.assign({}, q, { fields: Object.assign({}, f, { tipoOp: 'direta', ufDestino: cs[0].ufDestino }) }), opcoes);
+    confere('FOB', total.fob, inteira.fob);
+    const tributo = (c, k, chave) => (c.R.tri ? c.R.tri.apuracao.bloco1[k] : c.R[chave]);
+    [['II', 'II', '__ii'], ['IPI', 'IPI', '__ipi'], ['PIS', 'PISimp', '__pis'], ['COFINS', 'COFimp', '__cof']].forEach(([rot, k, chave]) => confere(rot, soma(c => tributo(c, k, chave)), inteira[chave]));
+    /* Todos diretos: não há perna de saída diferente, então o custo total tem de bater inteiro. */
+    if (clientes.every(c => !c.R.tri)) confere('Custo total', total.custo, inteira.custoReal);
+    return { multi: true, clientes, total, travas, avisos: conf.avisos, erros: [] };
+  }
+
   /* ==== Lista (qindex) e gravação ==== */
   /** Monta o registro de quotes[id] e a entrada de qindex — mesmo formato do saveQuote. */
   function snapshot(q, R) {
@@ -762,5 +903,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });
