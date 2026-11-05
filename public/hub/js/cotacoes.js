@@ -476,6 +476,19 @@
   }
   function criarOperacao(confirmado) {
     const r = W.operacaoDaCotacao(H.db, ed, R, eu(), W.hojeISO());
+    const linhaLanc = l => `<div class="row"><span>${esc(l.desc || '')}<br><small class="note">${esc(l.op || '')} · ${esc(l.status || '')} · vencimento ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(+l.valor || 0)}</span></div>`;
+    if (r.outraOp && confirmado !== true) {
+      const m = H.modal('Cotação já lançada em outra operação', `<p>Esta cotação já tem <b>${r.emOutraOp.length} lançamento(s)</b> no Financeiro, mas em outra operação:</p>
+        <div class="list" style="margin-top:8px">${r.emOutraOp.map(linhaLanc).join('')}</div>
+        <p class="note" style="margin-top:8px">Se a <b>${esc(r.id)}</b> é outra operação, lance o cronograma dela. Se é a mesma operação com outro número, cancele: lançar duplicaria os valores.</p>`,
+        `<button class="btn" data-x>Cancelar</button><button class="btn pri" id="rlok">Lançar na ${esc(r.id)}</button>`);
+      m.querySelector('#rlok').onclick = () => { H.fecharModal(); criarOperacao(true); };
+      return;
+    }
+    if (r.jaLancado) {
+      H.modal('Cronograma já lançado', `<p>A operação <b>${esc(r.id)}</b> já tem todo o cronograma desta cotação. Nada foi duplicado. Estes são os lançamentos:</p><div class="list" style="margin-top:8px">${r.existentes.map(linhaLanc).join('')}</div>
+        <p class="note" style="margin-top:8px">Se não os vê no Financeiro, confira o mês e a empresa dos filtros.</p>`, '<button class="btn" data-x>Fechar</button>');
+    }
     if (r.relancar && confirmado !== true) {
       const m = H.modal('Relançar no Financeiro', `<p>A operação <b>${esc(r.id)}</b> ainda tem <b>${r.jaExistem} lançamento(s)</b> desta cotação, que ficam como estão. Faltam estes, que serão lançados de novo como previstos:</p>
         <div class="list" style="margin-top:8px">${r.lancamentos.map(l => `<div class="row"><span>${esc(l.desc)}<br><small class="note">${esc(l.tipo)} · vencimento ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(l.valor)}</span></div>`).join('')}</div>
@@ -493,7 +506,7 @@
       if (!H.db.checklists[r.id] && H.CHK_MODELO) H.db.checklists[r.id] = H.CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
     }
     if (H.db.quotes[ed.id]) W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
-    if (r.jaLancado) { H.salvar(); return H.toast(`Operação <b>${esc(r.id)}</b> já tem todo o cronograma no Financeiro: nada foi duplicado.`); }
+    if (r.jaLancado) { H.salvar(); return; }
     H.db.fin.unshift(...r.lancamentos);
     H.salvar();
     if (r.relancar) return H.toast(`<b>${r.lancamentos.length} lançamento(s)</b> relançado(s) no Financeiro para a ${esc(r.id)}.`);

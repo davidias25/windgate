@@ -93,7 +93,7 @@ console.log('\nRelançar no Financeiro:');
   H.db.checklists = {}; H.db.opStatusHist = [];
   const marca = 'cotacao:q1';
   H.db.ops = [{ id: 'OP90', quoteId: 'q1' }];
-  H.db.fin = [{ _id: 'a', origem: marca, tipo: 'Receita', desc: '1º recebimento do cliente — parcela 1', data: '2026-10-01', valor: 10, status: 'Realizado' }];
+  H.db.fin = [{ _id: 'a', origem: marca, op: 'OP90', tipo: 'Receita', desc: '1º recebimento do cliente — parcela 1', data: '2026-10-01', valor: 10, status: 'Realizado' }];
   el.querySelector('#cop').onclick();
   ok(modal && H.db.fin.length === 1, 'parte excluída: pergunta antes e ainda não lança nada');
   ok(corpo.includes('3º pagamento') && !corpo.includes('1º recebimento') && corpo.includes('1 lançamento(s)'), 'a janela lista o que falta e diz quantos ficam como estão');
@@ -101,7 +101,14 @@ console.log('\nRelançar no Financeiro:');
   ok(H.db.fin.length > 1 && H.db.fin.filter(l => /^1º recebimento/.test(l.desc)).length === 1 && /relançado/.test(toast), 'confirmando, lança o que falta e não duplica o que ficou');
   const n = H.db.fin.length; modal = null;
   el.querySelector('#cop').onclick();
-  ok(!modal && H.db.fin.length === n && /nada foi duplicado/.test(toast), 'clicar de novo não lança nada');
+  ok(H.db.fin.length === n && /Nada foi duplicado/.test(corpo) && corpo.includes('OP90') && !corpo.includes('Relançar'), 'clicar de novo não lança nada e mostra onde estão os lançamentos');
+  /* Cotação reaproveitada: os lançamentos estão em outro número. */
+  H.db.fin = [{ _id: 'b', origem: marca, op: 'OP89', tipo: 'Receita', desc: '1º recebimento do cliente — parcela 1', data: '2026-10-01', valor: 10, status: 'Previsto', vencimento: '2026-10-06' }];
+  modal = null;
+  el.querySelector('#cop').onclick();
+  ok(modal && H.db.fin.length === 1 && corpo.includes('OP89') && corpo.includes('duplicaria'), 'lançamentos em outra operação: mostra e pergunta antes');
+  modal.querySelector('#rlok').onclick();
+  ok(H.db.fin.filter(l => l.op === 'OP90').length > 0 && H.db.fin.some(l => l._id === 'b'), 'confirmando, lança na operação certa e não mexe na outra');
   H.modal = m0; H.toast = t0;
 }
 

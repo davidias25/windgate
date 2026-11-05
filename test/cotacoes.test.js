@@ -187,6 +187,21 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     ok(r6.op && r6.relancar && r6.lancamentos.length === 1, 'operação excluída e recriada: volta a operação e só o que falta');
   }
 
+  console.log('\nMesma cotação reaproveitada para outro número:');
+  {
+    const qNova = Object.assign({}, qOp, { fields: Object.assign({}, qOp.fields, { opNum: 'op77.2' }) });
+    const r7 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qNova, C.calcular(qNova), 'Samir', '2026-11-20');
+    ok(r7.id === 'OP77.2' && r7.op && !r7.jaLancado && r7.outraOp && r7.lancamentos.length === 6 && r7.lancamentos.every(l => l.op === 'OP77.2'), 'OP77.2 não conta os lançamentos da OP77: oferece o cronograma inteiro');
+    ok(r7.emOutraOp.length === 6 && r7.emOutraOp[0].op === 'OP77', 'e mostra os que estão na OP77');
+    const fin8 = r1.lancamentos.concat(r7.lancamentos);
+    const r8 = C.operacaoDaCotacao({ ops: [r1.op, r7.op], fin: fin8 }, qNova, C.calcular(qNova), 'Samir', '2026-11-20');
+    ok(r8.jaLancado && !r8.outraOp && !r8.lancamentos.length && r8.existentes.length === 6, 'depois de lançada, a OP77.2 não duplica');
+    const r9 = C.operacaoDaCotacao({ ops: [r1.op, r7.op], fin: fin8 }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(r9.jaLancado && r9.existentes.every(l => l.op === 'OP77'), 'e a OP77 continua vendo só os dela');
+    const r10 = C.operacaoDaCotacao({ ops: [], fin: r1.lancamentos.map(l => Object.assign({}, l, { op: ' op77 ' })) }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
+    ok(r10.jaLancado, 'espaço e maiúscula no código da operação não enganam a regra');
+  }
+
   console.log('\nTaxas do dólar pela PTAX de compra:');
   {
     const t = C.taxasDaPtax(5.4321);

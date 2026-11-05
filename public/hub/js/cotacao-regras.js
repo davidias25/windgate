@@ -820,7 +820,9 @@ function triCalcular(e){
   const CRONO_OP = [{ dias: 5, rot: '1º' }, { dias: 35, rot: '2º' }, { dias: 95, rot: '3º' }];
   const somaDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
   /**
-   * Devolve { op (nova ou null se já existe), lancamentos[], jaLancado, relancar, jaExistem }.
+   * Devolve { op (nova ou null se já existe), lancamentos[], jaLancado, relancar, jaExistem, existentes[], outraOp, emOutraOp[] }.
+   * A marca é da cotação, e a mesma cotação pode ter sido reaproveitada para outro número: lançamento
+   * em outra operação não conta como "já lançado", mas é mostrado, porque pode ser a mesma operação renomeada.
    * Aprovar de novo não duplica o cronograma (marca origem 'cotacao:<id>'): só volta o que foi
    * excluído, com as datas do cronograma original. Lançamento que continua lá não é tocado.
    */
@@ -830,7 +832,8 @@ function triCalcular(e){
     const existe = (db.ops || []).find(o => o && o.id === id);
     const op = existe ? null : { _id: W.novoId(), id, nome: f.mercadoria || f.cliente, cliente: f.cliente, status: '', prox: 'Emitir contrato e cobrar 1ª parcela', resp: 'Davi', obs: 'Criada a partir da cotação aprovada', criadaEm: new Date().toISOString(), quoteId: q.id };
     const marca = 'cotacao:' + (q.id || id);
-    const existentes = (db.fin || []).filter(l => l && l.origem === marca);
+    const daCotacao = (db.fin || []).filter(l => l && l.origem === marca), mesmaOp = l => String(l.op || '').trim().toUpperCase() === id.trim();
+    const existentes = daCotacao.filter(mesmaOp), emOutraOp = daCotacao.filter(l => !mesmaOp(l));
     // Mesma parcela: mesmo tipo e o começo da descrição ("2º pagamento"), que é o que o sistema antigo também grava.
     const jaTem = (tipo, rot, palavra) => existentes.some(l => l.tipo === tipo && String(l.desc || '').startsWith(rot + ' ' + palavra));
     const origens = existentes.map(l => l.data).filter(W.ehISO).sort();
@@ -847,7 +850,7 @@ function triCalcular(e){
       if (!jaTem('Receita', CRONO_OP[k].rot, 'recebimento')) lancar(venc, 'Receita', CRONO_OP[k].rot + ' recebimento do cliente — parcela ' + CRONO_OP[k].rot.replace('º', ''), recebe[k]);
       if (!jaTem('Despesa', CRONO_OP[k].rot, 'pagamento')) lancar(venc, 'Despesa', CRONO_OP[k].rot + ' pagamento — ' + descPag[k], paga[k]);
     }
-    return { id, op, lancamentos: out, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length };
+    return { id, op, lancamentos: out, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
   }
 
   /* ==== Cotação aprovada no funil do CRM ====
