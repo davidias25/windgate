@@ -14,12 +14,15 @@
     [/busan/i, 'Busan', 35.1, 129.04], [/miami/i, 'Miami', 25.76, -80.19], [/mariel/i, 'Mariel', 23.0, -82.75],
     [/itaja[ií]/i, 'Itajaí', -26.9, -48.66], [/navegantes/i, 'Navegantes', -26.9, -48.65], [/paranagu[aá]/i, 'Paranaguá', -25.5, -48.52], [/salvador/i, 'Salvador', -12.97, -38.5],
     [/cangzhou/i, 'Cangzhou', 38.3, 116.85], [/tangshan/i, 'Tangshan', 39.63, 118.18], [/changsha/i, 'Changsha', 28.23, 112.94], [/xuzhou/i, 'Xuzhou', 34.26, 117.19],
+    [/lianyungang/i, 'Lianyungang', 34.74, 119.45], [/yantai/i, 'Yantai', 37.54, 121.39], [/rizhao/i, 'Rizhao', 35.38, 119.55], [/zhangjiagang/i, 'Zhangjiagang', 31.97, 120.43], [/taicang/i, 'Taicang', 31.65, 121.1], [/nanjing/i, 'Nanjing', 32.06, 118.8],
+    [/fuzhou/i, 'Fuzhou', 26.05, 119.3], [/weihai/i, 'Weihai', 37.5, 122.12], [/yingkou/i, 'Yingkou', 40.67, 122.23], [/hong ?kong/i, 'Hong Kong', 22.3, 114.17], [/kaohsiung/i, 'Kaohsiung', 22.62, 120.3], [/haikou/i, 'Haikou', 20.02, 110.35],
     [/yongkang/i, 'Yongkang', 28.9, 120.04], [/yiwu/i, 'Yiwu', 29.31, 120.07], [/hangzhou/i, 'Hangzhou', 30.27, 120.15], [/foshan/i, 'Foshan', 23.02, 113.12]
   ];
   /* Porto criado pela equipe (db.portos) vale primeiro, se tiver coordenadas. */
   const porto = txt => {
-    const nome = String(txt || '').trim(), meu = nome && (H.db.portos || {})[nome];
-    if (Array.isArray(meu) && meu.length === 2) return { nome, ll: [+meu[0], +meu[1]] };
+    const nome = String(txt || '').trim(), minusc = nome.toLowerCase(), portos = H.db.portos || {};
+    const chave = nome && Object.keys(portos).find(k => k.toLowerCase() === minusc), meu = chave && portos[chave];
+    if (Array.isArray(meu) && meu.length === 2 && isFinite(+meu[0]) && isFinite(+meu[1])) return { nome: chave, ll: [+meu[0], +meu[1]] };
     const p = PORTOS.find(x => x[0].test(nome)); return p ? { nome: p[1], ll: [p[2], p[3]] } : null;
   };
   /* Rota marítima simplificada Ásia → Brasil (via Singapura e Cabo da Boa Esperança). */
@@ -49,9 +52,13 @@
     const ops = db.ops.filter(o => o && W.ativa(o) && !['cotacao', 'contrato'].includes(o.status));
     const pos = ops.map(o => ({ o, p: posicaoEstimada(o, hoje) }));
     const fora = pos.filter(x => !x.p).map(x => x.o);
+    /* Quem tem texto no campo não está "sem porto": o nome é que não foi reconhecido, e dá para cadastrar. */
+    const semPorto = fora.filter(o => !String(o.origemPorto || o.fabricaCidade || '').trim());
+    const naoReconhecido = fora.filter(o => String(o.origemPorto || o.fabricaCidade || '').trim());
     el.innerHTML = `
       <div class="head"><div><h1>Mapa & Tracking</h1><p class="sub">Onde está cada operação agora. Posição estimada pelo embarque e ETA até o tracking automático por contêiner entrar.</p></div></div>
-      ${fora.length ? `<div class="banner" style="margin-bottom:12px"><b>${fora.length} operação(ões) fora do mapa:</b> sem porto de origem, não dá para estimar a posição. Informe o porto ou a cidade da fábrica na aba Resumo: ${fora.map(o => `<a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a>`).join(', ')}.</div>` : ''}
+      ${semPorto.length ? `<div class="banner" style="margin-bottom:12px"><b>${semPorto.length} operação(ões) fora do mapa, sem porto de origem:</b> informe o porto ou a cidade da fábrica na aba Resumo: ${semPorto.map(o => `<a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a>`).join(', ')}.</div>` : ''}
+      ${naoReconhecido.map(o => `<div class="banner" style="margin-bottom:12px"><b><a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a> fora do mapa:</b> o mapa não conhece "${esc(o.origemPorto || o.fabricaCidade)}". Confira a grafia na aba Resumo ou <button class="btn sm" data-cadporto="${esc(o.origemPorto || o.fabricaCidade)}">cadastre as coordenadas</button></div>`).join('')}
       <div class="box box-b"><div id="mapa" role="img" aria-label="Mapa com a posição das operações"></div>
         <p class="note" style="margin-top:8px">● magenta: no mar · ● azul: na fábrica ou no destino · operações no mesmo navio aparecem juntas.</p></div>
       <div class="box"><div class="box-h"><h2>Situação por operação</h2><span class="note">${ops.length} operação(ões) em andamento</span></div>
@@ -64,6 +71,17 @@
           <td>${o.tracking ? `<a href="${esc(o.tracking)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">armador ↗</a>` : '<span class="note">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">Nenhuma operação em produção ou trânsito.</td></tr>'}
         </tbody></table></div></div>`;
     el.querySelectorAll('[data-op]').forEach(x => x.onclick = e => { e.preventDefault(); H.ir('ficha', x.dataset.op); });
+    el.querySelectorAll('[data-cadporto]').forEach(b => b.onclick = () => {
+      const nome = b.dataset.cadporto;
+      const m = H.modal('Cadastrar porto', `<p>Coordenadas de <b>${esc(nome)}</b>, que você encontra no Google Maps.</p><div class="fields" style="margin-top:8px"><div class="f w2"><label class="lbl" for="plat">Latitude</label><input id="plat" inputmode="decimal" placeholder="34,74"></div><div class="f w2"><label class="lbl" for="plon">Longitude</label><input id="plon" inputmode="decimal" placeholder="119,45"></div></div>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="pok">Salvar</button>');
+      m.querySelector('#pok').onclick = () => {
+        const n = s => parseFloat(String(m.querySelector(s).value).replace(',', '.')), la = n('#plat'), lo = n('#plon');
+        if (!(Math.abs(la) <= 90) || !(Math.abs(lo) <= 180)) return H.toast('Latitude de −90 a 90 e longitude de −180 a 180.');
+        if (!H.db.portos) H.db.portos = {};
+        H.db.portos[nome] = [la, lo]; H.salvar(); H.fecharModal(); H.toast('Porto cadastrado.'); H.render();
+      };
+    });
 
     if (typeof L === 'undefined') { el.querySelector('#mapa').innerHTML = '<p class="empty">Mapa indisponível sem internet.</p>'; return; }
     if (mapa) { mapa.remove(); mapa = null; }
@@ -71,7 +89,8 @@
     // Quadros do OpenStreetMap (sem chave; a CARTO passou a exigir chave e mostrava "API KEY REQUIRED").
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>', maxZoom: 10 }).addTo(mapa);
     const grupos = {};
-    pos.forEach(({ o, p }) => { if (!p) return; const k = (o.navio || o.id) + '|' + p.ll.map(x => x.toFixed(1)).join(','); (grupos[k] = grupos[k] || { p, ops: [] }).ops.push(o); });
+    // Mesmo ponto, mesmo marcador: um nome em cima do outro escondia a operação.
+    pos.forEach(({ o, p }) => { if (!p) return; const k = p.ll.map(x => x.toFixed(1)).join(','); (grupos[k] = grupos[k] || { p, ops: [] }).ops.push(o); });
     const limites = [];
     Object.values(grupos).forEach(({ p, ops }) => {
       const mar = p.frac != null;

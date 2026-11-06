@@ -119,8 +119,15 @@ console.log('\nMapa:');
   H.db = { portos: { 'Porto Novo': [10, 20] }, ops: [{ id: 'OP24', cliente: 'A', status: 'embarcado', embarque: '2026-10-11', eta: '2026-12-22', origemPorto: '', fabricaCidade: '' }, { id: 'OP23', status: 'embarcado', origemPorto: 'Qingdao', destinoPorto: 'Pecém', embarque: '2026-10-11', eta: '2026-12-22' },
     { id: 'OP30', status: 'producao', origemPorto: 'Itajaí' }, { id: 'OP31', status: 'producao', fabricaCidade: 'Tangshan (Hebei)' }, { id: 'OP32', status: 'producao', origemPorto: 'Porto Novo' }, { id: 'OP33', status: 'cotacao' }] };
   const el = criarNo(); H.telas.mapa(el); const h = el.innerHTML;
-  ok(h.includes('1 operação(ões) fora do mapa') && h.includes('<a href="#" data-op="OP24">OP24</a>'), 'operação sem porto de origem é apontada, com link para a ficha');
+  ok(h.includes('1 operação(ões) fora do mapa, sem porto de origem') && h.includes('<a href="#" data-op="OP24">OP24</a>'), 'operação sem porto de origem é apontada, com link para a ficha');
   ok(h.split('fora do mapa').length === 3, 'só ela fica fora: Itajaí, Tangshan e porto criado pela equipe entram no mapa');
+  H.db.ops[0].origemPorto = 'Porto Desconhecido'; const e3 = criarNo(); H.telas.mapa(e3);
+  ok(e3.innerHTML.includes('o mapa não conhece "Porto Desconhecido"') && e3.innerHTML.includes('data-cadporto="Porto Desconhecido"') && !e3.innerHTML.includes('sem porto de origem'), 'porto informado e não reconhecido: diz o nome e oferece cadastrar, sem dizer que falta o porto');
+  H.db.portos['porto desconhecido'] = [1, 2]; const e4 = criarNo(); H.telas.mapa(e4);
+  ok(!e4.innerHTML.includes('fora do mapa'), 'porto cadastrado entra, sem depender de maiúsculas');
+  H.db.ops[0].origemPorto = 'Lianyungang'; const e5 = criarNo(); H.telas.mapa(e5);
+  ok(!e5.innerHTML.includes('fora do mapa'), 'novos portos da China são reconhecidos');
+  H.db.ops[0].origemPorto = '';
   ok(!h.includes('OP33'), 'operação em cotação continua fora do mapa, como antes');
   H.db.ops[0].origemPorto = 'Qingdao'; const e2 = criarNo(); H.telas.mapa(e2);
   ok(!e2.innerHTML.includes('fora do mapa'), 'com o porto informado, o aviso some');
