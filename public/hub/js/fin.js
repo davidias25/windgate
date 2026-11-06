@@ -88,10 +88,39 @@
         <div class="kpi"><span class="lbl">Próximos 7 dias</span><span class="v">${W.fmtBRLk(soma(prox7))}</span><span class="d">${prox7.length} conta(s)</span></div>
         <div class="kpi"><span class="lbl">${abaContas === 'pagar' ? 'Aguardando autorização' : 'Total em aberto'}</span><span class="v">${abaContas === 'pagar' ? aguardando.length : W.fmtBRLk(soma(lista))}</span><span class="d">${abaContas === 'pagar' ? 'Davi prepara · Samir autoriza' : lista.length + ' conta(s)'}</span></div>
       </div>
+      <div id="bcamb"></div>
       <div class="box">${tabelaLanc(lista, { contas: true })}</div>`;
     ligarTopo(el); ligarLanc(el);
+    if (abaContas === 'receber') blocoCambio(el.querySelector('#bcamb'), hoje);
     el.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { abaContas = b.dataset.c; H.render(); });
   };
+
+  /* Correção cambial das parcelas: o sistema calcula e mostra; quem confirma é uma pessoa com fin.lancar. */
+  const ptaxesDia = {};
+  async function buscarPtaxes(datas) {
+    for (const d of datas) {
+      if (ptaxesDia[d]) continue;
+      try { const j = await (await H.api('/api/cambio/ptax/' + d)).json(); if (j.success && j.ptax) ptaxesDia[d] = j.ptax.compra; } catch (e) { /* tenta de novo ao voltar à tela */ }
+    }
+  }
+  async function blocoCambio(box, hoje) {
+    if (!box) return;
+    const lista = W.parcelasComCambio(H.db, hoje).filter(p => p.pendente || p.chegou);
+    if (!lista.length) { box.innerHTML = ''; return; }
+    await buscarPtaxes([...new Set(lista.flatMap(p => p.datas))]);
+    if (!box.isConnected) return;
+    const n = v => (+v || 0).toFixed(4).replace('.', ','), pode = H.pode('fin.lancar');
+    box.innerHTML = `<div class="box"><div class="box-h"><h2>Correção cambial das parcelas</h2><span class="note">confira e confirme: o sistema não altera a parcela sozinho</span></div><div class="tw"><table><thead><tr><th>Parcela</th><th>PTAX</th><th class="num">Referência</th><th class="num">Valor</th><th class="num">Ajuste</th><th class="num">Corrigido</th><th></th></tr></thead><tbody>
+      ${lista.map(p => { const c = W.calcularAjusteLancamento(H.db, p.l, ptaxesDia, hoje), rot = `<b class="mono">${esc(p.o.id)}</b> ${p.n}ª parcela<br><small class="note">${esc(p.o.cliente || '')}</small>`;
+        if (c.erro) return `<tr><td>${rot}</td><td colspan="6" class="note">${esc(c.erro)}</td></tr>`;
+        return `<tr><td>${rot}</td><td class="mono">${n(c.ptax)}<br><small class="note">${W.dataBR(c.data)}${c.atraso ? ' · maior PTAX, em atraso' : ''}</small></td><td class="num">${n(c.referencia)}</td><td class="num">${W.fmtBRL(c.valorOriginal)}</td><td class="num">${c.dentro ? 'na faixa' : W.fmtBRL(c.ajuste)}</td><td class="num"><b>${W.fmtBRL(c.corrigido)}</b></td><td>${pode ? `<button class="btn sm" data-ajc="${esc(p.l._id)}">Confirmar</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+    box.querySelectorAll('[data-ajc]').forEach(b => b.onclick = () => {
+      const l = H.db.fin.find(x => x && x._id === b.dataset.ajc); if (!l) return;
+      const r = W.confirmarAjusteCambial(l, W.calcularAjusteLancamento(H.db, l, ptaxesDia, hoje), H.nomeUsuario(H.userKey));
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.toast('Parcela corrigida.'); H.render();
+    });
+  }
 
   /* ================= LANÇAMENTOS ================= */
   H.telas.lanc = function (el) {

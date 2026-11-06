@@ -26,4 +26,20 @@ async function ptax(fetchImpl, agora) {
   if (!dado) throw new Error('Sem cotação PTAX no período.');
   cache = { t, dado }; return dado;
 }
-module.exports = { ptax, interpretar, _reset: () => { cache = null; } };
+/* PTAX de uma data: não muda depois de publicada, então fica guardada sem prazo. */
+const porData = new Map();
+async function ptaxDoDia(data, fetchImpl) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(data || ''));
+  if (!m) throw new Error('Data inválida.');
+  if (porData.has(data)) return porData.get(data);
+  const dia = `${m[2]}-${m[3]}-${m[1]}`;
+  const url = `${URL_BCB}?@dataInicial='${dia}'&@dataFinalCotacao='${dia}'&$format=json&$orderby=dataHoraCotacao%20asc`;
+  const r = await (fetchImpl || fetch)(url, { headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error('Banco Central indisponível (' + r.status + ')');
+  const v = ((await r.json()).value || []).slice(-1)[0];
+  if (!v) return null;
+  const dado = { data, compra: +v.cotacaoCompra, venda: +v.cotacaoVenda, em: v.dataHoraCotacao };
+  porData.set(data, dado);
+  return dado;
+}
+module.exports = { ptax, ptaxDoDia, interpretar, _reset: () => { cache = null; porData.clear(); } };

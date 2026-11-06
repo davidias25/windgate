@@ -148,6 +148,7 @@
             <div class="f"><label class="lbl" for="cf_margemBRL">Margem (R$)</label><input id="cf_margemBRL" class="inp" data-marg="brl" value="${esc(F('margemBRL'))}" inputmode="decimal" ${bloq ? 'disabled' : ''}></div></div>
           <p class="note" style="margin-top:8px">Referência histórica (mai/25–jul/26): margem líquida mediana ≈26% s/ receita · faixa 10%–50%. Aço/escoras 13%–43% · Máquinas 10%–18% · cotações pequenas 45%+.</p>`}
           <div id="cpreco" style="margin-top:10px"></div>
+          <div id="ccambio" style="margin-top:12px"></div>
           <div class="btns" style="margin-top:10px;flex-direction:column;align-items:stretch">
             ${ed.status === 'draft' ? '<button class="btn blue" id="cenvia">Enviar para aprovação · Samir</button>' : ''}
             ${ed.status === 'wait' && podeAprovar() ? `${multi ? '' : '<button class="btn pri" id="caprova">Aprovar margem e liberar proposta</button>'}<button class="btn" id="cdevolve">Devolver para ajuste</button>` : ''}
@@ -198,6 +199,7 @@
       : (R.st || 0) > 0 ? `As parcelas fecham com <b>${fmt(base)}</b>: preço ${fmt(R.preco || 0)} menos o ICMS-DIFAL ${fmt(R.st || 0)}, que o cliente recolhe em guia própria.` : `As parcelas fecham com <b>${fmt(base)}</b>, o preço aprovado.`)
       + (base > 0 && soma ? ' ' + (Math.abs(soma - base) <= 0.05 ? pill('as 3 somam 100%', 'ok') : pill('as 3 somam ' + (soma / base * 100).toFixed(1) + '%', 'crit')) : '');
     const errs = W.desemErros(ed, R), preenchido = rs.some(Boolean);
+    painelCambio(el);
     el.querySelector('#cderr').innerHTML = errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? '<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> em todas as etapas o recebimento cobre a saída e a soma fecha com o valor a receber.</div>' : '';
   }
 
@@ -237,8 +239,36 @@
         ${[[1, '1 · Assinatura'], [2, '2 · Produto pronto'], [3, '3 · Chegada ao porto']].map(([n, t]) => `<tr><td><b>${t}</b></td><td class="num" id="cmo_${esc(c.id)}_${n}">—</td><td class="num">${inpCli(c, 'desR' + n, 130, { num: true })}</td><td id="cms_${esc(c.id)}_${n}"></td></tr>`).join('')}</tbody></table></div>
         <div id="cme_${esc(c.id)}"></div></div>`).join('')}</div></div>`;
   }
+  /* ================= CÂMBIO DA PROPOSTA: painel interno, nunca vai para o cliente ================= */
+  const num4 = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const ptaxDaProposta = () => (ed.cambioProposta && ed.cambioProposta.ptax) || parseFloat(String(F('ptaxProposta') || '').replace(',', '.')) || (H.ptax && +H.ptax.compra) || 0;
+  function tabelaSimulacao(q, nome) {
+    const s = W.simulacaoCambio(q, ptaxDaProposta()); if (!s) return '';
+    return `${nome ? `<p class="lbl" style="margin-top:10px">${esc(nome)}</p>` : ''}<div class="tw"><table><thead><tr><th>Dólar</th><th>Parcela</th><th class="num">Cliente</th><th class="num">Custo</th><th class="num">Lucro</th></tr></thead><tbody>
+      ${s.cenarios.map(c => c.parcelas.map((p, i) => `<tr>${i === 0 ? `<td rowspan="3" class="mono">${num4(c.dolar)}<br><small class="note">${c.delta > 0 ? '+' : ''}${c.delta.toFixed(2).replace('.', ',')}${c.dentro ? ' · na faixa' : ''}</small></td>` : ''}<td>${p.n}ª</td><td class="num">${fmt(p.preco)}</td><td class="num">${fmt(p.custo)}</td><td class="num" style="${p.lucro < 0 ? 'color:var(--crit);font-weight:700' : ''}">${fmt(p.lucro)}</td></tr>`).join('')).join('')}</tbody></table></div>`;
+  }
+  function painelCambio(el, clientes) {
+    const box = el.querySelector('#ccambio'); if (!box) return;
+    const congelado = !!ed.cambioProposta, ptax = ptaxDaProposta(), ref = W.referenciaDaProposta(ptax), bloq = travada();
+    const campoAtivo = document.activeElement && document.activeElement.id === 'cptaxprop';
+    if (!campoAtivo) box.innerHTML = `<h3 class="h3">Câmbio da proposta</h3>
+      <div class="f" style="margin:6px 0"><label class="lbl" for="cptaxprop">PTAX do dia da proposta</label><input class="inp" id="cptaxprop" inputmode="decimal" value="${ptax ? ptax.toFixed(4).replace('.', ',') : ''}" ${congelado || bloq ? 'disabled' : ''}></div><div id="ccamb2"></div>`;
+    const b2 = el.querySelector('#ccamb2');
+    b2.innerHTML = ref ? `<p class="note">Referência <b>${num4(ref.referencia)}</b> · faixa ${num4(ref.piso)} a ${num4(ref.teto)}${congelado ? ' · fixada na aprovação' : ''}. Simulação interna: não vai para o cliente.</p>${clientes ? clientes.map(c => tabelaSimulacao(c.q, c.nome)).join('') : tabelaSimulacao(ed)}` : '<p class="note">Informe a PTAX do dia para ver a simulação. A aprovação fixa a referência.</p>';
+    const i = el.querySelector('#cptaxprop');
+    if (i && !campoAtivo) i.oninput = () => { ed.fields.ptaxProposta = i.value; painelCambio(el, clientes); };
+  }
+  /** Fixa a referência na aprovação. Sem PTAX, a aprovação espera. */
+  function fixarCambio() {
+    if (ed.cambioProposta) return true;
+    const ptax = ptaxDaProposta(); if (!ptax) { H.toast('Informe a <b>PTAX do dia da proposta</b> antes de aprovar.'); return false; }
+    ed.cambioProposta = W.congelarCambio(ed, ptax, W.hojeISO());
+    return true;
+  }
+
   function atualizarMulti(el) {
     const rm = W.calcularPorCliente(ed, { usuario: eu() });
+    if (rm.clientes.length) painelCambio(el, rm.clientes.map(c => ({ q: c.q, nome: c.nome })));
     R = { preco: rm.total ? rm.total.preco : 0 };
     const txD = parseFloat(F('txDesp')) || 0;
     ed.items.forEach((it, i) => { const c = el.querySelector('#cfob_' + i); if (c) c.textContent = fmt((+it.q || 0) * (+it.u || 0) * txD); });
@@ -440,6 +470,8 @@
       else if (W.revisarAprovacoes(ed).length) { r.revogou = true; r.registro.status = 'wait'; r.registro.aprovadoPor = null; }
       r.registro.clientes = ed.clientes;
     }
+    // Preço mudou e voltou para aprovação: a nova aprovação fixa a referência de novo.
+    if (r.revogou) { delete ed.cambioProposta; delete r.registro.cambioProposta; }
     ed.id = r.registro.id; ed.status = r.registro.status; ed.aprovadoPor = r.registro.aprovadoPor;
     H.db.quotes[ed.id] = r.registro;
     const ix = H.db.qindex.findIndex(x => x && x.id === ed.id);
@@ -479,6 +511,7 @@
   /* Aprova um cliente. Com o último, a cotação fica aprovada e segue o caminho de sempre. */
   function aprovarCli(el, id) {
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
+    if (!fixarCambio()) return;
     const r = W.aprovarCliente(ed, id, eu());
     if (!r.ok) return H.toast('⛔ <b>Não aprova:</b> ' + esc(r.msg));
     if (!r.todos) { salvar(true); H.toast('Cliente aprovado.'); return editor(el); }
@@ -513,6 +546,7 @@
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
     const errs = W.desemErros(ed, R);
     if (errs.length) return H.toast('⛔ <b>Não aprova com desembolso furado:</b> ' + esc(errs[0]));
+    if (!fixarCambio()) return;
     ed.aprovadoPor = eu(); ed.status = 'ok';
     const anterior = H.db.quotes[ed.id];
     // Aprovar é gravar o status novo sobre a mesma cotação: passa pela regra sem o bloqueio de "aprovada".

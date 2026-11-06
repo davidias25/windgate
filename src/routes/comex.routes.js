@@ -16,6 +16,10 @@ module.exports = function registrar(app, ctx) {
   const veFin = req => quemChat(req) === '(sem-auth)' || W.pode(db() || {}, quemChat(req), 'fin.ver');
 
   /* Dólar do dia */
+  app.get('/api/cambio/ptax/:data', auth.exigirTokenSeAtiva, async (req, res) => {
+    try { const d = await cambio.ptaxDoDia(req.params.data); res.json({ success: true, ptax: d }); }
+    catch (e) { res.status(502).json({ success: false, message: e.message }); }
+  });
   app.get('/api/cambio/ptax', auth.exigirTokenSeAtiva, async (req, res) => {
     try { res.json(Object.assign({ success: true }, await cambio.ptax())); }
     catch (e) { res.status(502).json({ success: false, message: e.message }); }
