@@ -74,6 +74,28 @@
     const v = { fob: fobBRLtot, frete: freteBRL, seguro, impostos: II + IPI + PIS + COF + ICMSent, porto: despExtra + sisc + afrmm + honor + capat, nacional: terrestre };
     return { valores: v, total: Object.values(v).reduce((a, b) => a + b, 0), fobUSD, freteUSD: N('freteUSD'), taxa: txD, taxaFrete: txF, preco: numF(q.preco), tributos: { II, IPI, PIS, COF, ICMS: ICMSent } };
   }
+  /* Capacidade padrão, editável na operação-mãe. */
+  const CAPACIDADE_CONTEINER = [[/20/, 33, 28000], [/H[QC]/i, 76, 26500], [/40/, 67, 26500]];
+  const capacidadeDoTipo = tipo => { const c = CAPACIDADE_CONTEINER.find(([re]) => re.test(String(tipo || ''))); return c ? { m3: c[1], kg: c[2] } : { m3: 0, kg: 0 }; };
+  /** m³, peso e FOB da filha: o digitado na operação vale; sem ele, vem da cotação ligada. */
+  function medidasFilha(db, o) {
+    const q = cotacaoDaOp(db, o), its = (q && Array.isArray(q.items) ? q.items : []).filter(Boolean);
+    const soma = fn => its.reduce((a, it) => a + (+it.q || 0) * (+fn(it) || 0), 0);
+    const cbmCompleto = its.length > 0 && its.every(it => (+it.q || 0) * (+it.cbm || 0) > 0);
+    const ou = (k, v) => (+o[k] > 0 ? { v: +o[k], fonte: 'digitado' } : v > 0 ? { v, fonte: 'cotação' } : { v: 0, fonte: '' });
+    return { m3: ou('m3', cbmCompleto ? soma(it => it.cbm) : 0), pesoKg: ou('pesoKg', soma(it => it.p)), fobUSD: ou('fobUSD', soma(it => it.u)) };
+  }
+  /** Ocupado e livre do contêiner. Capacidade: a digitada na mãe ou a soma dos contêineres cadastrados. */
+  function ocupacaoDaMae(db, id) {
+    const m = (db.ops || []).find(x => x && x.id === id); if (!m) return null;
+    const filhas = W.filhasDe(db, id).map(o => ({ o, med: medidasFilha(db, o) }));
+    const conts = Array.isArray(m.containers) ? m.containers.filter(Boolean) : [];
+    const porTipo = conts.length ? conts.map(c => capacidadeDoTipo(c.tipo)) : (m.tipoConteiner ? [capacidadeDoTipo(m.tipoConteiner)] : []);
+    const capM3 = +m.capM3 > 0 ? +m.capM3 : porTipo.reduce((a, c) => a + c.m3, 0), capKg = +m.capKg > 0 ? +m.capKg : porTipo.reduce((a, c) => a + c.kg, 0);
+    const m3 = filhas.reduce((a, f) => a + f.med.m3.v, 0), kg = filhas.reduce((a, f) => a + f.med.pesoKg.v, 0), fobUSD = filhas.reduce((a, f) => a + f.med.fobUSD.v, 0);
+    return { filhas, capM3, capKg, m3, kg, fobUSD, livreM3: capM3 ? capM3 - m3 : null, livreKg: capKg ? capKg - kg : null, excedeu: (capM3 > 0 && m3 > capM3) || (capKg > 0 && kg > capKg),
+      semMedida: filhas.filter(f => !f.med.m3.v).map(f => f.o.id) };
+  }
   function cotacaoDaOp(db, o) {
     const qs = db.quotes || {};
     if (o.quoteId && qs[o.quoteId]) return Object.assign({ id: o.quoteId }, qs[o.quoteId]);
@@ -209,7 +231,8 @@
   }
   function conteineres(db, hoje) {
     const out = [];
-    (db.ops || []).filter(o => o && o.id && Array.isArray(o.containers)).forEach(o => o.containers.forEach((c, i) => { if (c && c.numero) out.push(Object.assign({ op: o.id, cliente: o.cliente, idx: i, c }, relogioConteiner(db, c, hoje))); }));
+    // A filha guarda uma cópia do contêiner da mãe: a lista conta cada contêiner uma vez, na mãe.
+    (db.ops || []).filter(o => o && o.id && !o.maeId && Array.isArray(o.containers)).forEach(o => o.containers.forEach((c, i) => { if (c && c.numero) out.push(Object.assign({ op: o.id, cliente: o.cliente, idx: i, c }, relogioConteiner(db, c, hoje))); }));
     const ordem = { vencido: 0, atencao: 1, ok: 2, 'sem-descarga': 3, 'devolvido-com-custo': 4, devolvido: 5 };
     return out.sort((a, b) => (ordem[a.status] - ordem[b.status]) || String(a.limite || '').localeCompare(String(b.limite || '')));
   }
@@ -376,7 +399,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };

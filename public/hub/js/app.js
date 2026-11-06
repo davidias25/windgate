@@ -47,6 +47,7 @@
 
   H.salvar = function () {
     if (!H.db) return;
+    W.sincronizarMaes(H.db, H.nomeUsuario(H.userKey));
     H.conhecidos = W.registrarRemocoes(H.db, H.conhecidos);
     versao++;
     setSync('busy', 'Salvando…');

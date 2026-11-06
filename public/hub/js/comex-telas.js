@@ -145,7 +145,8 @@
   /* ---------- Contêineres: relógio do free time ---------- */
   const ST_CONT = { vencido: ['em demurrage', COR.vencido], atencao: ['vence em até 2 dias', COR.atencao], ok: ['no prazo', COR.ok], 'sem-descarga': ['aguardando descarga', COR.cinza], devolvido: ['devolvido', COR.ok], 'devolvido-com-custo': ['devolvido com custo', COR.vencido] };
   function editarConteiner(opId, idx) {
-    const o = opById(opId), c = o && o.containers && o.containers[idx]; if (!c) return;
+    const o0 = opById(opId), o = o0 && o0.maeId ? (opById(o0.maeId) || o0) : o0, c = o && o.containers && o.containers[idx]; if (!c) return;
+    opId = o.id;
     const m = H.modal(`Contêiner ${c.numero}`, `<div class="fields">
       <div class="f"><label class="lbl" for="ka">Armador</label><input id="ka" value="${esc(c.armador || o.armador || '')}"></div>
       <div class="f"><label class="lbl" for="kt">Tipo</label><input id="kt" value="${esc(c.tipo || '')}" placeholder="40'HQ, 20'DC, 40'RF"></div>

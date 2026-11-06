@@ -99,7 +99,7 @@
           <p class="note">Calculado das mudanças de etapa registradas. Etapa sem histórico ainda mostra “—”.</p></div></div>
         <div class="box"><div class="box-h"><h2>Funil de vendas agora</h2></div><div class="box-b"><table class="mini"><tbody>${W.CRM_FASES.filter(f => W.CRM_ABERTAS.includes(f.k)).map(f => { const n = (db.crmOps || []).filter(x => x && W.faseDe(x) === f.k).length, max = Math.max(1, ...W.CRM_ABERTAS.map(k2 => (db.crmOps || []).filter(x => x && W.faseDe(x) === k2).length));
           return `<tr><td>${esc(f.l)}</td><td style="width:55%"><span class="barra"><i style="width:${n / max * 100}%;background:${f.c}"></i></span></td><td class="num">${n}</td></tr>`; }).join('')}</tbody></table></div></div>
-        <div class="box"><div class="box-h"><h2>Operações por etapa</h2></div><div class="box-b"><table class="mini"><tbody>${W.STATUS_OP.filter(s => !W.FINALIZADAS.includes(s.k)).map(s => { const n = db.ops.filter(o => o && o.status === s.k).length; return `<tr><td>${esc(s.l)}</td><td style="width:55%"><span class="barra"><i style="width:${Math.min(100, n / Math.max(1, d.ativas) * 100)}%;background:${s.c}"></i></span></td><td class="num">${n}</td></tr>`; }).join('')}</tbody></table></div></div>
+        <div class="box"><div class="box-h"><h2>Operações por etapa</h2></div><div class="box-b"><table class="mini"><tbody>${W.STATUS_OP.filter(s => !W.FINALIZADAS.includes(s.k)).map(s => { const n = db.ops.filter(o => o && !W.ehMae(o) && o.status === s.k).length; return `<tr><td>${esc(s.l)}</td><td style="width:55%"><span class="barra"><i style="width:${Math.min(100, n / Math.max(1, d.ativas) * 100)}%;background:${s.c}"></i></span></td><td class="num">${n}</td></tr>`; }).join('')}</tbody></table></div></div>
       </div>`;
   };
 })();

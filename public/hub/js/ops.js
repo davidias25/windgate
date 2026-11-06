@@ -11,7 +11,7 @@
     const res = comFin ? Object.fromEntries(W.resultadoPorOp(db, 'todas').map(r => [r.op, r])) : {};
     return `<div class="tw"><table><thead><tr><th>Operação</th><th>Cliente · produto</th><th>Etapa</th><th>Prazo da etapa</th><th>ETA</th>${opt && opt.compacta ? '' : '<th>Navio</th>'}<th class="num">Docs</th>${comFin ? '<th class="num">A receber</th><th class="num">Resultado</th>' : ''}<th>Resp.</th></tr></thead><tbody>
       ${lista.map(o => { const pct = W.checklistPct(db, o.id); const r = res[o.id];
-        return `<tr class="click" data-op="${esc(o.id)}"><td class="mono"><b>${esc(o.id)}</b></td><td><div class="cli" title="${esc(o.cliente || '')}">${esc(o.cliente || '—')}</div><small class="note cli" style="display:block">${esc(o.nome || '')}</small></td>
+        return `<tr class="click" data-op="${esc(o.id)}"><td class="mono">${o.maeId ? '<span class="note">↳ </span>' : ''}<b>${esc(o.id)}</b>${W.ehMae(o) ? '<br><span class="pill info">contêiner</span>' : ''}</td><td><div class="cli" title="${esc(o.cliente || '')}">${W.ehMae(o) ? esc(W.filhasDe(db, o.id).map(f => f.cliente).join(' + ') || 'sem filhas') : esc(o.cliente || '—')}</div><small class="note cli" style="display:block">${esc(o.nome || '')}</small></td>
         <td>${H.pillStatus(o.status)}</td><td>${H.semaforo(db, o)}</td><td class="mono">${W.dataBR(o.eta)}</td>${opt && opt.compacta ? '' : `<td>${esc(o.navio || '—')}</td>`}
         <td class="num">${pct == null ? '—' : pct + '%'}</td>${comFin ? `<td class="num">${r ? W.fmtBRL(r.saldoReceber) : '—'}</td><td class="num ${r && r.resultado < 0 ? 'neg' : ''}">${r ? W.fmtBRL(r.resultado) : '—'}</td>` : ''}
         <td>${esc(o.resp || '—')}</td></tr>`; }).join('')}
@@ -21,7 +21,7 @@
 
   function ligar(el) {
     el.querySelectorAll('[data-op]').forEach(x => x.addEventListener('click', e => { e.stopPropagation(); H.ir('ficha', x.dataset.op); }));
-    el.querySelectorAll('[data-a]').forEach(x => x.addEventListener('click', () => { const a = x.dataset.a; if (a === 'nova') novaOperacao(); else H.ir(a); }));
+    el.querySelectorAll('[data-a]').forEach(x => x.addEventListener('click', () => { const a = x.dataset.a; if (a === 'nova') novaOperacao(); else if (a === 'novamae') novaOperacao(true); else H.ir(a); }));
   }
 
   /* ================= LISTA DE OPERAÇÕES (ativas + histórico) ================= */
@@ -30,12 +30,13 @@
     const db = H.db;
     const q = (H.buscaGlobal || '').trim().toLowerCase();
     let lista = db.ops.filter(o => o && o.id);
-    if (!q) lista = lista.filter(o => modoLista === 'todas' ? true : modoLista === 'ativas' ? W.ativa(o) : !W.ativa(o));
+    if (!q) lista = lista.filter(o => modoLista === 'todas' ? true : modoLista === 'ativas' ? W.emAndamento(o) : !W.emAndamento(o));
     if (q) lista = lista.filter(o => [o.id, o.cliente, o.nome, o.navio, o.obs, o.tracking].join(' ').toLowerCase().includes(q));
-    lista.sort((a, b) => String(b.id).localeCompare(String(a.id), 'pt-BR', { numeric: true }));
+    // A filha fica logo abaixo da mãe.
+    lista.sort((a, b) => String(b.maeId || b.id).localeCompare(String(a.maeId || a.id), 'pt-BR', { numeric: true }) || (a.maeId ? 1 : 0) - (b.maeId ? 1 : 0) || String(a.id).localeCompare(String(b.id), 'pt-BR', { numeric: true }));
     el.innerHTML = `
       <div class="head"><div><h1>Operações</h1><p class="sub">Ativas e histórico completo. A busca procura em todas, inclusive as entregues.</p></div>
-        <div class="btns"><button class="btn pri" data-a="nova">+ Nova operação</button></div></div>
+        <div class="btns">${W.multiClienteLigado(db) && H.pode('fin.excluir') ? '<button class="btn" data-a="novamae">+ Contêiner compartilhado</button>' : ''}<button class="btn pri" data-a="nova">+ Nova operação</button></div></div>
       <div class="box"><div class="filters">
         <input type="search" id="opq" placeholder="Buscar por OP, cliente, produto, navio…" value="${esc(H.buscaGlobal || '')}">
         <div class="seg">${['ativas', 'entregues', 'todas'].map(m => `<button data-m="${m}" class="${modoLista === m && !q ? 'on' : ''}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
@@ -59,12 +60,13 @@
     const abas = [['resumo', 'Resumo'], ['etapas', 'Etapas & histórico'], ['logistica', 'Logística & contêineres'], ['docs', `Documentos${pct != null ? ' · ' + pct + '%' : ''}`]];
     abas.splice(3, 0, ['comex', 'Comex, custo & câmbio']);
     abas.push(['chat', 'Conversa']);
+    if (W.ehMae(o)) abas.unshift(['conteiner', 'Contêiner & filhas']);
     if (H.pode('fin.lancar')) abas.push(['fin', H.pode('fin.ver') ? 'Financeiro da operação' : 'Lançamentos da operação']);
 
     el.innerHTML = `
-      <div class="head"><div><span class="lbl"><a href="#ops" data-voltar>Operações</a> · ${esc(o.id)}</span><h1>${esc(o.id)} · ${esc(o.cliente || '')}</h1>
+      <div class="head"><div><span class="lbl"><a href="#ops" data-voltar>Operações</a> · ${esc(o.id)}${o.maeId ? ` · filha do contêiner <a href="#" data-mae="${esc(o.maeId)}">${esc(o.maeId)}</a>` : ''}</span><h1>${esc(o.id)} · ${W.ehMae(o) ? 'Contêiner compartilhado' : esc(o.cliente || '')}</h1>
         <p class="sub">${esc(o.nome || '')}${o.origemPorto || o.destinoPorto ? ' · ' + esc(o.origemPorto || '?') + ' → ' + esc(o.destinoPorto || '?') : ''}</p></div>
-        <div class="btns">${H.pillStatus(o.status)} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button>${H.pode('fin.excluir') ? '<button class="btn" data-acao="renomear">Editar código</button><button class="btn" data-acao="excluir">Excluir</button>' : ''}</div></div>
+        <div class="btns">${H.pillStatus(o.status)} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button>${H.pode('fin.excluir') ? `<button class="btn" data-acao="renomear">Editar código</button><button class="btn" data-acao="excluir">Excluir</button>${W.multiClienteLigado(db) && !o.maeId && !W.ehMae(o) ? '<button class="btn" data-acao="virarmae">Virar contêiner compartilhado</button>' : ''}` : ''}</div></div>
       <div class="box box-b"><div class="steps" aria-label="Etapas">${W.FLUXO.map((k, i) => `<div class="st ${i < idx ? 'done' : i === idx ? 'cur' : ''}"><span class="dot">${i < idx ? '✓' : i + 1}</span>${esc(W.stMeta(k).l)}</div>`).join('')}</div>
         ${o.status === 'travada' ? '<p class="banner" style="margin-top:10px">Operação travada. Registre o motivo e a próxima ação no Resumo.</p>' : ''}</div>
       ${r ? `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
@@ -76,12 +78,14 @@
       <div id="fichaAba"></div>`;
 
     el.querySelector('[data-voltar]').onclick = e => { e.preventDefault(); H.ir('ops'); };
+    const lnkMae = el.querySelector('[data-mae]'); if (lnkMae) lnkMae.onclick = e => { e.preventDefault(); H.ir('ficha', lnkMae.dataset.mae); };
+    const bVm = el.querySelector('[data-acao="virarmae"]'); if (bVm) bVm.onclick = () => virarMaeModal(o.id);
     el.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { abaFicha = b.dataset.aba; H.render(); });
     el.querySelector('[data-acao="etapa"]').onclick = () => mudarEtapa(o);
     const bRen = el.querySelector('[data-acao="renomear"]'); if (bRen) bRen.onclick = () => renomear(o.id);
     const bExc = el.querySelector('[data-acao="excluir"]'); if (bExc) bExc.onclick = () => excluir(o.id);
     if (!abas.find(a => a[0] === abaFicha)) abaFicha = 'resumo';
-    ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat, comex: H.fichaComex })[abaFicha](el.querySelector('#fichaAba'), o);
+    ({ conteiner: abaConteiner, resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat, comex: H.fichaComex })[abaFicha](el.querySelector('#fichaAba'), o);
   };
 
   function renomear(id) {
@@ -141,6 +145,7 @@
       <div class="f"><span class="lbl">Última alteração</span><span class="ro">${o.atualizadoEm ? W.dataBR(o.atualizadoEm) + ' · ' + esc(o.atualizadoPor || '') : '—'}</span></div>
     </div></div>`;
     box.querySelector('[data-salvar]').onclick = () => salvarCampos(box, o);
+    if (o.maeId) box.querySelectorAll('[data-k]').forEach(i => { if (W.CAMPOS_HERDADOS.includes(i.dataset.k)) { i.disabled = true; i.title = 'Vem do contêiner ' + o.maeId; } });
   }
 
   function abaEtapas(box, o) {
@@ -164,6 +169,11 @@
         : '<p class="empty">Nenhum contêiner cadastrado. O número do contêiner é o que liga o tracking automático.</p>'}
         <p class="box-b note">Com o contêiner cadastrado, ligue o tracking automático (ShipsGo) e acompanhe o free time na aba Comex, custo & câmbio.</p></div></div>`;
     box.querySelector('[data-salvar]').onclick = () => salvarCampos(box, o);
+    if (o.maeId) { // A logística é da mãe: na filha é só leitura.
+      box.querySelectorAll('input,select,textarea,button').forEach(i => { i.disabled = true; });
+      box.insertAdjacentHTML('afterbegin', `<p class="banner" style="margin-bottom:12px">Embarque, contêiner e DUIMP vêm do contêiner <b>${esc(o.maeId)}</b>: altere por lá.</p>`);
+      return;
+    }
     box.querySelector('[data-addc]').onclick = () => {
       const m = H.modal('Novo contêiner', `<div class="fields"><div class="f w2"><label class="lbl" for="cn">Número</label><input id="cn" placeholder="MSCU1234567" maxlength="11"></div><div class="f"><label class="lbl" for="ct">Tipo</label><select id="ct"><option>40'HQ</option><option>40'DC</option><option>20'DC</option><option>LCL</option></select></div><div class="f"><label class="lbl" for="cl">Lacre</label><input id="cl"></div></div>`, '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="cok">Adicionar</button>');
       m.querySelector('#cok').onclick = () => {
@@ -188,6 +198,7 @@
     const db = H.db;
     const chk = db.checklists[o.id];
     const docs = db.docs.filter(d => d && d.op === o.id);
+    const daMae = o.maeId ? db.docs.filter(d => d && d.op === o.maeId && !d.substituidoPor && !d.removidoEm && W.DOCS_DA_MAE.includes(W.tipoDoc(d))) : [];
     box.innerHTML = `<div class="g2">
       <div class="box"><div class="box-h"><h2>Checklist documental</h2><span class="note">${Array.isArray(chk) ? chk.length + ' itens' : 'sem checklist'}</span></div>
         ${Array.isArray(chk) && chk.length ? `<div class="tw"><table><thead><tr><th>Fase</th><th>Documento</th><th>Situação</th><th>Por</th></tr></thead><tbody>
@@ -197,6 +208,7 @@
         : '<p class="empty">Esta operação ainda não tem checklist.</p>'}</div>
       <div class="box"><div class="box-h"><h2>Arquivos da operação</h2><span class="note">${docs.length}</span></div><div class="box-b list">
         ${docs.length ? docs.map(d => `<div class="row"><div><b>${esc(d.nome)}</b><br><small class="note">${esc(d.grupo || d.cat || '')} · ${W.dataBR(d.data)} · ${esc(d.por || '')}</small></div>${W.linkPerdido(d.link) ? `<span class="pill crit" title="O arquivo ficou no disco do servidor e foi apagado numa publicação. Envie de novo.">arquivo perdido</span>` : d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}<button class="btn ghost sm" data-excl="${esc(d._id)}" title="Excluir documento" aria-label="Excluir documento">✕</button></div>`).join('') : '<p class="empty">Nenhum arquivo.</p>'}
+      ${daMae.length ? `<p class="lbl" style="margin-top:10px">Do contêiner ${esc(o.maeId)}</p>${daMae.map(d => `<div class="row"><div><b>${esc(d.nome)}</b><br><small class="note">${esc(d.cat || '')} · ${W.dataBR(d.data)} · ${esc(d.por || '')}</small></div>${W.linkPerdido(d.link) ? '<span class="pill crit">arquivo perdido</span>' : d.link ? `<a class="btn sm" href="${esc(d.link)}" target="_blank" rel="noopener">Abrir</a>` : ''}</div>`).join('')}` : ''}
       </div></div></div>`;
     box.querySelectorAll('[data-excl]').forEach(b => b.onclick = () => H.excluirDoc(b.dataset.excl));
     box.querySelectorAll('[data-chk]').forEach(s => s.onchange = () => {
@@ -238,6 +250,71 @@
     if (H.chatPainel) { if (H.chat && !H.chat.carregado) H.chatBuscar().then(() => { const p = document.querySelector('#chatPane'); if (p) H.chatPainel(p, 'op:' + o.id); }); else H.chatPainel(box.querySelector('#chatPane'), 'op:' + o.id); }
   }
 
+  /* ================= CONTÊINER COMPARTILHADO ================= */
+  const num = v => (+v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  function abaConteiner(box, o) {
+    const oc = W.ocupacaoDaMae(H.db, o.id), edita = H.pode('fin.excluir');
+    const fonte = c => (c.fonte ? `<br><small class="note">${esc(c.fonte)}</small>` : '');
+    box.innerHTML = `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+        <div class="kpi"><span class="lbl">m³ ocupados</span><span class="v">${num(oc.m3)}</span><span class="d">${oc.capM3 ? 'de ' + num(oc.capM3) + ' m³' : 'sem capacidade definida'}</span></div>
+        <div class="kpi"><span class="lbl">m³ livres</span><span class="v ${oc.livreM3 < 0 ? 'neg' : ''}">${oc.livreM3 == null ? '—' : num(oc.livreM3)}</span><span class="d">${oc.semMedida.length ? 'falta o m³ de ' + esc(oc.semMedida.join(', ')) : 'no contêiner'}</span></div>
+        <div class="kpi"><span class="lbl">Peso ocupado</span><span class="v">${num(oc.kg)} kg</span><span class="d">${oc.capKg ? 'de ' + num(oc.capKg) + ' kg' : 'sem capacidade definida'}</span></div>
+        <div class="kpi"><span class="lbl">Peso livre</span><span class="v ${oc.livreKg < 0 ? 'neg' : ''}">${oc.livreKg == null ? '—' : num(oc.livreKg) + ' kg'}</span><span class="d">FOB das filhas: US$ ${num(oc.fobUSD)}</span></div></div>
+      ${oc.excedeu ? '<div class="banner crit" style="margin-bottom:12px">⛔ As filhas somam mais do que cabe no contêiner. Confira as medidas.</div>' : ''}
+      <div class="box"><div class="box-h"><h2>Operações-filhas</h2>${edita ? '<button class="btn sm" data-addf>+ Filha</button>' : ''}</div>
+        ${oc.filhas.length ? `<div class="tw"><table><thead><tr><th>Filha</th><th>Cliente</th><th>Etapa</th><th class="num">m³</th><th class="num">Peso (kg)</th><th class="num">FOB (US$)</th><th></th></tr></thead><tbody>
+          ${oc.filhas.map(({ o: f, med }) => `<tr><td class="mono"><a href="#" data-ver="${esc(f.id)}"><b>${esc(f.id)}</b></a></td><td>${esc(f.cliente || '—')}<br><small class="note">${esc(f.nome || '')}</small></td><td>${H.pillStatus(f.status)}</td>
+            <td class="num">${edita ? `<input class="inp" data-med="m3" data-f="${esc(f.id)}" value="${esc(f.m3 == null ? '' : f.m3)}" placeholder="${esc(med.m3.v ? num(med.m3.v) : '')}" inputmode="decimal" style="width:80px;text-align:right">` : num(med.m3.v)}${fonte(med.m3)}</td>
+            <td class="num">${edita ? `<input class="inp" data-med="pesoKg" data-f="${esc(f.id)}" value="${esc(f.pesoKg == null ? '' : f.pesoKg)}" placeholder="${esc(med.pesoKg.v ? num(med.pesoKg.v) : '')}" inputmode="decimal" style="width:90px;text-align:right">` : num(med.pesoKg.v)}${fonte(med.pesoKg)}</td>
+            <td class="num">${edita ? `<input class="inp" data-med="fobUSD" data-f="${esc(f.id)}" value="${esc(f.fobUSD == null ? '' : f.fobUSD)}" placeholder="${esc(med.fobUSD.v ? num(med.fobUSD.v) : '')}" inputmode="decimal" style="width:100px;text-align:right">` : num(med.fobUSD.v)}${fonte(med.fobUSD)}</td>
+            <td class="num">${edita ? `<button class="btn ghost sm" data-desl="${esc(f.id)}" title="Desligar do contêiner">Desligar</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Nenhuma filha ainda. Crie uma para cada cliente deste contêiner.</p>'}
+        <p class="box-b note">Sem número digitado, m³, peso e FOB vêm da cotação ligada à filha. O m³ só vem da cotação se todos os itens tiverem CBM.</p></div>
+      <div class="box"><div class="box-h"><h2>Contêiner</h2>${edita ? '<button class="btn blue sm" data-salvar>Salvar</button>' : ''}</div><div class="box-b fields">
+        ${campo(o, 'fornecedor', 'Fornecedor', 'text', { w: 'w2' })}
+        <div class="f"><label class="lbl" for="c_tipoConteiner">Tipo de contêiner</label><select id="c_tipoConteiner" data-k="tipoConteiner"><option value="">—</option>${["20'DC", "40'DC", "40'HQ"].map(t => `<option ${o.tipoConteiner === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        ${campo(o, 'capM3', 'Capacidade (m³)')}${campo(o, 'capKg', 'Capacidade (kg)')}
+        <p class="note w4">Sem capacidade digitada, vale a dos contêineres cadastrados ou o tipo escolhido: 20' 33 m³ e 28.000 kg, 40' 67 m³ e 26.500 kg, 40' HQ 76 m³ e 26.500 kg. Embarque, BL, navio, ETA e DUIMP ficam em Logística & contêineres.</p></div></div>`;
+    const sv = box.querySelector('[data-salvar]'); if (sv) sv.onclick = () => salvarCampos(box.querySelector('.box:last-child'), o);
+    if (!edita) box.querySelectorAll('[data-k]').forEach(i => { i.disabled = true; });
+    box.querySelectorAll('[data-ver]').forEach(a => a.onclick = e => { e.preventDefault(); H.ir('ficha', a.dataset.ver); });
+    box.querySelectorAll('[data-med]').forEach(i => i.onchange = () => {
+      const f = H.db.ops.find(x => x && x.id === i.dataset.f); if (!f) return H.render();
+      const v = parseFloat(String(i.value).replace(',', '.'));
+      if (v > 0) f[i.dataset.med] = v; else delete f[i.dataset.med];
+      H.salvar(); H.render();
+    });
+    box.querySelectorAll('[data-desl]').forEach(b => b.onclick = () => {
+      const id = b.dataset.desl, m = H.modal('Desligar do contêiner', `<p><b>${esc(id)}</b> volta a ser uma operação comum. Os lançamentos e documentos dela ficam como estão, e os dados de embarque copiados continuam nela.</p>`, '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="dsok">Desligar</button>');
+      m.querySelector('#dsok').onclick = () => { const r = W.desligarFilha(H.db, id); if (!r.ok) return H.toast(esc(r.msg)); H.salvar(); H.fecharModal(); H.render(); };
+    });
+    const af = box.querySelector('[data-addf]'); if (af) af.onclick = () => novaFilha(o.id);
+    if (edita && !oc.filhas.length) { const s = box.querySelector('[data-salvar]'); if (s) s.insertAdjacentHTML('beforebegin', '<button class="btn sm" data-desfaz>Voltar a operação comum</button>');
+      const d = box.querySelector('[data-desfaz]'); if (d) d.onclick = () => { const r = W.desfazerMae(H.db, o.id); if (!r.ok) return H.toast(esc(r.msg)); H.salvar(); H.toast('Voltou a ser uma operação comum.'); H.render(); }; }
+  }
+  function novaFilha(maeId) {
+    const cots = (H.db.qindex || []).filter(q => q && q.id);
+    const m = H.modal('Nova operação-filha · ' + maeId, `<div class="fields"><div class="f"><label class="lbl" for="fi">Código</label><input id="fi" value="${esc(W.proximoCodigoFilha(H.db, maeId))}"></div>
+      <div class="f w3"><label class="lbl" for="fc">Cliente</label><input id="fc"></div><div class="f w4"><label class="lbl" for="fn">Mercadoria</label><input id="fn"></div>
+      <div class="f w4"><label class="lbl" for="fq">Cotação (opcional)</label><select id="fq"><option value="">—</option>${cots.map(q => `<option value="${esc(q.id)}">${esc(q.label || q.id)}</option>`).join('')}</select></div>
+      <div class="f"><label class="lbl" for="fm">m³</label><input id="fm" inputmode="decimal"></div><div class="f"><label class="lbl" for="fk">Peso (kg)</label><input id="fk" inputmode="decimal"></div><div class="f"><label class="lbl" for="fu">FOB (US$)</label><input id="fu" inputmode="decimal"></div></div>
+      <p class="note" style="margin-top:8px">Com cotação ligada, deixe em branco o que já está nela. A filha nasce em Contrato e herda a etapa do contêiner.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="fok">Criar filha</button>');
+    const q = s => m.querySelector(s), n = s => parseFloat(String(q(s).value).replace(',', '.')) || 0;
+    q('#fok').onclick = () => {
+      const r = W.criarFilha(H.db, maeId, { id: q('#fi').value, cliente: q('#fc').value, nome: q('#fn').value, quoteId: q('#fq').value, m3: n('#fm'), pesoKg: n('#fk'), fobUSD: n('#fu') }, H.nomeUsuario(H.userKey), null, CHK_MODELO);
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.fecharModal(); H.toast(`Filha <b>${esc(r.op.id)}</b> criada.`); H.render();
+    };
+  }
+  function virarMaeModal(id) {
+    const g = W.ligadosDaOp(H.db, id), o = H.db.ops.find(x => x && x.id === id);
+    const m = H.modal(`Virar contêiner compartilhado · ${esc(id)}`, `<p><b>${esc(id)}</b> passa a representar o contêiner, e cada cliente vira uma filha, como ${esc(id)}.1 e ${esc(id)}.2.</p>
+      ${g.fin ? `<p class="banner" style="margin-top:8px">Os <b>${g.fin} lançamento(s)</b> continuam em ${esc(id)}. Por enquanto, recebimentos não passam sozinhos para as filhas.</p>` : ''}
+      <p class="note" style="margin-top:8px">O cliente ${esc(o && o.cliente ? o.cliente : '')} sai da ${esc(id)} e fica guardado. Enquanto não houver filhas, dá para voltar atrás.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="vmok">Confirmar</button>');
+    m.querySelector('#vmok').onclick = () => { const r = W.virarMae(H.db, id); if (!r.ok) return H.toast(esc(r.msg)); abaFicha = 'conteiner'; H.salvar(); H.fecharModal(); H.render(); };
+  }
+
   function abaFin(box, o) {
     const ls = H.db.fin.filter(l => l && l.op === o.id).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
     box.innerHTML = `<div class="box"><div class="box-h"><h2>Lançamentos da operação</h2><div class="btns"><button class="btn sm blue" data-comp>Enviar comprovante</button><button class="btn sm" data-novo>+ Lançamento</button></div></div>
@@ -248,9 +325,9 @@
   }
 
   function mudarEtapa(o) {
-    const m = H.modal('Mudar etapa · ' + o.id, `<div class="fields"><div class="f w2"><label class="lbl" for="ne">Nova etapa</label><select id="ne">${W.STATUS_OP.map(s => `<option value="${s.k}" ${s.k === o.status ? 'selected' : ''}>${esc(s.l)}</option>`).join('')}</select></div>
+    const m = H.modal('Mudar etapa · ' + o.id, `<div class="fields"><div class="f w2"><label class="lbl" for="ne">Nova etapa</label><select id="ne">${W.etapasPermitidas(o).map(s => `<option value="${s.k}" ${s.k === o.status ? 'selected' : ''}>${esc(s.l)}</option>`).join('')}</select></div>
       <div class="f w2"><label class="lbl" for="nm">Motivo / observação</label><input id="nm" placeholder="Ex.: navio confirmou atracação"></div></div>
-      <p class="note" style="margin-top:10px">A mudança fica registrada na linha do tempo, com data e seu nome. O prazo da nova etapa começa a contar hoje.</p>`,
+      <p class="note" style="margin-top:10px">A mudança fica registrada na linha do tempo, com data e seu nome. O prazo da nova etapa começa a contar hoje.${o.maeId ? ` Produção, embarque, trânsito e chegada vêm do contêiner ${esc(o.maeId)}.` : W.ehMae(o) ? ' Produção, embarque, trânsito e chegada passam para as filhas.' : ''}</p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="neok">Confirmar</button>');
     m.querySelector('#neok').onclick = () => {
       o = opAtual(o);
@@ -272,11 +349,11 @@
   H.CHK_MODELO = CHK_MODELO;
 
   H.novaOperacao = () => novaOperacao();
-  function novaOperacao() {
+  function novaOperacao(mae) {
     const nums = H.db.ops.map(o => parseInt(String(o.id).replace(/\D/g, ''), 10)).filter(n => isFinite(n));
     const prox = 'OP' + ((nums.length ? Math.max(...nums) : 0) + 1);
-    const m = H.modal('Nova operação', `<div class="fields"><div class="f"><label class="lbl" for="no">Código</label><input id="no" value="${prox}"></div>
-      <div class="f w2"><label class="lbl" for="nc">Cliente</label><input id="nc"></div><div class="f"><label class="lbl" for="nr">Responsável</label><input id="nr" value="${esc(H.nomeUsuario(H.userKey))}"></div>
+    const m = H.modal(mae ? 'Novo contêiner compartilhado' : 'Nova operação', `<div class="fields"><div class="f"><label class="lbl" for="no">Código</label><input id="no" value="${prox}"></div>
+      <div class="f w2" ${mae ? 'hidden' : ''}><label class="lbl" for="nc">Cliente</label><input id="nc"></div><div class="f"><label class="lbl" for="nr">Responsável</label><input id="nr" value="${esc(H.nomeUsuario(H.userKey))}"></div>
       <div class="f w4"><label class="lbl" for="nn">Mercadoria / descrição</label><input id="nn"></div></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="nok">Criar operação</button>');
     m.querySelector('#nok').onclick = () => {
@@ -287,6 +364,7 @@
       /* mesmo checklist padrão do sistema atual, para a operação nascer completa */
       H.db.checklists[id] = (H.db.checklists[id] && H.db.checklists[id].length) ? H.db.checklists[id] : CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
       H.db.ops.push({ _id: W.novoId(), id, nome: m.querySelector('#nn').value.trim(), cliente: m.querySelector('#nc').value.trim(), status: 'cotacao', resp: m.querySelector('#nr').value.trim(), prox: '', obs: '', criadaEm: agora, statusEm: agora, statusPor: H.nomeUsuario(H.userKey) });
+      if (mae) { W.virarMae(H.db, id); abaFicha = 'conteiner'; }
       H.salvar(); H.fecharModal(); H.ir('ficha', id);
     };
   }

@@ -130,7 +130,11 @@
   const FINALIZADAS = ['entregue', 'concluida'];
   const PRAZO_STATUS = { cotacao: 7, contrato: 7, producao: 30, preparacao_embarque: 5, container_enviado_porto: 4, embarcado: 75, chegada: 7, logistica: 5 };
   const stMeta = k => STATUS_OP.find(s => s.k === k) || { k: k || '', l: k || '—', c: '#8A94AD' };
-  const ativa = o => o && !FINALIZADAS.includes(o.status);
+  /* Operação-mãe é o contêiner: não tem cliente e não conta como operação nas metas e nos totais. */
+  const ehMae = o => !!(o && o.papel === 'mae');
+  const ativa = o => o && !ehMae(o) && !FINALIZADAS.includes(o.status);
+  /** Para a lista de operações: a mãe aberta aparece junto das ativas. */
+  const emAndamento = o => !!o && !FINALIZADAS.includes(o.status);
 
   const soData = v => String(v || '').slice(0, 10);
   const ehISO = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || ''));
@@ -173,6 +177,94 @@
     return out.sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   }
 
+  /* ---------- Operação-mãe e filhas (2 ou mais clientes no mesmo contêiner) ----------
+     A mãe guarda o contêiner: fornecedor, BL, navio, ETA, DUIMP e as etapas de produção até a chegada.
+     Cada filha é uma operação comum, com cliente, parcelas e contrato. O que é da mãe fica copiado nas
+     filhas, e as telas que já leem o.eta ou o.containers continuam funcionando; só a mãe é editada. */
+  const CAMPOS_HERDADOS = ['fornecedor', 'fabricaCidade', 'origemPorto', 'destinoPorto', 'embarque', 'eta', 'etaHist', 'navio', 'armador', 'bl', 'tracking', 'trackingEm', 'posAtual', 'duimp', 'duimpVersao', 'duimpSituacao', 'containers'];
+  const ETAPAS_DA_MAE = ['producao', 'preparacao_embarque', 'container_enviado_porto', 'embarcado', 'chegada'];
+  const DOCS_DA_MAE = ['invoice', 'packing', 'bl', 'duimp'];
+  /* Checklist da filha: o que é por cliente. Câmbio, BL, seguro e DUIMP ficam no checklist da mãe. */
+  const ITEM_DA_FILHA = /contrato|proforma|icms|nf de sa[ií]da|gnre|ct-e|entrega/i;
+  const filhasDe = (db, id) => (db.ops || []).filter(o => o && o.maeId === id);
+  const maeDe = (db, o) => (o && o.maeId ? (db.ops || []).find(x => x && x.id === o.maeId) || null : null);
+  /** Etapas que cada tela pode escolher: a filha não mexe no que a mãe manda, e a mãe não entrega ao cliente. */
+  function etapasPermitidas(o) {
+    if (ehMae(o)) return STATUS_OP.filter(s => ['cotacao', 'contrato', 'concluida', 'travada'].includes(s.k) || ETAPAS_DA_MAE.includes(s.k));
+    if (o && o.maeId) return STATUS_OP.filter(s => !ETAPAS_DA_MAE.includes(s.k) || s.k === o.status);
+    return STATUS_OP;
+  }
+  /**
+   * Copia o que é da mãe para as filhas. Idempotente: roda a cada gravação e devolve quantas filhas mudaram.
+   * A etapa só anda na faixa da mãe: filha que já passou da chegada segue sozinha, e filha travada fica travada.
+   */
+  function sincronizarMaes(db, por, agora) {
+    const t = agora || new Date().toISOString(); let n = 0;
+    const iChegada = FLUXO.indexOf('chegada');
+    (db.ops || []).filter(ehMae).forEach(m => {
+      filhasDe(db, m.id).forEach(f => {
+        let mudou = false;
+        CAMPOS_HERDADOS.forEach(k => {
+          const de = m[k] == null ? null : JSON.stringify(m[k]), em = f[k] == null ? null : JSON.stringify(f[k]);
+          if (de === em) return;
+          if (m[k] == null) delete f[k]; else f[k] = JSON.parse(de);
+          mudou = true;
+        });
+        if (ETAPAS_DA_MAE.includes(m.status) && f.status !== m.status && f.status !== 'travada' && FLUXO.indexOf(f.status) <= iChegada) {
+          if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: f.id, de: f.status || '', para: m.status, em: t, deEm: f.statusEm || '', por: por || '', tipo: 'herdada', origem: 'hub2', motivo: 'Etapa do contêiner ' + m.id });
+          f.status = m.status; f.statusEm = t; f.statusPor = por || ''; delete f.statusEstimado; mudou = true;
+        }
+        if (mudou) n++;
+      });
+    });
+    return n;
+  }
+  /** Marca a operação como mãe. O cliente sai dela e fica guardado, para desfazer enquanto não houver filhas. */
+  function virarMae(db, id) {
+    const o = (db.ops || []).find(x => x && x.id === id);
+    if (!o) return { ok: false, msg: 'Operação não encontrada.' };
+    if (o.maeId) return { ok: false, msg: 'Uma operação-filha não pode ser mãe.' };
+    if (ehMae(o)) return { ok: false, msg: 'Esta operação já é um contêiner compartilhado.' };
+    o.papel = 'mae'; if (o.cliente) o.clienteAnterior = o.cliente; o.cliente = '';
+    return { ok: true, op: o };
+  }
+  function desfazerMae(db, id) {
+    const o = (db.ops || []).find(x => x && x.id === id);
+    if (!ehMae(o)) return { ok: false, msg: 'Esta operação não é um contêiner compartilhado.' };
+    if (filhasDe(db, id).length) return { ok: false, msg: 'Desligue as filhas antes.' };
+    delete o.papel; if (o.clienteAnterior) { o.cliente = o.clienteAnterior; delete o.clienteAnterior; }
+    return { ok: true, op: o };
+  }
+  /** Próximo código livre da filha: OP27 → OP27.1, OP27.2... */
+  function proximoCodigoFilha(db, maeId) {
+    const usados = new Set((db.ops || []).map(o => o && codigoOp(o.id))); let n = 1;
+    while (usados.has(codigoOp(maeId + '.' + n))) n++;
+    return codigoOp(maeId + '.' + n);
+  }
+  function criarFilha(db, maeId, dados, por, agora, modeloChecklist) {
+    const m = (db.ops || []).find(x => x && x.id === maeId), d = dados || {}, t = agora || new Date().toISOString();
+    if (!ehMae(m)) return { ok: false, msg: 'A operação-mãe não foi encontrada.' };
+    const id = codigoOp(d.id) || proximoCodigoFilha(db, maeId);
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._\/-]*$/u.test(id)) return { ok: false, msg: 'Use só letras, números, espaço, ponto, traço e barra no código.' };
+    if ((db.ops || []).some(x => x && codigoOp(x.id) === id)) return { ok: false, msg: `Já existe a operação ${id}.` };
+    if (!String(d.cliente || '').trim()) return { ok: false, msg: 'Informe o cliente da filha.' };
+    const f = { _id: novoId(), id, maeId, cliente: String(d.cliente).trim(), nome: String(d.nome || '').trim(), resp: d.resp || m.resp || '', status: 'contrato', statusEm: t, statusPor: por || '', prox: '', obs: '', criadaEm: t };
+    ['m3', 'pesoKg', 'fobUSD'].forEach(k => { if (+d[k] > 0) f[k] = +d[k]; });
+    if (d.quoteId) f.quoteId = d.quoteId;
+    db.ops.push(f);
+    if (modeloChecklist && db.checklists) db.checklists[id] = modeloChecklist.filter(([, titulo]) => ITEM_DA_FILHA.test(titulo)).map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
+    if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: 'contrato', em: t, por: por || '', tipo: 'mudanca', origem: 'hub2', motivo: 'Filha do contêiner ' + maeId });
+    sincronizarMaes(db, por, t);
+    return { ok: true, op: f };
+  }
+  /** Desliga a filha do contêiner: ela volta a ser uma operação comum, e os dados copiados ficam nela. */
+  function desligarFilha(db, id) {
+    const f = (db.ops || []).find(x => x && x.id === id);
+    if (!f || !f.maeId) return { ok: false, msg: 'Esta operação não é filha de um contêiner.' };
+    delete f.maeId;
+    return { ok: true, op: f };
+  }
+
   /* ---------- Código e exclusão da operação ---------- */
   const codigoOp = v => String(v == null ? '' : v).trim().toUpperCase();
   /** O que fica ligado à operação: é o que a tela mostra antes de renomear ou excluir. */
@@ -199,7 +291,7 @@
       if (Array.isArray(r)) return r.forEach(trocar);
       if (!r || typeof r !== 'object') return;
       Object.keys(r).forEach(k => {
-        if ((k === 'op' || k === 'opId') && typeof r[k] === 'string' && r[k].trim() === antigo) { r[k] = novo; alterados++; }
+        if ((k === 'op' || k === 'opId' || k === 'maeId') && typeof r[k] === 'string' && r[k].trim() === antigo) { r[k] = novo; alterados++; }
         else if (r[k] && typeof r[k] === 'object') trocar(r[k]);
       });
     };
@@ -220,6 +312,7 @@
   /** Como no sistema antigo: sai a operação; lançamentos e documentos ficam, com o código preservado. */
   function excluirOperacao(db, id, por, agora) {
     if (!(db.ops || []).some(x => x && x.id === id)) return { ok: false, msg: 'Operação não encontrada.' };
+    if ((db.ops || []).some(x => x && x.maeId === id)) return { ok: false, msg: 'Este contêiner ainda tem operações-filhas: exclua ou desligue as filhas antes.' };
     const g = ligadosDaOp(db, id);
     db.ops = db.ops.filter(x => !(x && x.id === id));
     if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: '', em: agora || new Date().toISOString(), por: por || '', tipo: 'exclusao', origem: 'hub2',
@@ -471,7 +564,7 @@
   function desempenho(db, nome, mes, hoje) {
     const h = hoje || hojeISO(), m = mes || h.slice(0, 7);
     const no = d => String(d || '').slice(0, 7) === m;
-    const etapas = (db.opStatusHist || []).filter(x => x && x.por === nome && no(x.em) && x.tipo !== 'correcao').length;
+    const etapas = (db.opStatusHist || []).filter(x => x && x.por === nome && no(x.em) && x.tipo !== 'correcao' && x.tipo !== 'herdada').length;
     let coletados = 0, revisados = 0;
     Object.values(db.checklists || {}).forEach(l => (Array.isArray(l) ? l : []).forEach(it => {
       if (!it) return;
@@ -492,6 +585,7 @@
     const ids = new Set();
     (db.opStatusHist || []).forEach(x => { if (x && String(x.em || '').slice(0, 7) === mes && x.para === 'contrato') ids.add(x.op); });
     (db.ops || []).forEach(o => { if (o && String(o.criadaEm || '').slice(0, 7) === mes && o.status && !['cotacao', 'travada'].includes(o.status)) ids.add(o.id); });
+    (db.ops || []).filter(ehMae).forEach(o => ids.delete(o.id));
     return [...ids];
   }
   function recadosPara(db, k, hoje) {
@@ -700,7 +794,7 @@
   function completudeDocs(db, o) {
     const idx = FLUXO.indexOf(o.status);
     const exigidos = DOC_TIPOS.filter(t => t.desde && idx >= 0 && FLUXO.indexOf(t.desde) >= 0 && idx >= FLUXO.indexOf(t.desde));
-    const tem = new Set((db.docs || []).filter(d => d && d.op === o.id && !d.substituidoPor && !d.removidoEm).map(tipoDoc));
+    const tem = new Set((db.docs || []).filter(d => d && (d.op === o.id || (o.maeId && d.op === o.maeId && DOCS_DA_MAE.includes(tipoDoc(d)))) && !d.substituidoPor && !d.removidoEm).map(tipoDoc));
     const faltam = exigidos.filter(t => !tem.has(t.k));
     return { exigidos: exigidos.length, faltam, pct: exigidos.length ? Math.round((exigidos.length - faltam.length) / exigidos.length * 100) : null };
   }
@@ -760,7 +854,7 @@
     if (perfilId === 'frete') {
       const lanc = (db.fin || []).filter(l => l && l.por === nome && no(l.criadoEm));
       const rap = lanc.filter(l => { const ref = l.liquidadoEm || l.data; return ref && diasEntre(soData(ref), soData(l.criadoEm)) <= 1; }).length;
-      const tr = (db.ops || []).filter(o => o && ['embarcado', 'container_enviado_porto', 'chegada'].includes(o.status));
+      const tr = (db.ops || []).filter(o => o && !ehMae(o) && ['embarcado', 'container_enviado_porto', 'chegada'].includes(o.status));
       const fretes = (db.fretes || []).filter(f => f && (f.resp === nome) && no(f.data));
       return [['Lançamentos em até 24 h', rap, lanc.length], ['Cargas no mar com tracking ou contêiner', tr.filter(o => o.tracking || (o.containers || []).length).length, tr.length],
         ['Cotações de frete registradas', fretes.length, null]].map(([l, a, b]) => ({ l, a, b, r: b == null ? (a > 0 ? Math.min(1, a / 4) : null) : r(a, b) }));
@@ -884,8 +978,8 @@
   /** Tudo que a reunião de sexta precisa, calculado do que foi registrado na semana. Sem números financeiros. */
   function resumoSemana(db, ini, fim, hoje) {
     const h = hoje || hojeISO(), na = d => { const x = soData(d); return x >= ini && x <= fim; };
-    const ops = (db.ops || []).filter(o => o && o.id), ativas = ops.filter(ativa);
-    const etapas = (db.opStatusHist || []).filter(x => x && na(x.em) && x.para && x.tipo !== 'correcao');
+    const ops = (db.ops || []).filter(o => o && o.id && !ehMae(o)), ativas = ops.filter(ativa);
+    const etapas = (db.opStatusHist || []).filter(x => x && na(x.em) && x.para && x.tipo !== 'correcao' && x.tipo !== 'herdada');
     const ganhos = (db.crmOps || []).filter(n => n && faseDe(n) === 'ganho' && na(n.fechadoEm || n.faseEm));
     const novosNeg = (db.crmOps || []).filter(n => n && na(n.criadoEm));
     const pedidos = (db.hubPedidos || []).filter(p => p && na(p.em));
@@ -957,7 +1051,7 @@
   /* ---------- Desempenho das operações (dashboard) ---------- */
   function desempenhoOperacoes(db, hoje) {
     const h = hoje || hojeISO(), meses = mesesAte(h.slice(0, 7), 12);
-    const ops = (db.ops || []).filter(o => o && o.id), hist = (db.opStatusHist || []).filter(x => x && x.op && x.em);
+    const ops = (db.ops || []).filter(o => o && o.id && !ehMae(o)), hist = (db.opStatusHist || []).filter(x => x && x.op && x.em);
     const novas = meses.map(m => ops.filter(o => String(o.criadaEm || '').slice(0, 7) === m).length);
     const entregues = meses.map(m => new Set(hist.filter(x => x.para === 'entregue' && String(x.em).slice(0, 7) === m).map(x => x.op)).size);
     const etapas = FLUXO.filter(k => !['entregue', 'concluida'].includes(k)).map(k => {
@@ -988,7 +1082,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    linkPerdido, arquivosPerdidos, excluirDocumento, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, excluirDocumento, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

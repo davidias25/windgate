@@ -23,8 +23,10 @@ module.exports = function registrar(app, ctx) {
 
   /* ShipsGo: criar rastreio para os contêineres de uma operação */
   app.post('/api/tracking/criar', auth.exigirTokenSeAtiva, async (req, res) => {
-    await pronto(); const o = (db().ops || []).find(x => x && x.id === (req.body || {}).op);
-    if (!o) return res.status(404).json({ success: false, message: 'Operação não encontrada.' });
+    await pronto(); const o0 = (db().ops || []).find(x => x && x.id === (req.body || {}).op);
+    if (!o0) return res.status(404).json({ success: false, message: 'Operação não encontrada.' });
+    // Cada contêiner rastreado é cobrado: a filha usa o rastreio da mãe.
+    const o = (o0.maeId && (db().ops || []).find(x => x && x.id === o0.maeId)) || o0;
     if (!shipsgo.configurado()) return res.json({ success: false, semIntegracao: true, message: 'Falta a chave SHIPSGO_API_KEY no Render.' });
     const alvos = (o.containers || []).map(c => c && c.numero).filter(Boolean);
     if (!alvos.length && !o.bl) return res.status(400).json({ success: false, message: 'Cadastre o contêiner ou o BL antes.' });

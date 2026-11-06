@@ -201,7 +201,7 @@
       qs: qs.length, aprov: aprov.length, valorAprov: aprov.reduce((s, q) => s + (+q.preco || 0), 0), rec, desp,
       fretes: (db.fretes || []).filter(f => f && noMes(f.data)).length,
       agFeitas: (db.agendaTasks || []).filter(t => t && t.doneAt && String(t.doneAt).slice(0, 7) === mes).length,
-      opsAtivas: (db.ops || []).filter(o => o && !['entregue', 'concluida'].includes(o.status))
+      opsAtivas: (db.ops || []).filter(o => o && o.papel !== 'mae' && !['entregue', 'concluida'].includes(o.status))
     };
   }
 
