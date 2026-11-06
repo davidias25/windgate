@@ -21,6 +21,31 @@ module.exports = function registrar(app, ctx) {
     catch (e) { res.status(502).json({ success: false, message: e.message }); }
   });
 
+  /* Um embarque pode ter vários contêineres: cada evento parte do resultado do anterior. */
+  function aplicarEventos(eventos, agora) {
+    const mudadas = new Map(), atuais = () => (db().ops || []).map(o => (o && mudadas.get(o._id || o.id)) || o);
+    eventos.forEach(ev => shipsgo.aplicarEvento(atuais(), ev, agora).forEach(n => mudadas.set(n._id || n.id, n)));
+    return [...mudadas.values()];
+  }
+  /* ShipsGo: posição real para o mapa. Só consulta: nada é criado nem cobrado, e o token não sai do servidor. */
+  app.get('/api/tracking/mapa', auth.exigirTokenSeAtiva, async (req, res) => {
+    await pronto();
+    if (!shipsgo.configurado()) return res.json({ success: true, semIntegracao: true, posicoes: {} });
+    const ops = (db().ops || []).filter(o => o && o.id && o.papel !== 'mae' && W.ativa(o) && (shipsgo.idDoLink(o.tracking) || (o.containers || []).length || o.bl)).slice(0, 40);
+    const posicoes = {}, eventos = []; let erro = null;
+    for (const o of ops) {
+      try {
+        const id = await shipsgo.embarqueDaOp(o);
+        if (!id) { posicoes[o.id] = { semRastreio: true }; continue; }
+        const d = await shipsgo.dadosDoEmbarque(id);
+        posicoes[o.id] = { id, status: d.status, pct: d.pct, origem: d.origem, destino: d.destino, pos: d.pos, rota: d.rota, link: d.link };
+        eventos.push(...d.eventos);
+      } catch (e) { erro = erro || e.message; if (e.status === 401 || e.status === 403) break; }
+    }
+    /* Serve de reserva do webhook: ETA, navio e descarga ficam em dia ao abrir o mapa. */
+    try { const mud = aplicarEventos(eventos, new Date().toISOString()); if (mud.length) await gravarParcial({ ops: mud }); } catch (e) { console.warn('⚠️ ShipsGo: atualização das operações:', e.message); }
+    res.json({ success: true, posicoes, erro });
+  });
   /* ShipsGo: criar rastreio para os contêineres de uma operação */
   app.post('/api/tracking/criar', auth.exigirTokenSeAtiva, async (req, res) => {
     await pronto(); const o0 = (db().ops || []).find(x => x && x.id === (req.body || {}).op);
@@ -31,7 +56,8 @@ module.exports = function registrar(app, ctx) {
     const alvos = (o.containers || []).map(c => c && c.numero).filter(Boolean);
     if (!alvos.length && !o.bl) return res.status(400).json({ success: false, message: 'Cadastre o contêiner ou o BL antes.' });
     const out = [];
-    for (const n of (alvos.length ? alvos : [null])) { try { out.push(Object.assign({ container: n }, await shipsgo.criarRastreio({ container: n, bl: n ? '' : o.bl, ref: o.id }))); } catch (e) { out.push({ container: n, erro: e.message }); } }
+    // Se já está na conta, não cria de novo: criar gasta crédito, e a referência diferente passaria pela checagem de duplicidade.
+    for (const n of (alvos.length ? alvos : [null])) { try { const ja = await shipsgo.acharEmbarque(n ? { container: n } : { bl: o.bl }); out.push(Object.assign({ container: n }, ja ? { id: ja, jaExistia: true } : await shipsgo.criarRastreio({ container: n, bl: n ? '' : o.bl, ref: o.id }))); } catch (e) { out.push({ container: n, erro: e.message }); } }
     res.json({ success: true, rastreios: out });
   });
   /* ShipsGo: webhook (URL cadastrada no painel: /api/webhooks/shipsgo/<SHIPSGO_WEBHOOK_TOKEN>) */
@@ -39,8 +65,7 @@ module.exports = function registrar(app, ctx) {
     if (!process.env.SHIPSGO_WEBHOOK_TOKEN || req.params.token !== process.env.SHIPSGO_WEBHOOK_TOKEN) return res.status(401).json({ success: false });
     await pronto();
     try {
-      const ev = shipsgo.interpretarEvento(req.body || {});
-      const mud = shipsgo.aplicarEvento(db().ops || [], ev, new Date().toISOString());
+      const mud = aplicarEventos(shipsgo.eventosDoPayload(req.body || {}), new Date().toISOString());
       if (mud.length) await gravarParcial({ ops: mud });
       res.json({ success: true, atualizadas: mud.length });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }

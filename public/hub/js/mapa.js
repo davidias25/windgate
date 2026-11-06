@@ -28,7 +28,21 @@
   /* Rota marítima simplificada Ásia → Brasil (via Singapura e Cabo da Boa Esperança). */
   const VIA = [[1.25, 103.8], [-6, 80], [-34.6, 18.5], [-20, -15]];
 
+  /* Posição real da ShipsGo: o servidor consulta, o navegador nunca vê o token. */
+  let track = null, buscandoTrack = false;
+  const CINCO_MIN = 5 * 60 * 1000;
+  function carregarTrack() {
+    if (buscandoTrack || (track && Date.now() - track.t < CINCO_MIN)) return;
+    buscandoTrack = true;
+    H.api('/api/tracking/mapa').then(r => r.json()).then(j => {
+      track = { t: Date.now(), posicoes: (j && j.posicoes) || {}, erro: (j && j.erro) || '', semIntegracao: !!(j && j.semIntegracao) };
+      if (H.estado.tela === 'mapa') H.render();
+    }).catch(() => { track = { t: Date.now(), posicoes: {}, erro: 'Não consegui consultar a ShipsGo agora.' }; if (H.estado.tela === 'mapa') H.render(); }).finally(() => { buscandoTrack = false; });
+  }
+  const realDe = o => (track && track.posicoes[o.id]) || null;
   function posicaoEstimada(o, hoje) {
+    const r = realDe(o);
+    if (r && r.pos) return { real: true, tipo: r.pos.tipo, ll: [r.pos.lat, r.pos.lng], pts: r.rota || [], frac: r.pct != null ? r.pct / 100 : null, ori: { nome: r.origem }, dst: { nome: r.destino }, navio: r.pos.navio, porto: r.pos.porto, status: r.status };
     const ori = porto(o.origemPorto) || porto(o.fabricaCidade), dst = porto(o.destinoPorto) || porto('Pecém');
     if (!ori || !dst) return null;
     const pts = [ori.ll].concat(ori.ll[1] > 60 ? VIA : [[0, -20]]).concat([dst.ll]);
@@ -49,26 +63,30 @@
   let mapa = null;
   H.telas.mapa = function (el) {
     const db = H.db, hoje = W.hojeISO();
-    const ops = db.ops.filter(o => o && W.ativa(o) && !['cotacao', 'contrato'].includes(o.status));
+    carregarTrack();
+    // Com posição real, entra mesmo se a etapa cadastrada ainda estiver atrás.
+    const ops = db.ops.filter(o => o && W.ativa(o) && (!['cotacao', 'contrato'].includes(o.status) || (realDe(o) && realDe(o).pos)));
     const pos = ops.map(o => ({ o, p: posicaoEstimada(o, hoje) }));
     const fora = pos.filter(x => !x.p).map(x => x.o);
     /* Quem tem texto no campo não está "sem porto": o nome é que não foi reconhecido, e dá para cadastrar. */
     const semPorto = fora.filter(o => !String(o.origemPorto || o.fabricaCidade || '').trim());
     const naoReconhecido = fora.filter(o => String(o.origemPorto || o.fabricaCidade || '').trim());
     el.innerHTML = `
-      <div class="head"><div><h1>Mapa & Tracking</h1><p class="sub">Onde está cada operação agora. Posição estimada pelo embarque e ETA até o tracking automático por contêiner entrar.</p></div></div>
+      <div class="head"><div><h1>Mapa & Tracking</h1><p class="sub">Onde está cada operação agora. Com o contêiner ou o link na ShipsGo, a posição é a real; nas demais, é estimada pelo embarque e ETA.</p></div></div>
+      ${track && track.erro ? `<div class="banner crit" style="margin-bottom:12px"><b>ShipsGo:</b> ${esc(track.erro)} O mapa mostra a posição estimada.</div>` : ''}
+      ${track && track.semIntegracao ? '<div class="banner" style="margin-bottom:12px">A chave da ShipsGo não está configurada no servidor: o mapa mostra só a posição estimada.</div>' : ''}
       ${semPorto.length ? `<div class="banner" style="margin-bottom:12px"><b>${semPorto.length} operação(ões) fora do mapa, sem porto de origem:</b> informe o porto ou a cidade da fábrica na aba Resumo: ${semPorto.map(o => `<a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a>`).join(', ')}.</div>` : ''}
       ${naoReconhecido.map(o => `<div class="banner" style="margin-bottom:12px"><b><a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a> fora do mapa:</b> o mapa não conhece "${esc(o.origemPorto || o.fabricaCidade)}". Confira a grafia na aba Resumo ou <button class="btn sm" data-cadporto="${esc(o.origemPorto || o.fabricaCidade)}">cadastre as coordenadas</button></div>`).join('')}
       <div class="box box-b"><div id="mapa" role="img" aria-label="Mapa com a posição das operações"></div>
-        <p class="note" style="margin-top:8px">● magenta: no mar · ● azul: na fábrica ou no destino · operações no mesmo navio aparecem juntas.</p></div>
+        <p class="note" style="margin-top:8px"><b style="color:#0F8A5F">●</b> verde: posição real da ShipsGo · <b style="color:#CE0058">●</b> magenta: estimada, no mar · <b style="color:#0046AD">●</b> azul: estimada, na fábrica ou no destino · operações no mesmo ponto aparecem juntas.</p></div>
       <div class="box"><div class="box-h"><h2>Situação por operação</h2><span class="note">${ops.length} operação(ões) em andamento</span></div>
         <div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th>Rota</th><th>Navio</th><th>Embarque</th><th>ETA</th><th class="num">Chega em</th><th class="num">Viagem</th><th>Tracking</th></tr></thead><tbody>
         ${pos.map(({ o, p }) => { const d = W.diasEntre(hoje, o.eta);
           return `<tr class="click" data-op="${esc(o.id)}"><td class="mono"><b>${esc(o.id)}</b><br><small class="note">${esc(o.cliente || '')}</small></td><td>${H.pillStatus(o.status)}</td>
-          <td>${esc((p && p.ori && p.ori.nome) || o.origemPorto || '?')} → ${esc((p && p.dst && p.dst.nome) || o.destinoPorto || '?')}${p ? '' : '<br><span class="pill warn">fora do mapa</span>'}</td><td>${esc(o.navio || '—')}</td>
+          <td>${esc((p && p.ori && p.ori.nome) || o.origemPorto || '?')} → ${esc((p && p.dst && p.dst.nome) || o.destinoPorto || '?')}${p ? '' : '<br><span class="pill warn">fora do mapa</span>'}</td><td>${esc((p && p.navio) || o.navio || '—')}</td>
           <td class="mono">${W.dataBR(o.embarque)}</td><td class="mono">${W.dataBR(o.eta)}</td><td class="num">${d == null ? '—' : d < 0 ? 'chegou' : d + ' dias'}</td>
           <td class="num">${p && p.frac != null ? Math.round(p.frac * 100) + '%' : '—'}</td>
-          <td>${o.tracking ? `<a href="${esc(o.tracking)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">armador ↗</a>` : '<span class="note">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">Nenhuma operação em produção ou trânsito.</td></tr>'}
+          <td>${p && p.real ? `<span class="pill ok">posição real</span>${p.porto ? `<br><small class="note">em ${esc(p.porto)}</small>` : ''}` : realDe(o) && realDe(o).semRastreio ? '<span class="note">não está na ShipsGo</span>' : realDe(o) && realDe(o).id ? `<span class="note">ShipsGo sem posição ainda${realDe(o).status ? ' · ' + esc(realDe(o).status) : ''}</span>` : ''}${realDe(o) && realDe(o).link ? `<br><a href="${esc(realDe(o).link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">ShipsGo ↗</a>` : o.tracking ? `<br><a href="${esc(o.tracking)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${/shipsgo/i.test(o.tracking) ? 'ShipsGo' : 'armador'} ↗</a>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">Nenhuma operação em produção ou trânsito.</td></tr>'}
         </tbody></table></div></div>`;
     el.querySelectorAll('[data-op]').forEach(x => x.onclick = e => { e.preventDefault(); H.ir('ficha', x.dataset.op); });
     el.querySelectorAll('[data-cadporto]').forEach(b => b.onclick = () => {
@@ -93,9 +111,9 @@
     pos.forEach(({ o, p }) => { if (!p) return; const k = p.ll.map(x => x.toFixed(1)).join(','); (grupos[k] = grupos[k] || { p, ops: [] }).ops.push(o); });
     const limites = [];
     Object.values(grupos).forEach(({ p, ops }) => {
-      const mar = p.frac != null;
-      if (mar) L.polyline(p.pts, { color: '#0046AD', weight: 1.5, dashArray: '5 5', opacity: .6 }).addTo(mapa);
-      L.circleMarker(p.ll, { radius: mar ? 8 : 6, color: '#fff', weight: 2, fillColor: mar ? '#CE0058' : '#0046AD', fillOpacity: 1 }).addTo(mapa)
+      const mar = p.real ? p.tipo === 'mar' : p.frac != null;
+      if ((mar || p.real) && p.pts.length > 1) L.polyline(p.pts, { color: '#0046AD', weight: 1.5, dashArray: '5 5', opacity: .6 }).addTo(mapa);
+      L.circleMarker(p.ll, { radius: mar ? 8 : 6, color: '#fff', weight: 2, fillColor: p.real ? '#0F8A5F' : mar ? '#CE0058' : '#0046AD', fillOpacity: 1 }).addTo(mapa)
         .bindTooltip(`<span class="map-lbl">${ops.map(o => esc(o.id)).join(' · ')}</span>`, { permanent: true, direction: 'right', className: 'map-tip', opacity: 1, offset: [8, 0] })
         .on('click', () => H.ir('ficha', ops[0].id));
       limites.push(p.ll);
