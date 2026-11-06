@@ -67,10 +67,15 @@ console.log('\nFunção ligada:');
   ok(!abrir('q1', true).innerHTML.includes('id="cladd"'), 'cotação aprovada não vira de vários clientes');
   const el = abrir('q3', true), h = el.innerHTML;
   ok(h.includes('Márcio') && h.includes('Bruno') && h.includes('Rateio dos custos comuns') && h.includes('CBM (m³)') && h.includes('Cronograma de desembolso por cliente'), 'mostra clientes, CBM, rateio e cronograma por cliente');
-  ok(!h.includes('id="cf_cliente"') && !h.includes('id="cf_margemPct"') && !h.includes('id="cenvia"'), 'sem os campos de um cliente só e sem Enviar para aprovação');
+  ok(!h.includes('id="cf_cliente"') && !h.includes('id="cf_margemPct"') && h.includes('id="cenvia"') && !h.includes('id="cprop"'), 'sem os campos de um cliente só, com Enviar para aprovação, e sem a proposta única');
   const resumo = el.querySelector('#cresumo').innerHTML;
   ok(resumo.includes('Márcio') && resumo.includes('Bruno') && resumo.includes('Total'), 'resumo com uma linha por cliente e o total');
   ok(el.querySelector('#crv_frete').textContent.includes('Márcio:'), 'o rateio mostra quanto fica com cada cliente');
+
+  const emAprovacao = banco(true); emAprovacao.quotes.q3.status = 'wait'; emAprovacao.quotes.q3.clientes.forEach(c => { c.status = 'wait'; }); emAprovacao.quotes.q3.clientes[0].status = 'ok';
+  H.db = emAprovacao; const elAp = criarNo(); H.telas.cotacoes(criarNo(), null); H.telas.cotacoes(elAp, 'q3');
+  const ra = elAp.querySelector('#cresumo').innerHTML;
+  ok(ra.includes('data-pdfc="c1"') && !ra.includes('data-pdfc="c2"'), 'cliente aprovado tem a sua proposta; o outro ainda não');
 
   const form = el.querySelector('#cform');
   const digita = (dataset, value) => form.disparar('input', { target: { dataset, value, type: 'text' } });

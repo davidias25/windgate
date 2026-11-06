@@ -169,6 +169,16 @@
   function darBaixa(l) {
     if (!l) return;
     const rec = W.ehReceita(l);
+    const tv = !rec ? W.travaFabrica(H.db, l) : null;
+    if (tv && tv.bloqueia) {
+      const samir = H.pode('fin.autorizar');
+      const mt = H.modal('Pagamento à fábrica travado', `<p>A cota destas filhas ainda não foi recebida. Pagar agora é adiantar <b>${W.fmtBRL(tv.descoberto)}</b> pelo cliente.</p>
+        <div class="list" style="margin-top:8px">${tv.abertas.map(f => `<div class="row"><span><b>${esc(f.op)}</b> ${esc(f.cliente)}<br><small class="note">cota ${W.fmtBRL(f.cota)} · recebido ${W.fmtBRL(f.recebido)}</small></span><span class="num">${W.fmtBRL(f.descoberto)}</span></div>`).join('')}</div>
+        ${samir ? '' : '<p class="note" style="margin-top:8px">Só o Samir libera este pagamento.</p>'}`,
+        `<button class="btn" data-x>Fechar</button>${samir ? '<button class="btn pri" id="lbf">Liberar mesmo assim</button>' : ''}`);
+      const lb = mt.querySelector('#lbf'); if (lb) lb.onclick = () => { W.liberarFabrica(H.db, l._id, H.nomeUsuario(H.userKey)); H.salvar(); H.fecharModal(); darBaixa(H.db.fin.find(x => x && x._id === l._id)); };
+      return;
+    }
     const m = H.modal(`${rec ? 'Receber' : 'Pagar'} · ${l.desc || l.op || ''}`, `<div class="fields">
       <div class="f w2"><label class="lbl" for="bv">Valor ${rec ? 'recebido' : 'pago'} (R$)</label><input id="bv" type="number" step="0.01" value="${(+l.valor || 0).toFixed(2)}"></div>
       <div class="f w2"><label class="lbl" for="bd">Data</label><input id="bd" type="date" value="${W.hojeISO()}"></div>

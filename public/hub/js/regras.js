@@ -271,7 +271,18 @@
   function ligadosDaOp(db, id) {
     const de = l => l && String(l.op || '').trim() === String(id).trim();
     const fin = (db.fin || []).filter(de);
-    return { fin: fin.length, realizados: fin.filter(realizado).length, valor: fin.reduce((a, l) => a + (+l.valor || 0), 0), docs: (db.docs || []).filter(de).length, notas: (db.hubNFe || []).filter(n => n && String(n.op || '').trim() === String(id).trim() && ['autorizada', 'autorizado'].includes(String(n.status || '').toLowerCase())).length };
+    return { fin: fin.length, realizados: fin.filter(realizado).length, valor: fin.reduce((a, l) => a + (+l.valor || 0), 0), docs: (db.docs || []).filter(de).length, notas: (db.hubNFe || []).filter(n => n && String(n.op || '').trim() === String(id).trim() && ['autorizada', 'autorizado'].includes(String(n.status || '').toLowerCase())).length,
+      notasAbertas: (db.hubNFe || []).filter(n => n && String(n.op || '').trim() === String(id).trim() && !/cancel|rejeit|deneg|inutiliz/i.test(String(n.status || ''))).length,
+      previstos: fin.filter(l => !realizado(l)).length };
+  }
+  /** Por que a operação não pode ser excluída. Vazio: pode. */
+  function bloqueiosExclusao(db, id) {
+    const g = ligadosDaOp(db, id), out = [];
+    if ((db.ops || []).some(x => x && x.maeId === id)) out.push('Este contêiner ainda tem operações-filhas: exclua ou desligue as filhas antes.');
+    if (g.realizados) out.push(`Tem ${g.realizados} lançamento(s) já realizado(s) no Financeiro.`);
+    if (g.docs) out.push(`Tem ${g.docs} documento(s): exclua os documentos antes.`);
+    if (g.notasAbertas) out.push(`Tem ${g.notasAbertas} NF-e registrada(s).`);
+    return out;
   }
   /**
    * Troca o código da operação em tudo o que aponta para ela: lançamentos, documentos, recorrências,
@@ -309,15 +320,22 @@
     if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: novo, de: '', para: '', em: t, por: por || '', tipo: 'renomeacao', origem: 'hub2', motivo: `Código alterado de ${de} para ${novo}` });
     return { ok: true, para: novo, alterados };
   }
-  /** Como no sistema antigo: sai a operação; lançamentos e documentos ficam, com o código preservado. */
-  function excluirOperacao(db, id, por, agora) {
+  /**
+   * Só sai operação sem lançamento realizado, documento ou NF-e. Lançamento previsto vai para `moverPara`,
+   * se informada; sem ela, fica no Financeiro com o código preservado. Tudo fica no histórico.
+   */
+  function excluirOperacao(db, id, por, agora, opcoes) {
     if (!(db.ops || []).some(x => x && x.id === id)) return { ok: false, msg: 'Operação não encontrada.' };
-    if ((db.ops || []).some(x => x && x.maeId === id)) return { ok: false, msg: 'Este contêiner ainda tem operações-filhas: exclua ou desligue as filhas antes.' };
+    const bloq = bloqueiosExclusao(db, id);
+    if (bloq.length) return { ok: false, msg: bloq.join(' '), bloqueios: bloq };
+    const dest = opcoes && opcoes.moverPara, t = agora || new Date().toISOString();
+    if (dest && (dest === id || !(db.ops || []).some(x => x && x.id === dest))) return { ok: false, msg: 'A operação de destino não existe.' };
     const g = ligadosDaOp(db, id);
+    if (dest) (db.fin || []).forEach(l => { if (l && String(l.op || '').trim() === String(id).trim()) { l.op = dest; l.movidoDe = id; } });
     db.ops = db.ops.filter(x => !(x && x.id === id));
-    if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: '', em: agora || new Date().toISOString(), por: por || '', tipo: 'exclusao', origem: 'hub2',
-      motivo: g.fin ? `${g.fin} lançamento(s) preservado(s) no Financeiro — ${fmtBRL(g.valor)}${g.realizados ? `, ${g.realizados} já realizado(s)` : ''}` : 'sem lançamentos vinculados' });
-    return { ok: true, ligados: g };
+    if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: '', em: t, por: por || '', tipo: 'exclusao', origem: 'hub2',
+      motivo: !g.fin ? 'sem lançamentos vinculados' : dest ? `${g.fin} lançamento(s) previsto(s) movido(s) para ${dest} — ${fmtBRL(g.valor)}` : `${g.fin} lançamento(s) previsto(s) preservado(s) no Financeiro — ${fmtBRL(g.valor)}` });
+    return { ok: true, ligados: g, movidos: dest ? g.fin : 0 };
   }
 
   /** Tira o documento da lista. Se ele era a versão nova de outro, a versão anterior volta a aparecer. */
@@ -1082,7 +1100,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, excluirDocumento, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

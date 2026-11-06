@@ -615,7 +615,7 @@ function triCalcular(e){
      Na triangular com vários clientes não há mark-up fixo: a NF de saída é a de entrada ÷ (1 − 4%). */
   const GRUPOS_RATEIO = [['frete', 'Frete internacional'], ['seguro', 'Seguro'], ['capatazia', 'Capatazia'], ['terrestre', 'Transporte terrestre'], ['siscomex', 'Taxa Siscomex'], ['afrmm', 'AFRMM'], ['honorarios', 'Honorários do despachante'], ['demais', 'Demais despesas']];
   const REGRAS_RATEIO = [['fob', 'Valor FOB'], ['peso', 'Peso'], ['cbm', 'CBM'], ['igual', 'Igual por cliente'], ['manual', 'Percentual manual']];
-  const RATEIO_PADRAO = { frete: 'cbm', seguro: 'fob', capatazia: 'fob', terrestre: 'fob', siscomex: 'fob', afrmm: 'fob', honorarios: 'fob', demais: 'fob' };
+  const RATEIO_PADRAO = { frete: 'cbm', seguro: 'fob', capatazia: 'cbm', terrestre: 'cbm', siscomex: 'cbm', afrmm: 'cbm', honorarios: 'cbm', demais: 'cbm' };
   const CAMPO_GRUPO = { frete: 'freteUSD', seguro: 'seguro', capatazia: 'capatazia', terrestre: 'transporte', siscomex: 'siscomex', afrmm: 'afrmm', honorarios: 'honorarios' };
 
   /** Clientes da cotação. A antiga vira um cliente com os campos de sempre, sem gravar nada. */
@@ -690,7 +690,7 @@ function triCalcular(e){
       margemPct: String(c.margemPct != null ? c.margemPct : f.margemPct), margemBRL: String(c.margemRS != null ? c.margemRS : 0), aliqST: String(c.aliqST != null ? c.aliqST : f.aliqST),
       desR1: c.desR1 != null ? String(c.desR1) : '', desR2: c.desR2 != null ? String(c.desR2) : '', desR3: c.desR3 != null ? String(c.desR3) : '',
       mkSF: '0', mkJT: '0', freteUSD: fatia('freteUSD', fob), seguro: fatia('seguro', fob), capatazia: fatia('capatazia', fob), transporte: fatia('transporte', fob), siscomex: fatia('siscomex', fob), honorarios: fatia('honorarios', fob), outrasAdu: fatia('outrasAdu', fob), afrmm: fatia('afrmm', peso) });
-    return Object.assign({}, q, { fields, items: itensDoCliente(q, c.id), exps: (q.exps || []).map(e => Object.assign({}, e, { v: (+e.v || 0) * fob })), fotos: (q.fotos || []).filter(ft => ft && ft.clienteId === c.id),
+    return Object.assign({}, q, { fields, items: itensDoCliente(q, c.id), exps: (q.exps || []).map(e => Object.assign({}, e, { v: (+e.v || 0) * fob })), fotos: (q.fotos || []).filter(ft => ft && (!ft.clienteId || ft.clienteId === c.id)),
       status: c.status || 'draft', aprovadoPor: c.aprovadoPor || null, clienteId: c.id, clientes: undefined, regraRateio: undefined, preco: 0 });
   }
   /**
@@ -744,8 +744,8 @@ function triCalcular(e){
     return { multi: true, clientes, total, travas, avisos: conf.avisos, erros: [] };
   }
 
-  /* Ligado pela diretoria na lista de cotações. Desligado, cotação com vários clientes abre só para leitura. */
-  const multiClienteLigado = db => !!(db && db.hubPainel && db.hubPainel._flags && db.hubPainel._flags.multiCliente);
+  /* Ligado para todos. A diretoria ainda pode desligar na lista de cotações: desligado, cotação com vários clientes abre só para leitura. */
+  const multiClienteLigado = db => !(db && db.hubPainel && db.hubPainel._flags && db.hubPainel._flags.multiCliente === false);
   /** Acrescenta um cliente. A 1ª vez, os campos de hoje viram o cliente 1 e todos os itens ficam dele. */
   function adicionarCliente(q) {
     if (!Array.isArray(q.clientes) || !q.clientes.length) {
@@ -778,6 +778,25 @@ function triCalcular(e){
     if (!ehMultiCliente(q)) return;
     const junta = k => q.clientes.map(c => String(c[k] || '').trim()).filter(Boolean).join(' + ');
     q.fields = Object.assign({}, q.fields, { cliente: junta('nome'), opNum: junta('opNum'), mercadoria: junta('mercadoria') });
+  }
+
+  /* ==== Aprovação por cliente ==== */
+  function enviarClientes(q) { clientesDe(q).forEach(c => { if (c.status !== 'ok') c.status = 'wait'; }); }
+  /** O Samir aprova cada cliente. Com o último, a cotação inteira fica aprovada. Guarda o preço aprovado. */
+  function aprovarCliente(q, clienteId, por, agora) {
+    const c = clientesDe(q).find(x => x.id === clienteId); if (!c) return { ok: false, msg: 'Cliente não encontrado.' };
+    const cc = calcularPorCliente(q).clientes.find(x => x.id === clienteId); if (!cc) return { ok: false, msg: 'Complete a cotação antes de aprovar.' };
+    const errs = desemErros(cc.q, cc.R); if (errs.length) return { ok: false, msg: errs[0] };
+    Object.assign(c, { status: 'ok', aprovadoPor: por || '', aprovadoEm: agora || new Date().toISOString(), precoAprovado: +cc.R.preco.toFixed(2) });
+    return { ok: true, todos: clientesDe(q).every(x => x.status === 'ok') };
+  }
+  /** Depois de editar: cliente cujo preço mudou volta para aprovação. Devolve os nomes. */
+  function revisarAprovacoes(q) {
+    if (!ehMultiCliente(q)) return [];
+    const rm = calcularPorCliente(q); if (!rm.clientes.length) return [];
+    const mudaram = [];
+    rm.clientes.forEach(cc => { const c = cc.cliente; if (c.status === 'ok' && Math.abs(+cc.R.preco.toFixed(2) - (+c.precoAprovado || 0)) > 0.005) { c.status = 'wait'; c.aprovadoPor = null; mudaram.push(c.nome || c.id); } });
+    return mudaram;
   }
 
   /* ==== Lista (qindex) e gravação ==== */
@@ -882,6 +901,64 @@ function triCalcular(e){
     return { id, op, lancamentos: out, soltos, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
   }
 
+  /* ==== Cotação com vários clientes vira mãe e filhas ====
+     Mãe: fábrica (pagamento único), frete, seguro e porto. Filha: parcelas do cliente, impostos dele, imposto de venda
+     e frete nacional. A parte de cada filha no que está na mãe sai do rateio da própria cotação, salvo em mae.rateio. */
+  function criarOperacoesDaMulti(db, q, opcoes) {
+    const o = opcoes || {}, maeId = String(o.maeId || '').trim().toUpperCase(), t = o.agora || new Date().toISOString(), hj = o.hoje || W.hojeISO(), por = o.por || '';
+    if (!ehMultiCliente(q)) return { ok: false, msg: 'Esta cotação tem um cliente só.' };
+    if (!maeId) return { ok: false, msg: 'Informe o código do contêiner (operação-mãe).' };
+    const rm = calcularPorCliente(q);
+    if (rm.erros.length) return { ok: false, msg: rm.erros[0] };
+    if (rm.travas.length) return { ok: false, msg: rm.travas[0].msg };
+    let mae = (db.ops || []).find(x => x && x.id === maeId), criouMae = false;
+    if (mae && !W.ehMae(mae)) { if (mae.maeId) return { ok: false, msg: maeId + ' é filha de outro contêiner.' }; if (mae.quoteId && mae.quoteId !== q.id) return { ok: false, msg: maeId + ' já é de outra cotação.' }; W.virarMae(db, maeId); }
+    if (!mae) { mae = { _id: W.novoId(), id: maeId, papel: 'mae', nome: 'Contêiner compartilhado', cliente: '', status: 'contrato', statusEm: t, statusPor: por, resp: 'Davi', prox: '', obs: 'Criada a partir da cotação aprovada', criadaEm: t, quoteId: q.id }; db.ops.unshift(mae); criouMae = true; if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: W.novoId(), op: maeId, de: '', para: 'contrato', em: t, por, tipo: 'mudanca', origem: 'hub2-cotacao', motivo: 'Cotação aprovada' }); }
+    if (!mae.quoteId) mae.quoteId = q.id;
+    /* Filhas: reaproveita a que já é daquele cliente desta cotação. */
+    const filhas = [];
+    for (const cc of rm.clientes) {
+      let f = (db.ops || []).find(x => x && x.quoteId === q.id && x.quoteClienteId === cc.id);
+      if (!f) {
+        const r = W.criarFilha(db, maeId, { id: cc.cliente.opNum || '', cliente: cc.nome, nome: cc.cliente.mercadoria || '', quoteId: q.id }, por, t, o.modeloChecklist);
+        if (!r.ok) return { ok: false, msg: (cc.nome || cc.id) + ': ' + r.msg };
+        f = r.op; f.quoteClienteId = cc.id; f.modalidade = 'propria'; f.estruturaFiscal = cc.R.tri ? 'jt' : 'sf';
+        if (cc.cliente.opNum !== f.id) cc.cliente.opNum = f.id;
+      }
+      filhas.push({ op: f, cc });
+    }
+    /* A parte da cotação vira o critério da mãe, para a filha dar o custo que o cliente viu. */
+    const pctDe = fn => { const tot = rm.clientes.reduce((a, c) => a + fn(c.R.custoPor), 0); return tot > 0 ? Object.fromEntries(filhas.map(x => [x.op.id, fn(x.cc.R.custoPor) / tot * 100])) : null; };
+    const CLASSE_MAE = { frete: p => p.frete, seguro: p => p.seguro, porto: p => p.capatazia + p.siscomex + p.afrmm + p.honorarios + p.demais };
+    mae.rateio = Object.assign({}, mae.rateio);
+    Object.keys(CLASSE_MAE).forEach(k => { const pct = pctDe(CLASSE_MAE[k]); if (pct && !(mae.rateio[k] && mae.rateio[k].criterio === 'manual')) mae.rateio[k] = { criterio: 'cotacao', pct }; });
+    const fobs = rm.total.fob; if (fobs > 0 && !mae.alocacaoFabrica) mae.alocacaoFabrica = { pct: Object.fromEntries(filhas.map(x => [x.op.id, x.cc.R.fob / fobs * 100])) };
+    /* Lançamentos: nada duplica ao repetir, pela marca de origem + tipo + descrição. */
+    const novos = [], marca = 'cotacao:' + q.id, existe = (op, tipo, desc) => (db.fin || []).some(l => l && l.origem === marca && l.op === op && l.tipo === tipo && l.desc === desc);
+    const lancar = (op, dias, tipo, desc, valor, custo) => { if (!(valor > 0.004) || existe(op, tipo, desc)) return; const l = { _id: W.novoId(), data: hj, vencimento: somaDias(hj, dias), op, tipo, categoria: '', fixo: false, empresa: 'WindGate', desc, valor: +(+valor).toFixed(2), status: 'Previsto', comp: '', nf: '', por, origem: marca }; if (custo) l.custo = custo; novos.push(l); };
+    const dias = CRONO_OP.map(x => x.dias), soma = fn => rm.clientes.reduce((a, c) => a + fn(c), 0);
+    const f = camposDe(q), sinal = N(f, 'fabSinal') || 30;
+    const o1 = soma(c => desemOuts(c.q, c.R).o1), o2 = soma(c => desemOuts(c.q, c.R).o2);
+    lancar(maeId, dias[0], 'Despesa', `1º pagamento — Sinal da fábrica (${sinal}% do FOB)`, o1, 'fob');
+    lancar(maeId, dias[1], 'Despesa', '2º pagamento — Saldo da fábrica · pré-embarque', o2, 'fob');
+    lancar(maeId, dias[2], 'Despesa', '3º pagamento — Frete internacional', soma(c => c.R.custoPor.frete), 'frete');
+    lancar(maeId, dias[2], 'Despesa', '3º pagamento — Seguro', soma(c => c.R.custoPor.seguro), 'seguro');
+    lancar(maeId, dias[2], 'Despesa', '3º pagamento — Porto, armazenagem e despachante', soma(c => CLASSE_MAE.porto(c.R.custoPor)), 'porto');
+    filhas.forEach(({ op, cc }) => {
+      const r = [N(cc.q.fields, 'desR1'), N(cc.q.fields, 'desR2'), N(cc.q.fields, 'desR3')];
+      if (r.reduce((a, b) => a + b, 0) <= 0) { r[0] = precoDesem(cc.R); r[1] = 0; r[2] = 0; }
+      CRONO_OP.forEach((c, i) => lancar(op.id, c.dias, 'Receita', c.rot + ' recebimento do cliente — parcela ' + (i + 1), r[i]));
+      const parc = cc.R.tri ? cc.R.tri.apuracao.bloco6.parcelas : null, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
+      let imp = parc ? de(/^Impostos de importa/) : cc.R.impostos || 0, venda = parc ? de(/^Resultante|^ICMS l[ií]quido|^DIFAL/) : cc.R.resultante || 0;
+      if (venda < 0) { imp += venda; venda = 0; }
+      lancar(op.id, dias[2], 'Despesa', '3º pagamento — Impostos de importação', imp, 'impostos');
+      lancar(op.id, dias[2], 'Despesa', '3º pagamento — Imposto de venda (resultante e DIFAL)', venda, 'impVenda');
+      lancar(op.id, dias[2], 'Despesa', '3º pagamento — Frete nacional', cc.R.custoPor.terrestre, 'nacional');
+    });
+    db.fin = novos.concat(db.fin || []);
+    return { ok: true, mae, criouMae, filhas: filhas.map(x => x.op), lancamentos: novos, jaLancado: !novos.length };
+  }
+
   /* ==== Cotação aprovada no funil do CRM ====
      Aprovada pelo Samir = proposta liberada: o negócio entra (ou avança) para "Proposta enviada".
      Já virou operação: o negócio fica Ganho. Negócio em Negociação, Ganho ou Perdido não volta de fase.
@@ -975,5 +1052,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    enviarClientes, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

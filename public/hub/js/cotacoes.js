@@ -95,7 +95,7 @@
       <div class="head"><div><button class="btn ghost sm" id="cvolta">← Cotações</button><h1 style="margin-top:6px">${ed.id ? 'Cotação ' + esc(F('opNum') || 'sem nº') : 'Nova cotação'}${F('cliente') ? ' · ' + esc(F('cliente')) : ''}</h1>
         <p class="sub">${stPill(ed.status)} ${ed.aprovadoPor && ed.status === 'ok' ? 'aprovada por ' + esc(ed.aprovadoPor) : ed.status === 'wait' ? 'aguardando o Samir aprovar a margem' : 'Davi monta → envia → Samir aprova a margem → proposta liberada'}</p></div>
         <div class="btns"><button class="btn" id="cnova">+ Nova</button>${bloq ? (semFlag() ? '' : '<button class="btn blue" id="cedit">Editar cotação</button>') : '<button class="btn" id="csalva">Salvar</button>'}
-          <button class="btn pri" id="cprop" ${ed.status === 'ok' ? '' : 'disabled title="Liberada depois da aprovação do Samir"'}>Gerar proposta (PDF)</button></div></div>
+          ${multi ? '' : `<button class="btn pri" id="cprop" ${ed.status === 'ok' ? '' : 'disabled title="Liberada depois da aprovação do Samir"'}>Gerar proposta (PDF)</button>`}</div></div>
       ${semFlag() ? '<div class="banner">Cotação com <b>vários clientes</b>: somente leitura enquanto a função estiver desligada.</div>' : bloq ? `<div class="banner">Cotação <b>aprovada</b>${ed.aprovadoPor ? ' por <b>' + esc(ed.aprovadoPor) + '</b>' : ''}: somente leitura. Para corrigir, clique em <b>Editar cotação</b>. Se o preço mudar, ela volta para a aprovação.</div>`
         : ed.status === 'ok' ? '<div class="banner">Editando uma cotação já aprovada. Se o <b>preço ao cliente</b> mudar, ela volta para a aprovação do Samir; o resto pode ser corrigido sem refazer o fluxo.</div>' : ''}
       <div class="g2 larga" style="align-items:start"><fieldset id="cform" ${bloq ? 'disabled' : ''} style="border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:16px">
@@ -149,10 +149,10 @@
           <p class="note" style="margin-top:8px">Referência histórica (mai/25–jul/26): margem líquida mediana ≈26% s/ receita · faixa 10%–50%. Aço/escoras 13%–43% · Máquinas 10%–18% · cotações pequenas 45%+.</p>`}
           <div id="cpreco" style="margin-top:10px"></div>
           <div class="btns" style="margin-top:10px;flex-direction:column;align-items:stretch">
-            ${ed.status === 'draft' && !multi ? '<button class="btn blue" id="cenvia">Enviar para aprovação · Samir</button>' : ''}
-            ${ed.status === 'wait' && podeAprovar() ? '<button class="btn pri" id="caprova">Aprovar margem e liberar proposta</button><button class="btn" id="cdevolve">Devolver para ajuste</button>' : ''}
+            ${ed.status === 'draft' ? '<button class="btn blue" id="cenvia">Enviar para aprovação · Samir</button>' : ''}
+            ${ed.status === 'wait' && podeAprovar() ? `${multi ? '' : '<button class="btn pri" id="caprova">Aprovar margem e liberar proposta</button>'}<button class="btn" id="cdevolve">Devolver para ajuste</button>` : ''}
             ${ed.status === 'ok' ? `<button class="btn" id="cop">Criar operação + previsto no Financeiro</button>` : ''}</div>
-          <p class="note" style="margin-top:8px">${multi ? 'Com vários clientes, a aprovação por cliente e as propostas ainda não estão disponíveis: por enquanto a cotação fica em rascunho.' : ed.status === 'wait' && !podeAprovar() ? 'Enviada. Aguardando o Samir aprovar a margem; o PDF é liberado em seguida.' : ed.status === 'ok' ? 'Proposta liberada: gere o PDF no padrão WindGate.' : 'Nada sai sem aprovação.'}</p></div></div></div>`;
+          <p class="note" style="margin-top:8px">${multi ? 'Cada cliente é aprovado e tem a sua proposta. Os botões ficam no resumo, ao lado do nome.' : ed.status === 'wait' && !podeAprovar() ? 'Enviada. Aguardando o Samir aprovar a margem; o PDF é liberado em seguida.' : ed.status === 'ok' ? 'Proposta liberada: gere o PDF no padrão WindGate.' : 'Nada sai sem aprovação.'}</p></div></div></div>`;
     ligar(el);
     atualizar(el);
   }
@@ -249,9 +249,15 @@
     if (rm.erros.length) { resumo.innerHTML = `<p class="note">Falta completar a cotação: ${esc(rm.erros[0])}</p>`; preco.innerHTML = ''; W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = '—'; }); return; }
     const lin = (a, b, forte) => `<div style="display:flex;justify-content:space-between;gap:8px${forte ? ';font-weight:700' : ''}"><span${forte ? '' : ' class="note"'}>${a}</span><span class="num">${b}</span></div>`;
     resumo.innerHTML = `${rm.clientes.map((c, k) => `<div style="padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><b>${nome(c, k)}</b>${c.R.tri ? pill('triangular', 'info') : ''}</div>
+        ${(st => st === 'ok' ? `<div style="display:flex;justify-content:space-between;gap:8px;margin:4px 0">${pill('aprovado', 'ok')}<button class="btn sm" data-pdfc="${esc(c.id)}">Proposta (PDF)</button></div>` : ed.status === 'wait' ? (podeAprovar() ? `<div style="margin:4px 0"><button class="btn pri sm" data-aprc="${esc(c.id)}">Aprovar este cliente</button></div>` : `<div style="margin:4px 0">${pill('aguardando o Samir', 'warn')}</div>`) : '')((clienteEd(c.id) || {}).status)}
         ${lin('FOB', fmt(c.R.fob))}${lin('Custo', fmt(c.custo))}${lin('DIFAL', fmt(c.R.tri ? c.R.tri.difal : c.R.st))}${lin('Margem s/ custo', pct(c.R.margemPctCampo) + ' · ' + fmt(c.R.margem))}${lin('Preço', fmt(c.R.preco), true)}
         ${c.R.warnMargem ? '<p class="note" style="color:var(--warn);margin-top:4px">⚠ Margem abaixo de 10%.</p>' : ''}</div>`).join('')}
       ${lin('Total FOB', fmt(rm.total.fob))}${lin('Total de custo', fmt(rm.total.custo), true)}`;
+    resumo.onclick = ev => {
+      const a = ev.target.closest('[data-aprc]'), p = ev.target.closest('[data-pdfc]');
+      if (a) aprovarCli(el, a.dataset.aprc);
+      if (p) { pdfCliente = p.dataset.pdfc; propostaModal(); }
+    };
     preco.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;font-size:18px"><b>Soma dos preços</b><b class="num">${fmt(rm.total.preco)}</b></div>`;
     W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = rm.clientes.map((c, k) => (c.nome || 'Cliente ' + (k + 1)) + ': ' + fmt(c.R.custoPor[g])).join(' · '); });
     rm.clientes.forEach(cc => {
@@ -428,6 +434,12 @@
     const anterior = ed.id ? H.db.quotes[ed.id] : null;
     const r = W.prepararGravacao(ed, R, forcar && anterior && anterior.status === 'ok' && ed.status !== 'ok' ? Object.assign({}, anterior, { status: 'x' }) : anterior, editando, eu());
     if (!r.ok) { H.toast(esc(r.msg)); return false; }
+    /* Vários clientes: o total pode não mudar e o preço de um deles, sim. Só quem mudou volta para aprovação. */
+    if (W.ehMultiCliente(ed) && anterior && anterior.status === 'ok' && editando) {
+      if (r.revogou) ed.clientes.forEach(c => { c.status = 'wait'; c.aprovadoPor = null; });
+      else if (W.revisarAprovacoes(ed).length) { r.revogou = true; r.registro.status = 'wait'; r.registro.aprovadoPor = null; }
+      r.registro.clientes = ed.clientes;
+    }
     ed.id = r.registro.id; ed.status = r.registro.status; ed.aprovadoPor = r.registro.aprovadoPor;
     H.db.quotes[ed.id] = r.registro;
     const ix = H.db.qindex.findIndex(x => x && x.id === ed.id);
@@ -448,12 +460,54 @@
     H.salvar();
   }
   function enviar(el) {
-    if (W.ehMultiCliente(ed)) return H.toast('Com vários clientes, a aprovação por cliente ainda não está disponível.');
+    if (W.ehMultiCliente(ed)) {
+      const rm = W.calcularPorCliente(ed, { usuario: eu() });
+      if (rm.erros.length) return H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(rm.erros[0]));
+      if (rm.travas.length) return H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(rm.travas[0].msg));
+      for (const cc of rm.clientes) { const e = W.desemErros(cc.q, cc.R); if (e.length) return H.toast(`⛔ <b>${esc(cc.nome || cc.id)}:</b> ${esc(e[0])}`); }
+      ed.criadoPor = ed.criadoPor || eu(); ed.status = 'wait'; W.enviarClientes(ed);
+      R = { preco: rm.total.preco };
+      if (salvar(true)) { avisarSamir(); H.toast('Enviada para aprovação do <b>Samir</b>.'); editor(el); }
+      return;
+    }
     if (!ed.items.length || !(R.custoReal > 0)) return H.toast('Preencha a cotação antes de enviar.');
     const errs = W.desemErros(ed, R);
     if (errs.length) { H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(errs[0])); return; }
     ed.criadoPor = ed.criadoPor || eu(); ed.status = 'wait';
     if (salvar(true)) { avisarSamir(); H.toast('Enviada para aprovação do <b>Samir</b>.'); editor(el); }
+  }
+  /* Aprova um cliente. Com o último, a cotação fica aprovada e segue o caminho de sempre. */
+  function aprovarCli(el, id) {
+    if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
+    const r = W.aprovarCliente(ed, id, eu());
+    if (!r.ok) return H.toast('⛔ <b>Não aprova:</b> ' + esc(r.msg));
+    if (!r.todos) { salvar(true); H.toast('Cliente aprovado.'); return editor(el); }
+    ed.aprovadoPor = eu(); ed.status = 'ok';
+    const anterior = H.db.quotes[ed.id];
+    if (anterior) H.db.quotes[ed.id] = Object.assign({}, anterior, { status: 'wait' });
+    if (!salvar(true)) return;
+    (H.db.hubRecados || []).filter(x => x && x.quoteId === ed.id && x.para === 'samir').forEach(x => { x.feito = Object.assign({}, x.feito, { samir: new Date().toISOString() }); });
+    W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
+    const ent = H.db.qindex.find(x => x && x.id === ed.id); if (ent) ent.funilEm = new Date().toISOString();
+    H.salvar();
+    H.toast('Todos os clientes aprovados: propostas liberadas e negócio no <b>Funil</b>.');
+    editor(el);
+    criarOperacao();
+  }
+  /* Vários clientes: pede o código do contêiner, cria mãe e filhas e lança o previsto. */
+  function criarOperacoesMulti() {
+    const ja = H.db.ops.find(o => o && o.quoteId === ed.id && W.ehMae(o));
+    const sug = ja ? ja.id : String((ed.clientes.map(c => c.opNum).find(Boolean) || '')).toUpperCase().split('.')[0];
+    const m = H.modal('Contêiner compartilhado', `<p>Cria o contêiner (operação-mãe), uma filha para cada cliente e o previsto no Financeiro: a fábrica, o frete, o seguro e o porto na mãe; as parcelas, os impostos e o frete nacional em cada filha.</p>
+      <div class="f" style="margin-top:8px"><label class="lbl" for="mcod">Código do contêiner</label><input id="mcod" value="${esc(sug)}" ${ja ? 'disabled' : ''}></div>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="mcok">Criar</button>');
+    m.querySelector('#mcok').onclick = () => {
+      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: m.querySelector('#mcod').value, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO });
+      if (!r.ok) return H.toast('⛔ ' + esc(r.msg));
+      if (H.db.quotes[ed.id]) { H.db.quotes[ed.id].clientes = ed.clientes; W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() }); }
+      H.salvar(); H.fecharModal();
+      H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b> com ${r.filhas.length} filhas · ${r.lancamentos.length} lançamento(s) previstos.`);
+    };
   }
   function aprovar(el) {
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
@@ -475,6 +529,7 @@
     m.querySelector('#mop').onclick = () => { H.fecharModal(); criarOperacao(); };
   }
   function criarOperacao(confirmado) {
+    if (W.ehMultiCliente(ed)) return criarOperacoesMulti();
     const r = W.operacaoDaCotacao(H.db, ed, R, eu(), W.hojeISO());
     const linhaLanc = l => `<div class="row"><span>${esc(l.desc || '')}<br><small class="note">${esc(l.op || '')} · ${esc(l.status || '')} · vencimento ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(+l.valor || 0)}</span></div>`;
     if (r.outraOp && confirmado !== true) {
@@ -551,15 +606,20 @@
   }
 
   /* ================= PROPOSTA EM PDF ================= */
+  /* Com vários clientes, a proposta é de um cliente: só a parte dele, sem nada do outro. */
+  let pdfCliente = null;
+  const alvoProposta = () => { if (!pdfCliente) return { q: ed, R }; const cc = W.calcularPorCliente(ed, { usuario: eu() }).clientes.find(x => x.id === pdfCliente); return cc ? { q: cc.q, R: cc.R } : { q: ed, R }; };
   function propostaModal() {
-    if (ed.status !== 'ok') return H.toast('A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.');
-    const errs = W.desemErros(ed, R); if (errs.length) return H.toast('⛔ <b>Desembolso bloqueado:</b> ' + esc(errs[0]));
-    const b = W.propostaBlocos(ed), temFoto = (ed.fotos || []).length > 0;
+    const clienteOk = pdfCliente && (clienteEd(pdfCliente) || {}).status === 'ok';
+    if (ed.status !== 'ok' && !clienteOk) return H.toast('A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.');
+    const alvo0 = alvoProposta();
+    const errs = W.desemErros(alvo0.q, alvo0.R); if (errs.length) return H.toast('⛔ <b>Desembolso bloqueado:</b> ' + esc(errs[0]));
+    const b = W.propostaBlocos(ed), temFoto = (alvo0.q.fotos || []).length > 0;
     const caixa = (x, desab, nota) => `<label class="row" style="justify-content:flex-start;gap:10px;${desab ? 'opacity:.55' : ''}"><input type="checkbox" data-pb="${x.k}" ${b[x.k] && !desab ? 'checked' : ''} ${desab ? 'disabled' : ''}><span><b>${esc(x.l)}</b><br><small class="note">${nota}</small></span></label>`;
     const m = H.modal('O que entra na proposta', `<p class="note" style="margin-bottom:8px">Desmarque o que não deve aparecer no PDF deste cliente. A escolha fica salva na cotação.</p>
       <div class="list">${W.PROPOSTA_BLOCOS.map(x => { const sem = x.k === 'fotos' && !temFoto; return caixa(x, sem, sem ? 'Nenhuma foto anexada a esta cotação.' : esc(x.d)); }).join('')}</div>
       <h3 class="h3" style="margin-top:12px">Composição do investimento</h3><p class="note" style="color:var(--warn)">⚠ Abrir estas linhas ao lado do total deixa a margem dedutível por subtração.</p>
-      <div class="list">${W.PROPOSTA_CUSTOS.map(x => { const v = +x.v(R) || 0; return caixa(x, !v, v ? fmt(v) + (x.sub ? ' · ' + esc(x.sub) : '') : 'Sem valor nesta cotação.'); }).join('')}</div>`,
+      <div class="list">${W.PROPOSTA_CUSTOS.map(x => { const v = +x.v(alvo0.R) || 0; return caixa(x, !v, v ? fmt(v) + (x.sub ? ' · ' + esc(x.sub) : '') : 'Sem valor nesta cotação.'); }).join('')}</div>`,
       '<button class="btn" id="pbtudo">Marcar tudo</button><button class="btn" data-x>Cancelar</button><button class="btn pri" id="pbgera">Gerar PDF</button>');
     m.querySelector('.modal').classList.add('larga');
     m.querySelector('#pbtudo').onclick = () => m.querySelectorAll('[data-pb]').forEach(i => { if (!i.disabled) i.checked = true; });
@@ -607,13 +667,13 @@
     if (!window.HUB_PROPOSTA) return H.toast('Gerador da proposta não carregou.');
     let print = document.getElementById('printProposal');
     if (!print) { print = document.createElement('div'); print.id = 'printProposal'; document.body.appendChild(print); }
-    const campos = W.camposDe(ed);
+    const alvo = alvoProposta(), campos = W.camposDe(alvo.q);
     const P = window.HUB_PROPOSTA({
       V: k => campos[k] == null ? '' : String(campos[k]), N: k => parseFloat(campos[k]) || 0, fmt, esc, toast: H.toast, cnpjFmt,
-      crmDocAnexarProposta: anexarNoCRM, desemErrors: () => W.desemErros(ed, R),
-      carregarFotosDaProposta: async () => { const out = []; for (const f of (ed.fotos || [])) { try { out.push(await fotoParaPDF(f.url)); } catch (e) { console.warn('foto ignorada', f.url, e); } } return out; },
+      crmDocAnexarProposta: anexarNoCRM, desemErrors: () => W.desemErros(alvo.q, alvo.R),
+      carregarFotosDaProposta: async () => { const out = []; for (const f of (alvo.q.fotos || [])) { try { out.push(await fotoParaPDF(f.url)); } catch (e) { console.warn('foto ignorada', f.url, e); } } return out; },
       openModal: () => {}, closeModal: H.fecharModal, saveDB: H.salvar, DB: H.db,
-      state: { items: ed.items, fotos: ed.fotos, blocos: ed.blocos, status: ed.status, id: ed.id }, R
+      state: { items: alvo.q.items, fotos: alvo.q.fotos, blocos: ed.blocos, status: 'ok', id: ed.id }, R: alvo.R
     });
     P.gerarPropostaPDF();
   }

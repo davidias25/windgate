@@ -223,6 +223,7 @@
     if (s.acao === 'baixa') {
       const atual = (db.fin || []).find(l => l && l._id === s.alvoId);
       if (!atual) return { erro: 'O lançamento previsto não existe mais.', codigo: 404 };
+      if (typeof W.travaFabrica === 'function' && W.travaFabrica(db, atual).bloqueia) return { erro: 'Pagamento à fábrica travado: há filha do contêiner sem recebimento. Só o Samir libera.', codigo: 409 };
       if (W.realizado(atual) && !c.podeAlterarBaixaAlheia && atual.baixaPor && atual.baixaPor !== quem) return { erro: `Este lançamento já foi baixado por ${atual.baixaPor}: só quem pode excluir altera a baixa de outra pessoa.`, codigo: 403 };
       const l = JSON.parse(JSON.stringify(atual));
       W.realizar(l, r2(k.valor), W.soData(k.data));

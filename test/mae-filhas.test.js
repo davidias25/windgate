@@ -128,7 +128,9 @@ console.log('\nCódigo e exclusão:');
   const r = W.renomearOperacao(d, 'OP27', 'OP28', 'x', T);
   ok(r.ok && op(d, 'OP27.1').maeId === 'OP28' && W.filhasDe(d, 'OP28').length === 2, 'renomear a mãe mantém as filhas ligadas');
   ok(/filhas/.test(W.excluirOperacao(d, 'OP28', 'x').msg) && d.ops.length === 4, 'mãe com filhas não pode ser excluída');
-  ok(W.excluirOperacao(d, 'OP27.1', 'x').ok && W.excluirOperacao(d, 'OP27.2', 'x').ok && W.excluirOperacao(d, 'OP28', 'x').ok, 'sem filhas, pode');
+  ok(W.excluirOperacao(d, 'OP27.1', 'x').ok && W.excluirOperacao(d, 'OP27.2', 'x').ok, 'as filhas saem');
+  d.fin = d.fin.filter(l => l.op !== 'OP28'); d.docs = d.docs.filter(x => x.op !== 'OP28');
+  ok(W.excluirOperacao(d, 'OP28', 'x').ok, 'sem filhas, pode');
 }
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
 process.exit(falhou ? 1 : 0);

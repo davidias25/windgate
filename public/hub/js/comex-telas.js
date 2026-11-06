@@ -48,6 +48,7 @@
     const p = ptaxV();
     if (!opId) {
       const linhas = opsAtivas().map(o => ({ o, c: W.custeioOp(H.db, o.id, { ptax: p }) }));
+      const conts = (H.db.ops || []).filter(o => W.ehMae(o) && W.emAndamento(o)).map(m => W.custeioConsolidado(H.db, m.id, { ptax: p }));
       el.innerHTML = cab('Custeio & margem', 'Custo de cada operação em três momentos: simulado na cotação, previsto aprovado e realizado no Financeiro. O dólar ainda sem câmbio fechado é recalculado pela PTAX do dia.', p ? `<span class="pill">PTAX ${n4(p)}</span>` : '') +
         `<div class="box"><div class="tw"><table><thead><tr><th>Operação</th><th>Modalidade</th><th class="num">Receita</th><th class="num">Previsto</th><th class="num">Projetado</th><th class="num">Desvio</th><th class="num">Margem prevista</th><th class="num">Margem projetada</th><th class="num">US$ sem câmbio</th><th class="num">Efeito do dólar hoje</th></tr></thead><tbody>
         ${linhas.map(({ o, c }) => `<tr data-op="${esc(o.id)}" class="clic"><td><b class="mono">${esc(o.id)}</b> <span class="note">${esc(o.cliente || '')}</span>${c.previstoAprovado ? '' : ' ' + pill('sem previsto', COR.cinza)}</td><td>${esc(o.modalidade || '—')}</td>
@@ -55,11 +56,14 @@
           <td class="num" style="color:${c.desvio > 0.05 ? COR.vencido : c.desvio < -0.02 ? COR.ok : 'inherit'}">${pct(c.desvio)}</td><td class="num">${pct(c.margemPrevista)}</td>
           <td class="num" style="color:${c.margemProjetada != null && c.margemProjetada < 0.10 ? COR.vencido : 'inherit'}"><b>${pct(c.margemProjetada)}</b></td><td class="num">${c.usdAberto ? usd(c.usdAberto) : '—'}</td>
           <td class="num" style="color:${c.impactoAberto > 0 ? COR.vencido : c.impactoAberto < 0 ? COR.ok : 'inherit'}">${c.impactoAberto ? (c.impactoAberto > 0 ? '+' : '') + W.fmtBRLk(c.impactoAberto) : '—'}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">Nenhuma operação ativa.</td></tr>'}</tbody></table></div></div>
-        <p class="note">Projetado = já pago + a pagar lançado + efeito do dólar sem contrato. Desvio acima de 5% e margem abaixo de 10% aparecem na Torre.</p>`;
+        <p class="note">Projetado = já pago + a pagar lançado + efeito do dólar sem contrato. Desvio acima de 5% e margem abaixo de 10% aparecem na Torre.</p>${conts.length ? `
+        <div class="box"><div class="box-h"><h2>Contêineres compartilhados</h2><span class="note">margem do contêiner: a soma das filhas</span></div><div class="tw"><table><thead><tr><th>Contêiner</th><th>Clientes</th><th class="num">Receita</th><th class="num">Projetado</th><th class="num">Margem</th></tr></thead><tbody>
+        ${conts.map(x => `<tr data-op="${esc(x.mae.id)}" class="clic"><td><b class="mono">${esc(x.mae.id)}</b></td><td>${x.filhas.map(f => esc(f.op.cliente || f.op.id)).join(' + ')}</td><td class="num">${W.fmtBRLk(x.receita)}</td><td class="num">${W.fmtBRLk(x.projetado)}</td><td class="num"><b>${pct(x.margem)}</b></td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
       el.querySelectorAll('[data-op]').forEach(t => t.onclick = () => H.ir('custeio', t.dataset.op));
       return;
     }
     const o = opById(opId); if (!o) { el.innerHTML = '<div class="banner">Operação não encontrada.</div>'; return; }
+    if (W.ehMae(o)) return custeioDaMae(el, o, p);
     const c = W.custeioOp(H.db, o.id, { ptax: p }), av = W.avisosTributarios(H.db, o.eta || hoje());
     el.innerHTML = cab(`Custeio · ${esc(o.id)} · ${esc(o.cliente || '')}`, `${esc(o.nome || '')}${c.cotacao ? ' · cotação vinculada' : ' · sem cotação vinculada (o simulado fica zerado)'}${c.previstoAprovado ? ` · previsto aprovado por ${esc(c.aprovadoPor)} em ${W.dataBR(c.aprovadoEm)}` : ''}`,
       `<button class="btn" data-irp="ficha|${esc(o.id)}">Abrir operação</button>${H.aprova() ? '<button class="btn blue" id="aprov">Aprovar previsto</button>' : ''}`, '<a href="#custeio" data-volta>Custeio</a>') +
@@ -67,6 +71,7 @@
         ${kpi('Custo projetado', W.fmtBRLk(c.projetado), 'desvio ' + pct(c.desvio), c.desvio > 0.05 ? 'neg' : '')}${kpi('Margem', pct(c.margemProjetada), 'prevista ' + pct(c.margemPrevista) + (c.margemSimulada != null ? ' · cotada ' + pct(c.margemSimulada) : ''), c.margemProjetada != null && c.margemProjetada < 0.10 ? 'neg' : '')}
         ${kpi('Lucro líquido projetado', c.lucroLiquido == null ? '—' : W.fmtBRLk(c.lucroLiquido), 'após IRPJ/CSLL 34% · ' + (c.lucroLiquido ? W.fmtBRLk(c.lucroLiquido / 2) + ' por sócio' : ''))}</div>
       ${av.length ? `<div class="banner">${av.map(esc).join(' ')}</div>` : ''}
+      ${o.maeId ? `<div class="banner">Esta é a margem do cliente. Inclui a parte dele no contêiner <b>${esc(o.maeId)}</b>: ${Object.keys(c.rateioDaMae).filter(k => c.rateioDaMae[k]).map(k => esc(W.CLASSE_ROTULO[k]) + ' ' + W.fmtBRL(c.rateioDaMae[k])).join(' · ') || 'nada lançado ainda'}. <a href="#" data-irp="custeio|${esc(o.maeId)}">Ver o contêiner</a></div>` : ''}
       ${c.duimp && W.conferirDuimpCotacao ? (dc => dc.length ? `<div class="banner"><b>DUIMP ${esc(c.duimp.numero)} × cotação:</b> ${dc.map(esc).join(' ')}</div>` : '')(W.conferirDuimpCotacao(H.db, c.op.id)) : ''}
       <div class="g2"><div class="box"><div class="box-h"><h2>Custo por classe</h2><span class="note">R$</span></div><div class="tw"><table><thead><tr><th>Classe</th><th class="num">Simulado</th><th class="num">Previsto</th><th class="num">Pago</th><th class="num">A pagar</th><th class="num">Projetado</th><th class="num">Desvio</th></tr></thead><tbody>
         ${c.linhas.filter(l => l.simulado || l.previsto || l.realizado || l.aPagar).map(l => `<tr><td>${esc(l.l)}</td><td class="num">${n2(l.simulado)}</td><td class="num">${n2(l.previsto)}</td><td class="num">${n2(l.realizado)}${l.origem === 'duimp' ? '<br><small class="note">federais da DUIMP</small>' : ''}</td><td class="num">${n2(l.aPagar)}</td><td class="num"><b>${n2(l.projetado)}</b>${l.semLancamento ? '<br><small class="note">ainda pelo previsto</small>' : ''}</td><td class="num" style="color:${l.desvio > 0.05 ? COR.vencido : 'inherit'}">${pct(l.desvio)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Sem custos lançados nem cotação vinculada.</td></tr>'}
@@ -105,6 +110,35 @@
         W.aprovarPrevisto(H.db, o.id, v, { receitaPrevista: numIn(m, '#pv_rec'), taxaPrevista: c.taxaPrevista, fobUSD: c.fobUSD, freteUSD: c.freteUSD }, eu()); H.salvar(); H.fecharModal(); H.toast('Previsto aprovado'); H.render(); };
     };
   };
+
+  /* Mãe: margem do contêiner, ocupação, rateio editável e alocação da fábrica. */
+  function custeioDaMae(el, o, p) {
+    const x = W.custeioConsolidado(H.db, o.id, { ptax: p }), oc = x.ocupacao, fs = x.filhas, edita = H.pode('fin.autorizar');
+    el.innerHTML = cab(`Custeio · contêiner ${esc(o.id)}`, fs.map(f => esc(f.op.cliente || f.op.id)).join(' + ') || 'sem filhas', `<button class="btn" data-irp="ficha|${esc(o.id)}">Abrir operação</button>`, '<a href="#custeio" data-volta>Custeio</a>') +
+      `<div class="kpis">${kpi('Receita do contêiner', W.fmtBRLk(x.receita), W.fmtBRLk(x.recebido) + ' recebido')}${kpi('Custo projetado', W.fmtBRLk(x.projetado), 'previsto ' + W.fmtBRLk(x.previsto))}${kpi('Margem do contêiner', pct(x.margem), 'prevista ' + pct(x.margemPrevista), x.margem != null && x.margem < 0.10 ? 'neg' : '')}${kpi('Ocupação', oc.capM3 ? (oc.m3 / oc.capM3 * 100).toFixed(0).replace('.', ',') + '%' : '—', oc.capM3 ? `${oc.m3.toLocaleString('pt-BR')} de ${oc.capM3.toLocaleString('pt-BR')} m³` : 'capacidade não informada', oc.excedeu ? 'neg' : '')}</div>
+      ${x.rateio.avisos.length ? `<div class="banner">${x.rateio.avisos.map(esc).join(' ')}</div>` : ''}
+      ${x.rateio.receitaNaMae ? `<div class="banner">Há <b>${W.fmtBRL(x.rateio.receitaNaMae)}</b> de recebimento lançado no contêiner. Recebimento é do cliente: mova para a filha, senão a margem de cada um fica errada.</div>` : ''}
+      <div class="box"><div class="box-h"><h2>Margem por cliente</h2></div><div class="tw"><table><thead><tr><th>Filha</th><th>Cliente</th><th class="num">Receita</th><th class="num">Recebido</th><th class="num">Projetado</th><th class="num">Margem</th></tr></thead><tbody>
+      ${fs.map(f => `<tr data-fi="${esc(f.op.id)}" class="clic"><td><b class="mono">${esc(f.op.id)}</b></td><td>${esc(f.op.cliente || '')}</td><td class="num">${W.fmtBRLk(f.receita)}</td><td class="num">${W.fmtBRLk(f.receitaRecebida)}</td><td class="num">${W.fmtBRLk(f.projetado)}</td><td class="num"><b>${pct(f.margemProjetada)}</b></td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sem filhas.</td></tr>'}</tbody></table></div></div>
+      <div class="box"><div class="box-h"><h2>Custos comuns e a parte de cada filha</h2><span class="note">${x.rateio.confere ? 'a soma das filhas bate com o contêiner' : 'a soma das filhas NÃO bate com o contêiner'}</span></div><div class="tw"><table><thead><tr><th>Classe</th><th>Critério</th><th class="num">Total</th>${fs.map(f => `<th class="num">${esc(f.op.id)}</th>`).join('')}${edita ? '<th></th>' : ''}</tr></thead><tbody>
+      ${x.rateio.classes.map(c => `<tr><td>${esc(c.rot)}</td><td>${esc({ m3: 'm³', fob: 'FOB', manual: 'manual', cotacao: 'da cotação', duimp: 'itens da DUIMP', igual: 'partes iguais' }[c.criterio] || c.criterio)}</td><td class="num">${n2(c.total)}</td>${fs.map(f => { const q = c.porFilha[f.op.id] || { realizado: 0, aPagar: 0 }; return `<td class="num">${n2(q.realizado + q.aPagar)}</td>`; }).join('')}${edita ? `<td><button class="btn sm" data-rt="${esc(c.k)}">Editar</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="${fs.length + 4}" class="empty">Nada lançado no contêiner ainda.</td></tr>`}</tbody></table></div></div>`;
+    el.querySelector('[data-volta]').onclick = e => { e.preventDefault(); H.ir('custeio'); };
+    el.querySelectorAll('[data-irp]').forEach(b => b.onclick = () => { const [t, y] = b.dataset.irp.split('|'); H.ir(t, y || null); });
+    el.querySelectorAll('[data-fi]').forEach(r => r.onclick = () => H.ir('custeio', r.dataset.fi));
+    el.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => {
+      const k = b.dataset.rt, fabrica = k === 'fob', atual = fabrica ? (o.alocacaoFabrica || {}) : ((o.rateio || {})[k] || {});
+      const m = H.modal(fabrica ? 'Alocação do pagamento à fábrica' : 'Rateio: ' + esc(W.CLASSE_ROTULO[k]), `<div class="f"><label class="lbl" for="rtc">Critério</label><select id="rtc">${fabrica ? '<option value="padrao">Pelo FOB de cada filha</option><option value="manual">Manual (%)</option>' : '<option value="padrao">Padrão</option>' + W.CRITERIOS_MAE.map(([v, t]) => `<option value="${v}" ${atual.criterio === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <div class="fields" style="margin-top:8px">${fs.map(f => `<div class="f"><label class="lbl" for="rt_${esc(f.op.id)}">${esc(f.op.id)} (%)</label><input id="rt_${esc(f.op.id)}" data-rtp="${esc(f.op.id)}" inputmode="decimal" value="${(atual.pct || {})[f.op.id] != null ? (+atual.pct[f.op.id]).toFixed(2) : ''}"></div>`).join('')}</div><p class="note">Os percentuais só valem no critério manual, e precisam somar 100%.</p>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="rtok">Salvar</button>');
+      if (fabrica && atual.pct) m.querySelector('#rtc').value = 'manual';
+      m.querySelector('#rtok').onclick = () => {
+        const cr = m.querySelector('#rtc').value, pc = {}; m.querySelectorAll('[data-rtp]').forEach(i => { pc[i.dataset.rtp] = +String(i.value).replace(',', '.') || 0; });
+        const r = fabrica ? W.definirAlocacaoFabrica(H.db, o.id, cr === 'manual' ? pc : null) : W.definirRateioMae(H.db, o.id, k, cr, pc);
+        if (!r.ok) return H.toast(esc(r.msg));
+        H.salvar(); H.fecharModal(); H.toast('Rateio atualizado.'); H.render();
+      };
+    });
+  }
 
   /* ---------- Câmbio & dólar ---------- */
   H.telas.cambio = function (el) {

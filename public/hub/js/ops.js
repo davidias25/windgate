@@ -104,15 +104,25 @@
     };
   }
   function excluir(id) {
-    const g = W.ligadosDaOp(H.db, id);
-    const m = H.modal(`Excluir a operação ${esc(id)}?`, `<p>A operação sai da lista.${g.fin ? ` Os <b>${g.fin} lançamento(s)</b> dela, ${W.fmtBRL(g.valor)} no total${g.realizados ? `, dos quais ${g.realizados} já realizado(s)` : ''}, <b>continuam no Financeiro</b> e seguem somando no caixa, como "operação não cadastrada".` : ''}${g.docs ? ` Os ${g.docs} documento(s) também ficam.` : ''}</p>
-      ${g.notas ? `<p class="banner" style="margin-top:8px">Esta operação tem <b>${g.notas} NF-e autorizada(s)</b>. Excluir a operação não cancela nota nenhuma.</p>` : ''}
-      <p class="note" style="margin-top:8px">Para religar os lançamentos, crie de novo uma operação com o mesmo código.</p>`,
-      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="oxok">Excluir só a operação</button>');
+    const bloq = W.bloqueiosExclusao(H.db, id), g = W.ligadosDaOp(H.db, id);
+    if (bloq.length) return H.modal(`A operação ${esc(id)} não pode ser excluída`, `<div class="list">${bloq.map(b => `<div class="row"><span>${esc(b)}</span></div>`).join('')}</div>`, '<button class="btn" data-x>Fechar</button>');
+    const outras = H.db.ops.filter(o => o && o.id && o.id !== id).map(o => o.id).sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+    const m = H.modal(`Excluir a operação ${esc(id)}?`, `<p>A operação sai da lista${g.fin ? '.' : ', e não tem lançamentos.'}</p>
+      ${g.fin ? `<p style="margin-top:8px"><b>${g.fin} lançamento(s) previsto(s)</b>, ${W.fmtBRL(g.valor)} no total. Para onde eles vão?</p>
+        <div class="f" style="margin-top:6px"><label class="lbl" for="oxmv">Mover para a operação</label><select id="oxmv"><option value="">Não mover: ficam no Financeiro com o código ${esc(id)}</option>${outras.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select></div>` : ''}`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="oxok">Continuar</button>');
     m.querySelector('#oxok').onclick = () => {
-      const r = W.excluirOperacao(H.db, id, H.nomeUsuario(H.userKey));
-      if (!r.ok) return H.toast(esc(r.msg));
-      H.salvar(); H.fecharModal(); H.toast(`Operação <b>${esc(id)}</b> excluída.`); H.ir('ops');
+      const sel = m.querySelector('#oxmv'), destino = sel ? sel.value : '';
+      H.fecharModal();
+      const c = H.modal('Confirme a exclusão', `<p>${destino ? `${g.fin} lançamento(s) vão para a <b>${esc(destino)}</b>, e a` : 'A'} operação <b>${esc(id)}</b> será excluída. Digite o código para confirmar.</p>
+        <div class="f" style="margin-top:8px"><label class="lbl" for="oxcod">Código da operação</label><input id="oxcod" autocomplete="off"></div>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="oxfim">Excluir</button>');
+      c.querySelector('#oxfim').onclick = () => {
+        if (c.querySelector('#oxcod').value.trim().toUpperCase() !== String(id).trim().toUpperCase()) return H.toast('O código digitado não confere.');
+        const r = W.excluirOperacao(H.db, id, H.nomeUsuario(H.userKey), null, { moverPara: destino });
+        if (!r.ok) return H.toast(esc(r.msg));
+        H.salvar(); H.fecharModal(); H.toast(`Operação <b>${esc(id)}</b> excluída.`); H.ir('ops');
+      };
     };
   }
 

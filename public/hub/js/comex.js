@@ -110,11 +110,13 @@
        Triangular: as parcelas do custo do grupo. Direta: o resultante; o DIFAL/ST o cliente paga à parte,
        então entra dos dois lados (preço e custo) e não aparece como lucro nem como saída de caixa. */
     let difalCliente = 0, R = null;
-    try { R = motorCotacao().calcular(q); } catch (e) { R = null; }
+    try { R = q._RCliente || motorCotacao().calcular(q); } catch (e) { R = null; }
     if (R && R.tri) {
       const parc = R.tri.apuracao.bloco6.parcelas, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
       Object.assign(v, { fob: de(/^FOB/), frete: de(/^Frete internacional/), seguro: de(/^Seguro/), impostos: de(/^Impostos de importa/), porto: de(/^Despesas de nacional/), nacional: de(/^Frete terrestre/), impVenda: de(/^Resultante|^ICMS l[ií]quido|^DIFAL/) });
     } else if (R) { difalCliente = R.st || 0; v.impVenda = (R.resultante || 0) + difalCliente; }
+    /* Filha: frete, seguro e despesas pelo rateio comercial; o resto segue o cálculo fiscal do cliente. */
+    if (q._custoPor) { const p = q._custoPor; Object.assign(v, { frete: p.frete, seguro: p.seguro, porto: p.capatazia + p.siscomex + p.afrmm + p.honorarios + p.demais, nacional: p.terrestre }); }
     return { valores: v, total: Object.values(v).reduce((a, b) => a + b, 0), fobUSD, freteUSD: N('freteUSD'), taxa: txD, taxaFrete: txF, preco: numF(q.preco), difalCliente, tributos: { II, IPI, PIS, COF, ICMS: ICMSent } };
   }
   /* Capacidade padrão, editável na operação-mãe. */
@@ -141,9 +143,15 @@
   }
   function cotacaoDaOp(db, o) {
     const qs = db.quotes || {};
-    if (o.quoteId && qs[o.quoteId]) return Object.assign({ id: o.quoteId }, qs[o.quoteId]);
-    const k = Object.keys(qs).find(id => qs[id] && qs[id].fields && String(qs[id].fields.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase());
-    return k ? Object.assign({ id: k }, qs[k]) : null;
+    let q = null;
+    if (o.quoteId && qs[o.quoteId]) q = Object.assign({ id: o.quoteId }, qs[o.quoteId]);
+    else { const k = Object.keys(qs).find(id => qs[id] && qs[id].fields && String(qs[id].fields.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase()); if (k) q = Object.assign({ id: k }, qs[k]); }
+    /* Filha de cotação com vários clientes: só a parte daquele cliente, com o rateio comercial dele. */
+    if (q && o.quoteClienteId && Array.isArray(q.clientes) && q.clientes.length > 1) {
+      const cc = (motorCotacao().calcularPorCliente(q).clientes || []).find(x => x.id === o.quoteClienteId);
+      if (cc) return Object.assign({}, cc.q, { id: q.id, preco: cc.R.preco, _custoPor: cc.R.custoPor, _RCliente: cc.R });
+    }
+    return q;
   }
   const vazio = () => Object.fromEntries(CLASSES.map(([k]) => [k, 0]));
 
@@ -198,12 +206,19 @@
       if (W.ehReceita(l)) { if (W.realizado(l)) receita.recebida += valorDe(l); else receita.prevista += valorDe(l); return; }
       const c = classeDe(l); if (W.realizado(l)) realizado[c] += valorDe(l); else aPagar[c] += valorDe(l);
     });
+    /* Filha: soma a parte dela no que foi lançado na mãe (fábrica, frete, porto...). */
+    const mae = o.maeId ? W.maeDe(db, o) : null, rateioDaFilha = {};
+    if (mae) rateioDaMae(db, mae.id).classes.forEach(cl => { const p = cl.porFilha[opId]; if (!p) return; realizado[cl.k] += p.realizado; aPagar[cl.k] += p.aPagar; rateioDaFilha[cl.k] = p.realizado + p.aPagar; });
     /* Sem lançamento de impostos no Financeiro, os federais da DUIMP viram o realizado
        da classe (origem 'duimp'). Nenhum lançamento financeiro é criado. */
     const du = duimpDaOp(db, opId);
     const impostosDuimp = du && du.itens.length && !(realizado.impostos + aPagar.impostos > 0.005) ? r2(impostosFederais(du.itens)) : null;
     if (impostosDuimp != null) realizado.impostos = impostosDuimp;
     const cb = cambioOp(db, opId, taxaPrevista);
+    if (mae) { // O câmbio fechado na mãe conta para a filha pela parte dela no FOB.
+      const parte = (partesFabrica(db, mae).pesos[opId] || 0) / Math.max(1e-9, Object.values(partesFabrica(db, mae).pesos).reduce((a, b) => a + b, 0)), cm = cambioOp(db, mae.id, taxaPrevista);
+      cb.usdFechado += cm.usdFechado * parte; cb.brlFechado += cm.brlFechado * parte; cb.variacao += cm.variacao * parte; cb.taxaMedia = cb.usdFechado ? cb.brlFechado / cb.usdFechado : null;
+    }
     // Dólar ainda sem contrato: vale a PTAX de hoje (quando há) ou a taxa prevista.
     const usdTotal = fobUSD + freteUSD, usdAberto = Math.max(0, usdTotal - cb.usdFechado);
     const impactoAberto = ptax && taxaPrevista ? usdAberto * (ptax - taxaPrevista) : 0;
@@ -224,15 +239,138 @@
     const custoProjetado = linhas.reduce((a, x) => a + x.projetado, 0) + impactoAberto;
     const margem = v => receitaTotal ? (receitaTotal - v) / receitaTotal : null;
     return {
-      op: o, cotacao: q ? q.id : null, temCotacao: !!cq, previstoAprovado: !!cus.previsto, aprovadoPor: cus.aprovadoPor || '', aprovadoEm: cus.aprovadoEm || '',
+      rateioDaMae: rateioDaFilha, op: o, cotacao: q ? q.id : null, temCotacao: !!cq, previstoAprovado: !!cus.previsto, aprovadoPor: cus.aprovadoPor || '', aprovadoEm: cus.aprovadoEm || '',
       linhas, simulado: soma(simulado), previsto: totPrev, realizado: totReal, aPagar: totAPagar, projetado: custoProjetado,
       receita: receitaTotal, receitaRecebida: receita.recebida, margemSimulada: cq && cq.preco ? (cq.preco - soma(simulado)) / cq.preco : null,
-      margemPrevista: margem(totPrev), margemProjetada: margem(custoProjetado), desvio: totPrev ? (custoProjetado - totPrev) / totPrev : null,
+      margemPrevista: totPrev > 0 ? margem(totPrev) : null, margemProjetada: margem(custoProjetado), desvio: totPrev ? (custoProjetado - totPrev) / totPrev : null,
       fobUSD, freteUSD, usdTotal, usdFechado: cb.usdFechado, usdAberto, taxaPrevista, taxaMedia: cb.taxaMedia, variacaoCambial: cb.variacao, impactoAberto, ptax,
       contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null,
       duimp: du ? { numero: du.numero, versao: du.versao, itens: du.itens.length, impostosFederais: impostosDuimp } : null
     };
   }
+  /* ---------- Contêiner compartilhado: custos comuns, fábrica e visão consolidada ----------
+     O que é comum fica lançado na mãe. A parte de cada filha é calculada na hora, nunca gravada como outro
+     lançamento: o caixa conta uma vez só e, ao mudar o critério, tudo acompanha. */
+  const CRITERIOS_MAE = [['m3', 'Por m³'], ['fob', 'Por FOB'], ['manual', 'Manual (%)']];
+  const RATEIO_MAE_PADRAO = { frete: 'm3', porto: 'm3', demurrage: 'm3', nacional: 'm3', outros: 'm3', cambio: 'm3', seguro: 'fob', impostos: 'fob', impVenda: 'fob' };
+  /** Divide o total em centavos pelos pesos. A diferença de arredondamento vai para a maior filha. */
+  function ratearCentavos(total, pesos) {
+    const ids = Object.keys(pesos), soma = ids.reduce((a, id) => a + (+pesos[id] || 0), 0), cent = Math.round((+total || 0) * 100), out = {};
+    if (!ids.length) return out;
+    const p = id => (soma > 0 ? (+pesos[id] || 0) / soma : 1 / ids.length);
+    ids.forEach(id => { out[id] = Math.round(cent * p(id)); });
+    const dif = cent - ids.reduce((a, id) => a + out[id], 0);
+    const maior = ids.reduce((a, b) => (p(b) > p(a) ? b : a));
+    out[maior] += dif;
+    ids.forEach(id => { out[id] = out[id] / 100; });
+    return out;
+  }
+  const iguais = ids => Object.fromEntries(ids.map(id => [id, 1]));
+  /** Pesos pelo critério. Sem m³ em alguma filha, cai para o FOB; sem FOB, em partes iguais, sempre avisando. */
+  function pesosPor(db, m, criterio, pct) {
+    const fs = W.filhasDe(db, m.id).map(o => ({ o, med: medidasFilha(db, o) })), ids = fs.map(f => f.o.id);
+    const de = k => Object.fromEntries(fs.map(f => [f.o.id, f.med[k].v]));
+    if ((criterio === 'manual' || criterio === 'cotacao') && pct && ids.some(id => +pct[id] > 0)) return { criterio, pesos: Object.fromEntries(ids.map(id => [id, +pct[id] || 0])) };
+    if (criterio === 'm3') { if (fs.length && fs.every(f => f.med.m3.v > 0)) return { criterio: 'm3', pesos: de('m3') }; if (fs.length && fs.every(f => f.med.fobUSD.v > 0)) return { criterio: 'fob', pesos: de('fobUSD'), aviso: 'm³ sem preencher em alguma filha: rateado por FOB.' }; return { criterio: 'igual', pesos: iguais(ids), aviso: 'm³ e FOB sem preencher: rateado em partes iguais.' }; }
+    if (fs.length && fs.every(f => f.med.fobUSD.v > 0)) return { criterio: 'fob', pesos: de('fobUSD') };
+    if (fs.length && fs.every(f => f.med.m3.v > 0)) return { criterio: 'm3', pesos: de('m3'), aviso: 'FOB sem preencher em alguma filha: rateado por m³.' };
+    return { criterio: 'igual', pesos: iguais(ids), aviso: 'FOB e m³ sem preencher: rateado em partes iguais.' };
+  }
+  /** Impostos da DUIMP única: cada filha paga pelos itens atribuídos a ela, quando todos têm dono. */
+  function pesosDaDuimp(db, m) {
+    const ids = W.filhasDe(db, m.id).map(o => o.id); if (!ids.length) return null;
+    const dd = ids.map(id => ({ id, d: duimpDaOp(db, id) }));
+    if (dd.some(x => !x.d) || dd.some(x => x.d.semOp && x.d.semOp.length)) return null;
+    const pesos = Object.fromEntries(dd.map(x => [x.id, impostosFederais(x.d.itens)]));
+    return Object.values(pesos).some(v => v > 0) ? { criterio: 'duimp', pesos } : null;
+  }
+  function partesDaClasse(db, m, classe) {
+    const cfg = (m.rateio || {})[classe] || {};
+    if (!cfg.criterio && classe === 'impostos') { const d = pesosDaDuimp(db, m); if (d) return d; }
+    return pesosPor(db, m, cfg.criterio || RATEIO_MAE_PADRAO[classe] || 'm3', cfg.pct);
+  }
+  /** Pagamento à fábrica: pelo FOB de cada filha, ou pelo percentual digitado na mãe. */
+  function partesFabrica(db, m) {
+    const a = m.alocacaoFabrica || {};
+    return pesosPor(db, m, a.pct ? 'manual' : 'fob', a.pct);
+  }
+  const partesDe = (db, m, classe) => (classe === 'fob' ? partesFabrica(db, m) : partesDaClasse(db, m, classe));
+  /** O que está lançado na mãe, classe por classe, com a parte de cada filha. A soma das filhas é igual à da mãe ao centavo. */
+  function rateioDaMae(db, id) {
+    const m = (db.ops || []).find(x => x && x.id === id); if (!m) return { classes: [], avisos: [], receitaNaMae: 0, confere: true };
+    const base = {}; let receitaNaMae = 0;
+    lancOp(db, id).forEach(l => {
+      if (W.ehReceita(l)) { receitaNaMae += valorDe(l); return; }
+      const k = classeDe(l); base[k] = base[k] || { realizado: 0, aPagar: 0 };
+      if (W.realizado(l)) base[k].realizado += valorDe(l); else base[k].aPagar += valorDe(l);
+    });
+    const avisos = [];
+    const classes = CLASSES.filter(([k]) => base[k]).map(([k, rot]) => {
+      const p = partesDe(db, m, k), r = ratearCentavos(base[k].realizado, p.pesos), a = ratearCentavos(base[k].aPagar, p.pesos), porFilha = {};
+      Object.keys(p.pesos).forEach(fid => { porFilha[fid] = { realizado: r[fid] || 0, aPagar: a[fid] || 0 }; });
+      if (p.aviso) avisos.push(rot + ': ' + p.aviso);
+      return { k, rot, criterio: p.criterio, realizado: r2(base[k].realizado), aPagar: r2(base[k].aPagar), total: r2(base[k].realizado + base[k].aPagar), porFilha };
+    });
+    const confere = classes.every(c => { const ks = Object.keys(c.porFilha); return !ks.length || Math.abs(ks.reduce((s, f) => s + c.porFilha[f].realizado + c.porFilha[f].aPagar, 0) - c.total) < 0.005; });
+    return { classes, avisos: [...new Set(avisos)], receitaNaMae: r2(receitaNaMae), confere };
+  }
+  /** Quanto cabe a cada filha de um valor da fábrica. */
+  function alocarFabrica(db, maeId, valor) {
+    const m = (db.ops || []).find(x => x && x.id === maeId); if (!m) return {};
+    return ratearCentavos(valor, partesFabrica(db, m).pesos);
+  }
+  const conferirPct = (ids, pct) => { const t = ids.reduce((a, id) => a + (+pct[id] || 0), 0); return Math.abs(t - 100) > 0.001 ? `Os percentuais somam ${t.toLocaleString('pt-BR')}%, e precisam somar 100%.` : ''; };
+  /** Muda o critério de uma classe na mãe. Para 'padrao', volta ao critério que vale para todos. */
+  function definirRateioMae(db, maeId, classe, criterio, pct) {
+    const m = (db.ops || []).find(x => x && x.id === maeId); if (!W.ehMae(m)) return { ok: false, msg: 'Só a operação-mãe tem rateio.' };
+    m.rateio = Object.assign({}, m.rateio);
+    if (criterio === 'padrao') { delete m.rateio[classe]; return { ok: true }; }
+    if (criterio === 'manual') { const e = conferirPct(W.filhasDe(db, maeId).map(o => o.id), pct || {}); if (e) return { ok: false, msg: e }; m.rateio[classe] = { criterio, pct: Object.assign({}, pct) }; return { ok: true }; }
+    m.rateio[classe] = { criterio };
+    return { ok: true };
+  }
+  function definirAlocacaoFabrica(db, maeId, pct) {
+    const m = (db.ops || []).find(x => x && x.id === maeId); if (!W.ehMae(m)) return { ok: false, msg: 'Só a operação-mãe tem alocação.' };
+    if (!pct) { delete m.alocacaoFabrica; return { ok: true }; }
+    const e = conferirPct(W.filhasDe(db, maeId).map(o => o.id), pct); if (e) return { ok: false, msg: e };
+    m.alocacaoFabrica = { pct: Object.assign({}, pct) };
+    return { ok: true };
+  }
+  /** Visão da mãe: margem do contêiner, ocupação e a linha de cada filha. */
+  function custeioConsolidado(db, id, opts) {
+    const m = (db.ops || []).find(x => x && x.id === id); if (!W.ehMae(m)) return null;
+    const filhas = W.filhasDe(db, id).map(o => custeioOp(db, o.id, opts));
+    const soma = fn => filhas.reduce((a, c) => a + (fn(c) || 0), 0), rateio = rateioDaMae(db, id);
+    const receita = soma(c => c.receita), projetado = soma(c => c.projetado), previsto = soma(c => c.previsto);
+    return { mae: m, filhas, rateio, ocupacao: ocupacaoDaMae(db, id), receita, recebido: soma(c => c.receitaRecebida), previsto, projetado, realizado: soma(c => c.realizado), aPagar: soma(c => c.aPagar),
+      margem: receita ? (receita - projetado) / receita : null, margemPrevista: receita && previsto > 0 ? (receita - previsto) / receita : null };
+  }
+  /** Quanto cada filha já pagou por dentro: cota da fábrica (pago + este pagamento) contra o que ela já pagou à WindGate. */
+  function coberturaFabrica(db, maeId, valorNovo) {
+    const m = (db.ops || []).find(x => x && x.id === maeId); if (!m) return [];
+    const pago = lancOp(db, maeId).filter(l => !W.ehReceita(l) && classeDe(l) === 'fob' && W.realizado(l)).reduce((a, l) => a + valorDe(l), 0);
+    const cotas = alocarFabrica(db, maeId, pago + (+valorNovo || 0));
+    return W.filhasDe(db, maeId).map(o => {
+      const recebido = r2(lancOp(db, o.id).filter(l => W.ehReceita(l) && W.realizado(l)).reduce((a, l) => a + valorDe(l), 0));
+      const cota = cotas[o.id] || 0;
+      return { op: o.id, cliente: o.cliente || '', cota, recebido, descoberto: r2(Math.max(0, cota - recebido)) };
+    });
+  }
+  /** Pagamento à fábrica lançado na mãe: filha sem recebimento segura o pagamento até o Samir liberar. */
+  function travaFabrica(db, l) {
+    const m = l && (db.ops || []).find(x => x && x.id === l.op);
+    if (!W.ehMae(m) || W.ehReceita(l) || classeDe(l) !== 'fob' || W.realizado(l)) return { bloqueia: false, filhas: [] };
+    const filhas = coberturaFabrica(db, m.id, valorDe(l)), abertas = filhas.filter(f => f.descoberto > 0.005);
+    return { bloqueia: abertas.length > 0 && !l.liberacaoFabrica, liberado: !!l.liberacaoFabrica, liberacao: l.liberacaoFabrica || null, filhas, abertas, descoberto: r2(abertas.reduce((a, f) => a + f.descoberto, 0)) };
+  }
+  /** O Samir libera o pagamento mesmo sem cobertura. Fica registrado quem, quando e quanto estava descoberto. */
+  function liberarFabrica(db, id, por, agora) {
+    const l = (db.fin || []).find(x => x && x._id === id); if (!l) return { ok: false, msg: 'Lançamento não encontrado.' };
+    const t = travaFabrica(db, l);
+    l.liberacaoFabrica = { por: por || '', em: agora || new Date().toISOString(), descoberto: t.descoberto || 0 };
+    return { ok: true };
+  }
+
   /** Aprova o previsto da operação (foto do custo na hora da aprovação). */
   function aprovarPrevisto(db, opId, valores, extra, por, agora) {
     const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
@@ -422,11 +560,24 @@ Modelo para revisão jurídica antes da assinatura.`;
     const h = hoje || W.hojeISO(), ptax = extra && extra.ptax, p = W.perfilDe(db, k).id, fin = W.pode(db, k, 'fin.ver'), res = W.pode(db, k, 'fin.resultado');
     const out = [], add = (x) => out.push(x);
     const meu = donos => !donos || donos.includes(p) || p === 'diretoria';
+    /* Nível certo: o que é do contêiner aparece na mãe, uma vez só; cobrança e margem aparecem na filha. */
+    (db.ops || []).filter(o => W.ehMae(o) && W.emAndamento(o)).forEach(m => {
+      const pi = W.prazoInfo(db, m, h);
+      if (pi.sit === 'atrasado' && meu(['operacoes', 'frete', 'documentos'])) add({ tipo: 'prazo', nivel: 2, titulo: `Contêiner ${m.id} atrasado em ${W.stMeta(m.status).l}`, detalhe: `${pi.dias != null ? pi.dias + ' dia(s) na etapa' : ''} · ${W.filhasDe(db, m.id).length} cliente(s)`, op: m.id, ir: ['ficha', m.id] });
+      const em = (m.etaHist || []).slice(-1)[0];
+      if (em && Math.abs(W.diasEntre(em.de, em.para) || 0) > 3 && W.diasEntre(W.soData(em.em), h) <= 7 && meu(['operacoes', 'frete'])) add({ tipo: 'eta', nivel: 2, titulo: `ETA do contêiner ${m.id} mudou ${W.diasEntre(em.de, em.para) > 0 ? '+' : ''}${W.diasEntre(em.de, em.para)} dias`, detalhe: `${W.dataBR(em.de)} → ${W.dataBR(em.para)}. Avisar os clientes e rever a semana dos impostos.`, op: m.id, ir: ['ficha', m.id] });
+      if (fin) {
+        lancOp(db, m.id).filter(l => !W.ehReceita(l) && !W.realizado(l) && classeDe(l) === 'fob' && W.diasEntre(h, W.vencDe(l)) <= 7).forEach(l => { const t = travaFabrica(db, l); if (t.bloqueia) add({ tipo: 'fabrica', nivel: 3, titulo: `${m.id}: pagamento à fábrica sem recebimento de ${t.abertas.map(x => x.op).join(', ')}`, detalhe: `${W.fmtBRLk(t.descoberto)} descobertos · vencimento ${W.dataBR(W.vencDe(l))}`, op: m.id, ir: ['custeio', m.id] }); });
+        const rm = lancOp(db, m.id).filter(l => W.ehReceita(l) && !W.realizado(l)); if (rm.length) add({ tipo: 'cadastro', nivel: 1, titulo: `${m.id}: ${rm.length} recebimento(s) lançado(s) no contêiner`, detalhe: 'Recebimento é do cliente: mova para a operação-filha.', op: m.id, ir: ['ficha', m.id] });
+      }
+    });
     opsAtivas(db).forEach(o => {
+      const naMae = !!o.maeId && W.ETAPAS_DA_MAE.includes(o.status);
+      if (o.maeId && fin) { const venc = lancOp(db, o.id).filter(l => W.ehReceita(l) && !W.realizado(l) && W.vencDe(l) < h); if (venc.length) add({ tipo: 'cobranca', nivel: 2, titulo: `${o.id}: cobrar ${o.cliente || 'cliente'}`, detalhe: `${venc.length} parcela(s) vencida(s) · ${W.fmtBRLk(venc.reduce((a, l) => a + valorDe(l), 0))}`, op: o.id, ir: ['contacorrente', o.id] }); }
       const pi = W.prazoInfo(db, o, h);
-      if (pi.sit === 'atrasado' && meu(['operacoes', 'frete', 'documentos'])) add({ tipo: 'prazo', nivel: 2, titulo: `${o.id} atrasada em ${W.stMeta(o.status).l}`, detalhe: `${pi.dias != null ? pi.dias + ' dia(s) na etapa' : ''} · ${o.cliente || ''}`, op: o.id, ir: ['ficha', o.id] });
+      if (!naMae && pi.sit === 'atrasado' && meu(['operacoes', 'frete', 'documentos'])) add({ tipo: 'prazo', nivel: 2, titulo: `${o.id} atrasada em ${W.stMeta(o.status).l}`, detalhe: `${pi.dias != null ? pi.dias + ' dia(s) na etapa' : ''} · ${o.cliente || ''}`, op: o.id, ir: ['ficha', o.id] });
       const eh = (o.etaHist || []).slice(-1)[0];
-      if (eh && Math.abs(W.diasEntre(eh.de, eh.para) || 0) > 3 && W.diasEntre(W.soData(eh.em), h) <= 7 && meu(['operacoes', 'frete'])) add({ tipo: 'eta', nivel: 2, titulo: `ETA da ${o.id} mudou ${W.diasEntre(eh.de, eh.para) > 0 ? '+' : ''}${W.diasEntre(eh.de, eh.para)} dias`, detalhe: `${W.dataBR(eh.de)} → ${W.dataBR(eh.para)}. Avisar o cliente e rever a semana dos impostos.`, op: o.id, ir: ['ficha', o.id] });
+      if (!o.maeId && eh && Math.abs(W.diasEntre(eh.de, eh.para) || 0) > 3 && W.diasEntre(W.soData(eh.em), h) <= 7 && meu(['operacoes', 'frete'])) add({ tipo: 'eta', nivel: 2, titulo: `ETA da ${o.id} mudou ${W.diasEntre(eh.de, eh.para) > 0 ? '+' : ''}${W.diasEntre(eh.de, eh.para)} dias`, detalhe: `${W.dataBR(eh.de)} → ${W.dataBR(eh.para)}. Avisar o cliente e rever a semana dos impostos.`, op: o.id, ir: ['ficha', o.id] });
       if (['conta e ordem', 'encomenda'].includes(o.modalidade) && !contratoDaOp(db, o) && meu(['operacoes'])) add({ tipo: 'contrato', nivel: 1, titulo: `${o.id} sem contrato de ${o.modalidade}`, detalhe: o.cliente || '', op: o.id, ir: ['contratos'] });
       if (!o.modalidade && meu(['operacoes'])) add({ tipo: 'cadastro', nivel: 1, titulo: `${o.id} sem modalidade`, detalhe: 'Conta e ordem, encomenda ou própria: muda impostos, documentos e numerário.', op: o.id, ir: ['ficha', o.id] });
       if (res) { const c = custeioOp(db, o.id, { ptax });
@@ -446,7 +597,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };

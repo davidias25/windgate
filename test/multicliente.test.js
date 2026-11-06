@@ -154,7 +154,7 @@ console.log('\nVirar vários clientes e voltar:');
   const tres = cotacao(); C.adicionarCliente(tres); tres.items[3].clienteId = 'c3';
   C.removerCliente(tres, 'c3');
   ok(tres.clientes.length === 2 && tres.items[3].clienteId === '' && C.conferirClientes(tres).erros.some(e => /sem cliente/.test(e)), 'com mais clientes restando, o item do removido fica sem dono e isso é cobrado');
-  ok(C.multiClienteLigado({ hubPainel: { _flags: { multiCliente: true } } }) && !C.multiClienteLigado({}) && !C.multiClienteLigado({ hubPainel: {} }), 'a função vem desligada por padrão');
+  ok(C.multiClienteLigado({ hubPainel: { _flags: { multiCliente: true } } }) && C.multiClienteLigado({}) && C.multiClienteLigado({ hubPainel: {} }) && !C.multiClienteLigado({ hubPainel: { _flags: { multiCliente: false } } }), 'a função vem ligada, e só o desligamento explícito fecha');
 }
 
 console.log('\nPropriedade: em cotações geradas, a soma sempre fecha:');
