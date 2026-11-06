@@ -147,4 +147,21 @@ async function lerComprovante({ base64, mime }, fetchImpl) {
   return extrairJSON(await chamar([bloco, { type: 'text', text: 'Leia este comprovante.' }], SISTEMA_COMPROVANTE, fetchImpl, { max_tokens: 1500 }));
 }
 
-module.exports = { ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, lerComprovante, extrairJSON, blocoImagem, MODELO };
+const SISTEMA_CONTRATO = `Você revisa contratos de importação da WindGate, uma trading no Ceará, antes de o sócio liberar. Compare o CONTRATO com o MODELO OFICIAL e os FATOS.
+Você só aponta alertas. Não reescreva nem sugira texto de cláusula. Não invente lei, valor ou fato: aponte só o que está nos documentos recebidos.
+Procure:
+1. cláusulas ausentes ou alteradas em relação ao modelo oficial (campos preenchidos e [PENDENTE] não são alteração);
+2. cláusulas que favorecem menos a WindGate que o modelo;
+3. risco financeiro para a WindGate: pagamento à fábrica antes do recebimento do cliente; margem negativa no pior cenário do dólar; custo não coberto (demurrage, frete nacional, DIFAL, CBS/IBS após 2027).
+Responda SOMENTE com JSON: {"alertas":[{"nivel":"bloqueante|atencao|informativo","titulo":"curto","detalhe":"o que viu e onde","clausula":"número, se houver"}]}.
+Bloqueante: cláusula essencial ausente ou alterada contra a WindGate. Sem nada a apontar: {"alertas":[]}.`;
+/** Só devolve alertas: a resposta nunca volta para o texto do contrato. */
+async function revisarContrato({ texto, oficial, fatos }, fetchImpl) {
+  if (!ativa()) { const e = new Error('Revisão por IA desligada: falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  const msg = `MODELO OFICIAL:\n${String(oficial || '').slice(0, 60000)}\n\nCONTRATO:\n${String(texto || '').slice(0, 60000)}\n\nFATOS:\n${JSON.stringify(fatos || {})}`;
+  const d = extrairJSON(await chamar([{ type: 'text', text: msg }], SISTEMA_CONTRATO, fetchImpl, { max_tokens: 3000 }));
+  const NIVEIS = ['bloqueante', 'atencao', 'informativo'];
+  return (Array.isArray(d.alertas) ? d.alertas : []).slice(0, 40).map(a => ({ nivel: NIVEIS.includes(a && a.nivel) ? a.nivel : 'atencao', titulo: String((a && a.titulo) || '').slice(0, 200), detalhe: String((a && a.detalhe) || '').slice(0, 800), clausula: String((a && a.clausula) || '').slice(0, 40), origem: 'ia' }));
+}
+
+module.exports = { revisarContrato, ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, lerComprovante, extrairJSON, blocoImagem, MODELO };

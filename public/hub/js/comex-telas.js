@@ -291,10 +291,10 @@
 
   /* ---------- Contratos ---------- */
   H.telas.contratos = function (el) {
-    const cs = (H.db.hubContratos || []).filter(Boolean);
+    const cs = (H.db.hubContratos || []).filter(c => c && !c.padrao);
     const faltam = opsAtivas().filter(o => ['conta e ordem', 'encomenda'].includes(o.modalidade) && !W.contratoDaOp(H.db, o));
-    el.innerHTML = cab('Contratos de compra e venda', 'Contrato de conta e ordem ou encomenda por operação (ou guarda-chuva por cliente), com cláusula de reajuste tributário para 2027 em diante.', '<button class="btn" id="modelo">Gerar modelo</button><button class="btn blue" id="novo">+ Contrato</button>') +
-      `${faltam.length ? `<div class="banner">${faltam.length} operação(ões) sem contrato: ${faltam.map(o => esc(o.id)).join(', ')}.</div>` : ''}
+    el.innerHTML = cab('Contratos de compra e venda', 'Contrato padrão de cada operação, sempre importação por conta própria. Conta e ordem e encomenda ficam como exceção, na lista de baixo.', '<button class="btn" id="cfgct">Dados das contratadas</button><button class="btn" id="modelo">Modelo curto (não é o padrão)</button><button class="btn blue" id="novo">+ Contrato</button>') +
+      `<div id="ctpadrao"></div>${faltam.length ? `<div class="banner">${faltam.length} operação(ões) sem contrato: ${faltam.map(o => esc(o.id)).join(', ')}.</div>` : ''}
       <div class="box"><div class="tw"><table><thead><tr><th>Cliente</th><th>Abrangência</th><th>Modalidade</th><th>Assinado</th><th>Vigência</th><th>Reajuste tributário</th><th>Situação</th><th></th></tr></thead><tbody>
       ${cs.map(c => `<tr><td><b>${esc(c.cliente || '')}</b></td><td>${c.tipo === 'guarda-chuva' ? 'todas as operações' : esc(c.op || '')}</td><td>${esc(c.modalidade || '')}</td><td class="mono">${W.dataBR(c.assinadoEm)}</td><td class="mono">${W.dataBR(c.vigencia)}</td><td>${c.clausulaTributaria ? pill('sim', COR.ok) : pill('não', COR.vencido)}</td><td>${pill(c.status || 'rascunho', c.status === 'assinado' ? COR.ok : COR.atencao)}</td><td class="num">${c.link ? `<a class="btn ghost sm" href="${esc(c.link)}" target="_blank" rel="noopener">Arquivo</a>` : ''}<button class="btn ghost sm" data-ed="${esc(c._id)}">Editar</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum contrato registrado.</td></tr>'}</tbody></table></div></div>`;
     const form = c => { c = c || { status: 'rascunho', modalidade: 'conta e ordem', tipo: 'operacao', clausulaTributaria: true };
@@ -313,6 +313,7 @@
     };
     el.querySelector('#novo').onclick = () => form();
     el.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => form(cs.find(x => x._id === b.dataset.ed)));
+    blocoContratoPadrao(el);
     el.querySelector('#modelo').onclick = () => {
       const m = H.modal('Modelo de contrato', `<div class="fields"><div class="f w2"><label class="lbl" for="mo">Operação</label><select id="mo">${optOps('', true)}</select></div><div class="f"><label class="lbl" for="mm">Modalidade</label><select id="mm">${W.MODALIDADES.slice(0, 2).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div></div><textarea id="mt" class="inp" rows="14" style="width:100%;margin-top:8px"></textarea>`, '<button class="btn blue" id="cp">Copiar</button>');
       const at = () => { const o = opById(val(m, '#mo')) || {}; m.querySelector('#mt').value = W.modeloContrato({ cliente: o.cliente, op: o.id, produto: o.nome, modalidade: val(m, '#mm'), empresa: o.empresa === 'JeT' ? 'JET IMPORT' : undefined, cnpjEmpresa: o.empresa === 'JeT' ? '[CNPJ JeT]' : undefined }); };
@@ -320,6 +321,83 @@
       m.querySelector('#cp').onclick = () => { try { navigator.clipboard.writeText(m.querySelector('#mt').value); H.toast('Copiado'); } catch (e) {} };
     };
   };
+
+  /* ---------- Contrato padrão: gerar, revisar por regras e IA, e o Samir libera ---------- */
+  const COR_NIVEL = { bloqueante: COR.vencido, atencao: COR.atencao, informativo: COR.info };
+  const ROT_NIVEL = { bloqueante: 'Bloqueante', atencao: 'Atenção', informativo: 'Informativo' };
+  const postJson = async (u, b) => (await H.api(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })).json();
+  let modelosCt = null;
+  async function blocoContratoPadrao(el) {
+    const box = el.querySelector('#ctpadrao'); if (!box) return;
+    if (!modelosCt) { try { modelosCt = await (await H.api('/api/contratos/modelos')).json(); } catch (e) { modelosCt = { instalados: {} }; } }
+    if (!box.isConnected) return;
+    const ins = modelosCt.instalados || {}, ops = opsAtivas().filter(o => !W.ehMae(o));
+    box.innerHTML = `${ins.jt && ins.sf ? '' : `<div class="banner"><b>Modelo oficial não instalado${ins.jt || ins.sf ? ' para ' + (ins.jt ? 'SF Trading' : 'J&T Import') : ''}.</b> A geração só libera com o texto de gen.py e gen2.py: as cláusulas não são escritas pelo sistema.</div>`}
+      <div class="box"><div class="box-h"><h2>Contrato padrão por operação</h2><span class="note">importação por conta própria</span></div><div class="tw"><table><thead><tr><th>Operação</th><th>Cliente</th><th>Contratada</th><th>Situação</th><th>Revisão</th><th></th></tr></thead><tbody>
+      ${ops.map(o => { const q = W.cotacaoDaOp(H.db, o), est = W.estruturaDe(o, q), c = W.contratoPadraoDaOp(H.db, o.id), des = c && W.contratoDesatualizado(H.db, c), al = (c && c.revisao && c.revisao.alertas) || [];
+        return `<tr><td><b class="mono">${esc(o.id)}</b></td><td>${esc(o.cliente || '')}</td><td>${esc(W.ESTRUTURAS[est].nome)}</td>
+          <td>${!c ? pill('sem contrato', COR.cinza) : des ? pill('desatualizado', COR.vencido) : c.status === 'liberado' ? pill('liberado por ' + (c.liberadoPor || ''), COR.ok) : pill('gerado · v' + c.versao, COR.info)}${c && (c.pendentes || []).length ? ' ' + pill(c.pendentes.length + ' pendente(s)', COR.atencao) : ''}</td>
+          <td>${!c || !c.revisao ? '—' : `${pill(al.filter(a => a.nivel === 'bloqueante').length + ' bloqueante(s)', al.some(a => a.nivel === 'bloqueante') ? COR.vencido : COR.ok)} <button class="btn ghost sm" data-ctver="${esc(c._id)}">Ver</button>`}</td>
+          <td class="num"><button class="btn sm" data-ctger="${esc(o.id)}" ${q && ins[est] ? '' : 'disabled'}>${c ? 'Gerar de novo' : 'Gerar'}</button>${c ? ` <a class="btn sm" href="${esc(c.link)}" target="_blank" rel="noopener">PDF</a> <a class="btn sm" href="${esc(c.linkDocx)}" target="_blank" rel="noopener">DOCX</a> <button class="btn sm" data-ctrev="${esc(c._id)}">Revisar</button>${H.pode('fin.autorizar') && c.status !== 'liberado' ? ` <button class="btn blue sm" data-ctlib="${esc(c._id)}">Liberar</button>` : ''}` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhuma operação ativa.</td></tr>'}</tbody></table></div></div>`;
+    box.querySelectorAll('[data-ctger]').forEach(b => b.onclick = () => gerarContratoModal(b.dataset.ctger));
+    box.querySelectorAll('[data-ctver]').forEach(b => b.onclick = () => verRevisao((H.db.hubContratos || []).find(x => x._id === b.dataset.ctver)));
+    box.querySelectorAll('[data-ctrev]').forEach(b => b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Revisando…';
+      const j = await postJson('/api/contratos/revisar', { id: b.dataset.ctrev }).catch(() => ({}));
+      if (!j.success) { H.toast(esc(j.message || 'Não consegui revisar.')); return H.render(); }
+      const c = (H.db.hubContratos || []).find(x => x._id === b.dataset.ctrev); if (c) c.revisao = j.revisao;
+      verRevisao(c || { revisao: j.revisao });
+    });
+    box.querySelectorAll('[data-ctlib]').forEach(b => b.onclick = async () => {
+      const j = await postJson('/api/contratos/liberar', { id: b.dataset.ctlib }).catch(() => ({}));
+      if (!j.success) return H.toast(esc(j.message || 'Não consegui liberar.'));
+      const c = (H.db.hubContratos || []).find(x => x._id === b.dataset.ctlib); if (c) Object.assign(c, j.contrato);
+      H.toast('Contrato liberado.'); H.render();
+    });
+    const cfg = el.querySelector('#cfgct'); if (cfg) cfg.onclick = dadosContratadas;
+  }
+  /* Ao criar a operação: um contrato por operação ou filha. Sem o modelo oficial, não faz nada e não atrapalha. */
+  H.gerarContratos = async function (ops) {
+    await Promise.resolve(H.salvar());
+    let feitos = 0;
+    for (const op of ops) {
+      const j = await postJson('/api/contratos/gerar', { op }).catch(() => ({}));
+      if (j.success) feitos++;
+    }
+    if (feitos) H.toast(`${feitos} contrato(s) gerado(s) nos documentos da operação. Revise em Contratos.`);
+  };
+  /* Dados da J&T e da SF ficam no banco, não no código: o repositório é público. */
+  function dadosContratadas() {
+    const p = painel('_contrato'), campos = [['razao', 'Razão social'], ['cnpj', 'CNPJ'], ['endereco', 'Endereço'], ['banco', 'Banco'], ['agencia', 'Agência'], ['conta', 'Conta'], ['pix', 'PIX']];
+    const m = H.modal('Dados das contratadas', ['jt', 'sf'].map(e => `<h3 class="h3">${esc(W.ESTRUTURAS[e].nome)}</h3><div class="fields" style="margin-bottom:12px">${campos.map(([k, l]) => `<div class="f"><label class="lbl" for="ct_${e}_${k}">${esc(l)}</label><input id="ct_${e}_${k}" data-e="${e}" data-k="${k}" value="${esc((p[e] || {})[k] || '')}"></div>`).join('')}</div>`).join(''), '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="ctok">Salvar</button>');
+    m.querySelector('#ctok').onclick = () => { m.querySelectorAll('[data-e]').forEach(i => { p[i.dataset.e] = p[i.dataset.e] || {}; p[i.dataset.e][i.dataset.k] = i.value.trim(); }); H.salvar(); H.fecharModal(); H.toast('Dados salvos.'); };
+  }
+  /* Editáveis antes de gerar: o que falta sai como [PENDENTE] em amarelo. */
+  function gerarContratoModal(opId) {
+    const d = W.dadosDoContrato(H.db, opId), c = d.campos, sim = !d.contribuinte ? '' : `<p class="note w4">Contribuinte: inscrição estadual ativa antes da chegada, com comprovante 5 dias úteis antes da chegada prevista.</p>`;
+    const campo = ([k, l]) => (['ieNumero', 'ieComprovanteEm'].includes(k) && !d.contribuinte) ? '' : `<div class="f"><label class="lbl" for="ge_${k}">${esc(l)}</label><input id="ge_${k}" data-ge="${k}" ${k === 'ieComprovanteEm' ? 'type="date"' : ''} value="${esc(c[k] || '')}"></div>`;
+    const m = H.modal(`Contrato da ${esc(opId)} · ${esc(W.ESTRUTURAS[d.estrutura].nome)}`, `<div class="fields">${W.CAMPOS_EDITAVEIS.map(campo).join('')}
+      <div class="f"><label class="lbl" for="ge_fr">Frete nacional</label><select id="ge_fr"><option value="1" ${c.freteNacional === 'incluso' ? 'selected' : ''}>Incluso</option><option value="0" ${c.freteNacional === 'incluso' ? '' : 'selected'}>Não incluso</option></select></div>
+      ${sim}${d.parcelas.map(p => `<div class="f"><label class="lbl" for="ge_p${p.n}">Parcela ${p.n} (R$)</label><input id="ge_p${p.n}" data-gp="${p.n}" inputmode="decimal" value="${(+p.valor || 0).toFixed(2)}"></div>`).join('')}</div>
+      <p class="note" style="margin-top:8px">Parcela diferente da cotação gera alerta bloqueante na revisão.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="geok">Gerar DOCX e PDF</button>');
+    m.querySelector('#geok').onclick = async () => {
+      const ed = {}; m.querySelectorAll('[data-ge]').forEach(i => { if (i.value.trim() !== String(c[i.dataset.ge] || '')) ed[i.dataset.ge] = i.value.trim(); });
+      ed.freteNacional = m.querySelector('#ge_fr').value === '1';
+      ed.parcelas = [...m.querySelectorAll('[data-gp]')].map(i => ({ n: +i.dataset.gp, valor: +String(i.value).replace(',', '.') || 0 }));
+      const b = m.querySelector('#geok'); b.disabled = true; b.textContent = 'Gerando…';
+      const j = await postJson('/api/contratos/gerar', { op: opId, editados: ed }).catch(e => ({ message: e.message }));
+      if (!j.success) { b.disabled = false; b.textContent = 'Gerar DOCX e PDF'; return H.toast(esc(j.message || 'Não consegui gerar.')); }
+      H.fecharModal(); H.toast(`Contrato v${j.contrato.versao} guardado nos documentos da ${esc(opId)}.`);
+      if (H.recarregar) H.recarregar(); else H.render();
+    };
+  }
+  function verRevisao(c) {
+    const r = c && c.revisao; if (!r) return;
+    const grupos = W.NIVEIS.map(n => [n, r.alertas.filter(a => a.nivel === n)]);
+    H.modal('Revisão do contrato', `<p class="note">A revisão só aponta alertas: não altera o texto. Quem libera é o Samir.${r.ia ? '' : ' A análise por IA não rodou nesta revisão.'}</p>
+      ${grupos.map(([n, xs]) => xs.length ? `<h3 class="h3" style="margin-top:10px">${pill(ROT_NIVEL[n] + ' · ' + xs.length, COR_NIVEL[n])}</h3><div class="list">${xs.map(a => `<div class="row"><span><b>${esc(a.titulo)}</b>${a.clausula ? ' · cláusula ' + esc(a.clausula) : ''}<br><small class="note">${esc(a.detalhe || '')}${a.origem === 'ia' ? ' · apontado pela IA' : ''}</small></span></div>`).join('')}</div>` : '').join('') || '<p class="banner ok">Nenhum alerta.</p>'}`, '<button class="btn" data-x>Fechar</button>');
+  }
 
   /* ---------- Compliance e habilitações ---------- */
   H.telas.compliance = function (el) {

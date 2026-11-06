@@ -799,7 +799,18 @@ app.post('/api/email/notas', auth.exigirTokenSeAtiva, async (req, res) => {
 if (email.configurado() && process.env.NODE_ENV !== 'test') setInterval(() => lerEmailNotas().catch(e => console.warn('⚠️ E-mail de notas:', e.message)), 10 * 60 * 1000);
 
 /* ---------- Comércio exterior: dólar, rastreio, bancos, portais, MCP ---------- */
-require('./routes/comex.routes')(app, { auth, acesso, gravarParcial, podeOperar, quemChat, ia, pronto: () => bancoPronto, db: () => memoryDB });
+/* Guarda um arquivo gerado pelo servidor, com a mesma regra do upload: com o Storage ligado, fora dele é falha. */
+async function guardarArquivoGerado(buffer, nome, mime) {
+  const dir = path.join(__dirname, '../uploads');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const arq = path.join(dir, Date.now() + '-' + String(nome).replace(/[^\w.-]+/g, '_'));
+  fs.writeFileSync(arq, buffer);
+  let sup = null;
+  try { sup = await uploadParaSupabase(arq, nome, mime); } catch (e) { console.warn('⚠️ Supabase Storage desativado ou sem credenciais.'); }
+  if (storageAtivo() && !(sup && sup.publicUrl)) { fs.unlink(arq, () => {}); throw new Error('O arquivo não foi guardado no Storage.'); }
+  return (sup && sup.publicUrl) || '/uploads/' + path.basename(arq);
+}
+require('./routes/comex.routes')(app, { auth, acesso, gravarParcial, podeOperar, quemChat, ia, guardarArquivoGerado, pronto: () => bancoPronto, db: () => memoryDB });
 
 /* ---------- Emissão de NF-e (Focus NFe) ---------- */
 const nfeFocus = require('./services/nfe.service');

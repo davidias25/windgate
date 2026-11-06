@@ -542,6 +542,7 @@
       if (H.db.quotes[ed.id]) { H.db.quotes[ed.id].clientes = ed.clientes; W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() }); }
       H.salvar(); H.fecharModal();
       H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b> com ${r.filhas.length} filhas · ${r.lancamentos.length} lançamento(s) previstos.`);
+      if (!r.jaLancado && H.gerarContratos) H.gerarContratos(r.filhas.map(f => f.id));
     };
   }
   function aprovar(el) {
@@ -606,6 +607,7 @@
     H.salvar();
     if (r.relancar) return H.toast(`<b>${r.lancamentos.length} lançamento(s)</b> relançado(s) no Financeiro para a ${esc(r.id)}.`);
     H.toast(`Operação <b>${esc(r.id)}</b> ${r.op ? 'criada' : 'atualizada'} · cronograma lançado no Financeiro (1ª parcela em ${W.dataBR(r.lancamentos[0] && r.lancamentos[0].vencimento)}).`);
+    if (r.op && H.gerarContratos) H.gerarContratos([r.id]);
   }
 
   /* ================= FOTOS ================= */

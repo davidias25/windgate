@@ -3,7 +3,8 @@
  * webhook, extrato pelas APIs dos bancos, portais externos (cliente,
  * fornecedor, despachante), conferência de documentos por IA e servidor MCP.
  */
-const W = Object.assign({}, require('../../public/hub/js/regras.js'), require('../../public/hub/js/comex.js'), require('../../public/hub/js/cotacao-regras.js'), require('../../public/hub/js/cambio-regras.js'));
+const W = Object.assign({}, require('../../public/hub/js/regras.js'), require('../../public/hub/js/comex.js'), require('../../public/hub/js/cotacao-regras.js'), require('../../public/hub/js/cambio-regras.js'), require('../../public/hub/js/contrato-regras.js'));
+const contratoDoc = require('../services/contrato-doc.service');
 const propostaLink = require('../services/proposta-link.service');
 const cambio = require('../services/cambio.service');
 const shipsgo = require('../services/shipsgo.service');
@@ -12,7 +13,7 @@ const portal = require('../services/portal.service');
 const mcp = require('../services/mcp.service');
 
 module.exports = function registrar(app, ctx) {
-  const { auth, acesso, gravarParcial, podeOperar, quemChat, pronto, db, ia } = ctx;
+  const { auth, acesso, gravarParcial, podeOperar, quemChat, pronto, db, ia, guardarArquivoGerado } = ctx;
   const perfilReq = req => acesso.perfil(db(), quemChat(req));
   const veFin = req => quemChat(req) === '(sem-auth)' || W.pode(db() || {}, quemChat(req), 'fin.ver');
 
@@ -140,6 +141,56 @@ module.exports = function registrar(app, ctx) {
     if (a.tipo === 'despachante' && acao === 'canal' && texto) n.canal = texto.slice(0, 20);
     await gravarParcial({ ops: [n], hubRecados: [{ _id: 'portal-' + o.id + '-' + ev.id, para: 'todos', por: 'Portal · ' + a.tipo, prio: 'alta', feito: {}, texto: `${o.id} · ${a.tipo}: ${acao === 'mensagem' ? texto.slice(0, 140) : acao.replace(/-/g, ' ') + (ev.data ? ' ' + ev.data.split('-').reverse().join('/') : '') + (texto && acao !== 'mensagem' ? ' · ' + texto.slice(0, 80) : '')}`, em: ev.em }] });
     res.json({ success: true });
+  });
+
+  /* Contrato padrão: gerar, revisar e liberar */
+  const podeFinAutorizar = req => W.pode(db() || {}, quemChat(req), 'fin.autorizar');
+  app.get('/api/contratos/modelos', auth.exigirTokenSeAtiva, (req, res) => res.json({ success: true, instalados: contratoDoc.modelosInstalados(), ia: ia.ativa() }));
+  app.post('/api/contratos/gerar', auth.exigirTokenSeAtiva, async (req, res) => {
+    await pronto(); const b = req.body || {}, d = W.dadosDoContrato(db(), String(b.op || ''), b.editados);
+    if (!d) return res.status(404).json({ success: false, message: 'Operação não encontrada.' });
+    if (W.ehMae(d.op)) return res.status(400).json({ success: false, message: 'O contrato é um por filha: gere em cada cliente.' });
+    if (!d.q) return res.status(400).json({ success: false, message: 'Esta operação não tem cotação ligada.' });
+    const modelo = contratoDoc.modelo(d.estrutura);
+    if (!modelo) return res.status(409).json({ success: false, semModelo: true, message: `O modelo oficial de ${W.ESTRUTURAS[d.estrutura].nome} ainda não foi instalado.` });
+    try {
+      const p = W.preencherModelo(modelo, d), agora = new Date().toISOString(), anterior = W.contratoPadraoDaOp(db(), d.op.id), versao = ((anterior && +anterior.versao) || 0) + 1;
+      const nome = `Contrato_${d.op.id.replace(/[^\w.-]+/g, '_')}_v${versao}`, por = quemChat(req);
+      const [docx, pdf] = await Promise.all([guardarArquivoGerado(contratoDoc.gerarDocx(p), nome + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'), guardarArquivoGerado(contratoDoc.gerarPdf(p), nome + '.pdf', 'application/pdf')]);
+      const c = { _id: 'ct-' + d.op.id.replace(/[^\w.-]+/g, '_') + '-v' + versao, padrao: true, op: d.op.id, cliente: d.op.cliente || '', tipo: 'operacao', modalidade: 'propria', estrutura: d.estrutura, versao, status: 'gerado', clausulaTributaria: true, por, em: agora, link: pdf, linkDocx: docx, editados: b.editados || {}, pendentes: p.pendentes, digital: W.digitalDaCotacao(d.q), revisao: null };
+      const docOf = (id, link, ext) => ({ _id: c._id + '-' + id, op: d.op.id, grupo: 'contratos', cat: 'Contrato com o cliente', nome: nome + '.' + ext, link, status: 'recebido', por, obs: 'Gerado pelo sistema', data: agora.slice(0, 10) });
+      const parcial = { hubContratos: [c], docs: [docOf('pdf', pdf, 'pdf'), docOf('docx', docx, 'docx')] };
+      if (anterior) parcial.hubContratos.push(Object.assign({}, anterior, { status: 'cancelado', substituidoPor: c._id }));
+      await gravarParcial(parcial);
+      res.json({ success: true, contrato: c });
+    } catch (e) { res.status(502).json({ success: false, message: e.message }); }
+  });
+  app.post('/api/contratos/revisar', auth.exigirTokenSeAtiva, async (req, res) => {
+    await pronto(); const c = (db().hubContratos || []).find(x => x && x._id === String((req.body || {}).id || ''));
+    if (!c) return res.status(404).json({ success: false, message: 'Contrato não encontrado.' });
+    const d = W.dadosDoContrato(db(), c.op, c.editados); if (!d) return res.status(404).json({ success: false, message: 'Operação não encontrada.' });
+    const alertas = W.revisarEmCodigo(db(), c, d);
+    let iaFeita = false, iaErro = '';
+    const modelo = contratoDoc.modelo(c.estrutura);
+    if (modelo) {
+      try {
+        const p = W.preencherModelo(modelo, d), s = d.tabelaRaw ? W.simulacaoCambio(d.q, d.tabelaRaw.referencia - 0.05) : null;
+        const fatos = { estrutura: W.ESTRUTURAS[c.estrutura].nome, contribuinte: d.contribuinte, eta: d.op.eta || '', cotacaoComFreteNacional: d.campos.freteNacional, pior: s ? s.cenarios.reduce((a, b) => (b.lucro < a.lucro ? b : a)).lucro : null, recebimentoCobreSaida: W.desemErros(d.q, d.R).length === 0 };
+        alertas.push(...await ia.revisarContrato({ texto: p.texto, oficial: (modelo.blocos || []).map(x => x.texto || '[' + x.t + ']').join('\n'), fatos }));
+        iaFeita = true;
+      } catch (e) { iaErro = e.message; alertas.push({ nivel: 'atencao', titulo: 'A análise por IA não rodou', detalhe: e.message, origem: 'regra' }); }
+    }
+    const revisao = { em: new Date().toISOString(), por: quemChat(req), alertas, ia: iaFeita, iaErro };
+    await gravarParcial({ hubContratos: [Object.assign({}, c, { revisao, status: c.status === 'liberado' ? 'gerado' : c.status })] });
+    res.json({ success: true, revisao });
+  });
+  app.post('/api/contratos/liberar', auth.exigirTokenSeAtiva, async (req, res) => {
+    if (!podeFinAutorizar(req)) return res.status(403).json({ success: false, message: 'Quem libera o contrato é o Samir.' });
+    await pronto(); const c0 = (db().hubContratos || []).find(x => x && x._id === String((req.body || {}).id || ''));
+    const c = c0 ? Object.assign({}, c0) : null, r = W.liberarContrato(db(), c, quemChat(req));
+    if (!r.ok) return res.status(409).json({ success: false, message: r.msg });
+    await gravarParcial({ hubContratos: [c] });
+    res.json({ success: true, contrato: c });
   });
 
   /* Link rastreável da proposta */
