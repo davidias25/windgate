@@ -28,6 +28,21 @@
   /* Rota marítima simplificada Ásia → Brasil (via Singapura e Cabo da Boa Esperança). */
   const VIA = [[1.25, 103.8], [-6, 80], [-34.6, 18.5], [-20, -15]];
 
+  /* Um mundo só: toda longitude entre −180 e 180, e a rota que cruza a borda vira dois trechos,
+     senão ela riscaria o mapa inteiro na horizontal. */
+  const lngNoMundo = lng => ((((+lng + 180) % 360) + 360) % 360) - 180;
+  const noMundo = ll => [ll[0], lngNoMundo(ll[1])];
+  function trechosDaRota(pts) {
+    const out = []; let atual = [];
+    (pts || []).map(noMundo).forEach(p => {
+      if (atual.length && Math.abs(p[1] - atual[atual.length - 1][1]) > 180) { out.push(atual); atual = []; }
+      atual.push(p);
+    });
+    if (atual.length) out.push(atual);
+    return out.filter(t => t.length > 1);
+  }
+  H.mapaGeo = { lngNoMundo, trechosDaRota };
+
   /* Posição real da ShipsGo: o servidor consulta, o navegador nunca vê o token. */
   let track = null, buscandoTrack = false;
   const CINCO_MIN = 5 * 60 * 1000;
@@ -42,7 +57,7 @@
   const realDe = o => (track && track.posicoes[o.id]) || null;
   function posicaoEstimada(o, hoje) {
     const r = realDe(o);
-    if (r && r.pos) return { real: true, tipo: r.pos.tipo, ll: [r.pos.lat, r.pos.lng], pts: r.rota || [], frac: r.pct != null ? r.pct / 100 : null, ori: { nome: r.origem }, dst: { nome: r.destino }, navio: r.pos.navio, porto: r.pos.porto, status: r.status };
+    if (r && r.pos) return { real: true, tipo: r.pos.tipo, ll: noMundo([r.pos.lat, r.pos.lng]), pts: r.rota || [], frac: r.pct != null ? r.pct / 100 : null, ori: { nome: r.origem }, dst: { nome: r.destino }, navio: r.pos.navio, porto: r.pos.porto, status: r.status };
     const ori = porto(o.origemPorto) || porto(o.fabricaCidade), dst = porto(o.destinoPorto) || porto('Pecém');
     if (!ori || !dst) return null;
     const pts = [ori.ll].concat(ori.ll[1] > 60 ? VIA : [[0, -20]]).concat([dst.ll]);
@@ -103,16 +118,21 @@
 
     if (typeof L === 'undefined') { el.querySelector('#mapa').innerHTML = '<p class="empty">Mapa indisponível sem internet.</p>'; return; }
     if (mapa) { mapa.remove(); mapa = null; }
-    mapa = L.map(el.querySelector('#mapa'), { worldCopyJump: true, scrollWheelZoom: false }).setView([5, 40], 2);
+    const MUNDO = [[-85, -180], [85, 180]];
+    mapa = L.map(el.querySelector('#mapa'), { maxBounds: MUNDO, maxBoundsViscosity: 1, scrollWheelZoom: false }).setView([5, 40], 2);
+    // O zoom mínimo é o maior em que o mundo inteiro ainda cabe na largura: as sobras nas laterais ficam da cor do mar.
+    mapa.setMinZoom(Math.max(0, Math.floor(Math.log2(Math.max(256, mapa.getSize().x) / 256))));
+    mapa.setZoom(mapa.getMinZoom());
+    el.querySelector('#mapa').style.background = '#AAD3DF';
     // Quadros do OpenStreetMap (sem chave; a CARTO passou a exigir chave e mostrava "API KEY REQUIRED").
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>', maxZoom: 10 }).addTo(mapa);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>', maxZoom: 10, noWrap: true, bounds: MUNDO }).addTo(mapa);
     const grupos = {};
     // Mesmo ponto, mesmo marcador: um nome em cima do outro escondia a operação.
     pos.forEach(({ o, p }) => { if (!p) return; const k = p.ll.map(x => x.toFixed(1)).join(','); (grupos[k] = grupos[k] || { p, ops: [] }).ops.push(o); });
     const limites = [];
     Object.values(grupos).forEach(({ p, ops }) => {
       const mar = p.real ? p.tipo === 'mar' : p.frac != null;
-      if ((mar || p.real) && p.pts.length > 1) L.polyline(p.pts, { color: '#0046AD', weight: 1.5, dashArray: '5 5', opacity: .6 }).addTo(mapa);
+      if (mar || p.real) trechosDaRota(p.pts).forEach(t => L.polyline(t, { color: '#0046AD', weight: 1.5, dashArray: '5 5', opacity: .6 }).addTo(mapa));
       L.circleMarker(p.ll, { radius: mar ? 8 : 6, color: '#fff', weight: 2, fillColor: p.real ? '#0F8A5F' : mar ? '#CE0058' : '#0046AD', fillOpacity: 1 }).addTo(mapa)
         .bindTooltip(`<span class="map-lbl">${ops.map(o => esc(o.id)).join(' · ')}</span>`, { permanent: true, direction: 'right', className: 'map-tip', opacity: 1, offset: [8, 0] })
         .on('click', () => H.ir('ficha', ops[0].id));

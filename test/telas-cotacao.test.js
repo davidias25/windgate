@@ -116,6 +116,13 @@ console.log('\nMapa:');
 {
   H.pillStatus = s => s; H.ir = () => {};
   vm.runInContext(fs.readFileSync(path.join(raiz, 'public/hub/js/mapa.js'), 'utf8'), ctx);
+  const G = H.mapaGeo;
+  ok(G.lngNoMundo(222) === -138 && G.lngNoMundo(-222) === 138 && G.lngNoMundo(120) === 120 && G.lngNoMundo(-50) === -50, 'longitude fora do mundo volta para −180 a 180');
+  const cruza = G.trechosDaRota([[30, 170], [31, 179], [32, 190], [33, 200], [34, 280]]);
+  ok(cruza.length === 2 && cruza[0].length === 2 && cruza[1].length === 3 && cruza[1][0][1] === -170, 'rota que cruza o Pacífico vira dois trechos, sem riscar o mapa');
+  ok(G.trechosDaRota([[0, 10], [1, 20]]).length === 1 && G.trechosDaRota([]).length === 0 && G.trechosDaRota(null).length === 0, 'rota comum fica inteira, e rota vazia não quebra');
+  const volta = G.trechosDaRota([[30, 120], [20, -170], [10, -100]]);
+  ok(volta.length === 1 && volta[0].length === 2, 'trecho de um ponto só não é desenhado');
   H.db = { portos: { 'Porto Novo': [10, 20] }, ops: [{ id: 'OP24', cliente: 'A', status: 'embarcado', embarque: '2026-10-11', eta: '2026-12-22', origemPorto: '', fabricaCidade: '' }, { id: 'OP23', status: 'embarcado', origemPorto: 'Qingdao', destinoPorto: 'Pecém', embarque: '2026-10-11', eta: '2026-12-22' },
     { id: 'OP30', status: 'producao', origemPorto: 'Itajaí' }, { id: 'OP31', status: 'producao', fabricaCidade: 'Tangshan (Hebei)' }, { id: 'OP32', status: 'producao', origemPorto: 'Porto Novo' }, { id: 'OP33', status: 'cotacao' }] };
   const el = criarNo(); H.telas.mapa(el); const h = el.innerHTML;
