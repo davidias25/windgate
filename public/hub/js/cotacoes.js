@@ -95,7 +95,7 @@
       <div class="head"><div><button class="btn ghost sm" id="cvolta">← Cotações</button><h1 style="margin-top:6px">${ed.id ? 'Cotação ' + esc(F('opNum') || 'sem nº') : 'Nova cotação'}${F('cliente') ? ' · ' + esc(F('cliente')) : ''}</h1>
         <p class="sub">${stPill(ed.status)} ${ed.aprovadoPor && ed.status === 'ok' ? 'aprovada por ' + esc(ed.aprovadoPor) : ed.status === 'wait' ? 'aguardando o Samir aprovar a margem' : 'Davi monta → envia → Samir aprova a margem → proposta liberada'}</p></div>
         <div class="btns"><button class="btn" id="cnova">+ Nova</button>${bloq ? (semFlag() ? '' : '<button class="btn blue" id="cedit">Editar cotação</button>') : '<button class="btn" id="csalva">Salvar</button>'}
-          ${multi ? '' : `<button class="btn pri" id="cprop" ${ed.status === 'ok' ? '' : 'disabled title="Liberada depois da aprovação do Samir"'}>Gerar proposta (PDF)</button>`}</div></div>
+          ${multi || ed.status !== 'ok' ? '' : '<button class="btn" id="clink" title="Link para o cliente. Avisa quando ele abrir.">Link da proposta</button>'}${multi ? '' : `<button class="btn pri" id="cprop" ${ed.status === 'ok' ? '' : 'disabled title="Liberada depois da aprovação do Samir"'}>Gerar proposta (PDF)</button>`}</div></div>
       ${semFlag() ? '<div class="banner">Cotação com <b>vários clientes</b>: somente leitura enquanto a função estiver desligada.</div>' : bloq ? `<div class="banner">Cotação <b>aprovada</b>${ed.aprovadoPor ? ' por <b>' + esc(ed.aprovadoPor) + '</b>' : ''}: somente leitura. Para corrigir, clique em <b>Editar cotação</b>. Se o preço mudar, ela volta para a aprovação.</div>`
         : ed.status === 'ok' ? '<div class="banner">Editando uma cotação já aprovada. Se o <b>preço ao cliente</b> mudar, ela volta para a aprovação do Samir; o resto pode ser corrigido sem refazer o fluxo.</div>' : ''}
       <div class="g2 larga" style="align-items:start"><fieldset id="cform" ${bloq ? 'disabled' : ''} style="border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:16px">
@@ -279,12 +279,13 @@
     if (rm.erros.length) { resumo.innerHTML = `<p class="note">Falta completar a cotação: ${esc(rm.erros[0])}</p>`; preco.innerHTML = ''; W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = '—'; }); return; }
     const lin = (a, b, forte) => `<div style="display:flex;justify-content:space-between;gap:8px${forte ? ';font-weight:700' : ''}"><span${forte ? '' : ' class="note"'}>${a}</span><span class="num">${b}</span></div>`;
     resumo.innerHTML = `${rm.clientes.map((c, k) => `<div style="padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><b>${nome(c, k)}</b>${c.R.tri ? pill('triangular', 'info') : ''}</div>
-        ${(st => st === 'ok' ? `<div style="display:flex;justify-content:space-between;gap:8px;margin:4px 0">${pill('aprovado', 'ok')}<button class="btn sm" data-pdfc="${esc(c.id)}">Proposta (PDF)</button></div>` : ed.status === 'wait' ? (podeAprovar() ? `<div style="margin:4px 0"><button class="btn pri sm" data-aprc="${esc(c.id)}">Aprovar este cliente</button></div>` : `<div style="margin:4px 0">${pill('aguardando o Samir', 'warn')}</div>`) : '')((clienteEd(c.id) || {}).status)}
+        ${(st => st === 'ok' ? `<div style="display:flex;justify-content:space-between;gap:8px;margin:4px 0">${pill('aprovado', 'ok')}<span><button class="btn sm" data-linkc="${esc(c.id)}">Link</button> <button class="btn sm" data-pdfc="${esc(c.id)}">Proposta (PDF)</button></span></div>` : ed.status === 'wait' ? (podeAprovar() ? `<div style="margin:4px 0"><button class="btn pri sm" data-aprc="${esc(c.id)}">Aprovar este cliente</button></div>` : `<div style="margin:4px 0">${pill('aguardando o Samir', 'warn')}</div>`) : '')((clienteEd(c.id) || {}).status)}
         ${lin('FOB', fmt(c.R.fob))}${lin('Custo', fmt(c.custo))}${lin('DIFAL', fmt(c.R.tri ? c.R.tri.difal : c.R.st))}${lin('Margem s/ custo', pct(c.R.margemPctCampo) + ' · ' + fmt(c.R.margem))}${lin('Preço', fmt(c.R.preco), true)}
         ${c.R.warnMargem ? '<p class="note" style="color:var(--warn);margin-top:4px">⚠ Margem abaixo de 10%.</p>' : ''}</div>`).join('')}
       ${lin('Total FOB', fmt(rm.total.fob))}${lin('Total de custo', fmt(rm.total.custo), true)}`;
     resumo.onclick = ev => {
-      const a = ev.target.closest('[data-aprc]'), p = ev.target.closest('[data-pdfc]');
+      const a = ev.target.closest('[data-aprc]'), p = ev.target.closest('[data-pdfc]'), lk = ev.target.closest('[data-linkc]');
+      if (lk) linkProposta(lk.dataset.linkc);
       if (a) aprovarCli(el, a.dataset.aprc);
       if (p) { pdfCliente = p.dataset.pdfc; propostaModal(); }
     };
@@ -340,6 +341,7 @@
     on('#cedit', () => { editando = true; H.toast('Cotação destravada: se o preço mudar, volta para aprovação.'); editor(el); });
     on('#csalva', () => salvar(false) && editor(el));
     on('#cprop', propostaModal);
+    on('#clink', () => linkProposta());
     on('#cenvia', () => enviar(el));
     on('#caprova', () => aprovar(el));
     on('#cdevolve', () => { ed.status = 'draft'; if (salvar(true, true)) { H.toast('Devolvida para ajuste.'); editor(el); } });
@@ -640,6 +642,18 @@
   }
 
   /* ================= PROPOSTA EM PDF ================= */
+  /* Link assinado da proposta: o cliente abre sem senha, e o negócio mostra quando e quantas vezes. */
+  async function linkProposta(clienteId) {
+    if (!ed.id) return H.toast('Salve a cotação primeiro.');
+    if (!salvar(true)) return;
+    try {
+      const j = await (await H.api('/api/propostas/link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quoteId: ed.id, clienteId: clienteId || '' }) })).json();
+      if (!j.success) return H.toast(esc(j.message || 'Não consegui gerar o link.'));
+      const url = location.origin + j.caminho;
+      const m = H.modal('Link da proposta', `<p>Válido por ${j.dias} dias. A página mostra só a proposta: itens, parcelas e condições. Na primeira abertura, o dono do negócio recebe um recado.</p><div class="f" style="margin-top:8px"><label class="lbl" for="lkurl">Link</label><input id="lkurl" readonly value="${esc(url)}"></div>`, '<button class="btn" data-x>Fechar</button><button class="btn blue" id="lkcp">Copiar</button>');
+      m.querySelector('#lkcp').onclick = () => { try { navigator.clipboard.writeText(url); H.toast('Link copiado.'); } catch (e) { H.toast('Copie o link no campo.'); } };
+    } catch (e) { H.toast('Não consegui gerar o link.'); }
+  }
   /* Com vários clientes, a proposta é de um cliente: só a parte dele, sem nada do outro. */
   let pdfCliente = null;
   const alvoProposta = () => { if (!pdfCliente) return { q: ed, R }; const cc = W.calcularPorCliente(ed, { usuario: eu() }).clientes.find(x => x.id === pdfCliente); return cc ? { q: cc.q, R: cc.R } : { q: ed, R }; };

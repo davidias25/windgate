@@ -16,7 +16,7 @@
   /* ---------- Protocolo de sincronização (idêntico ao sistema atual) ---------- */
 
   const COLECOES_SYNC = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks',
-    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe', 'hubComprovantes'];
+    'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe', 'hubComprovantes', 'propostaLinks', 'propostaAberturas'];
 
   function novoId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -689,6 +689,29 @@
     fechadosPeriodo.filter(n => faseDe(n) === 'perdido').forEach(n => { const m = n.motivoPerda || 'Não informado'; perdas[m] = (perdas[m] || 0) + 1; });
     return { abertos: abertos.length, pipeline, previsao, conversao, ganhos: ganhos.length, fechados: fechadosPeriodo.length, ticket, ciclo, parados, porOrigem, perdas };
   }
+  /* Link rastreável da proposta. Cada abertura é um registro novo: uma gravação de outra pessoa nunca apaga a contagem. */
+  function aberturasDaProposta(db, quoteId) {
+    const xs = (db.propostaAberturas || []).filter(a => a && a.quoteId === quoteId).sort((a, b) => String(a.em).localeCompare(String(b.em)));
+    return { vezes: xs.length, primeira: xs.length ? xs[0].em : '', ultima: xs.length ? xs[xs.length - 1].em : '' };
+  }
+  /** "Proposta aberta em 06/11 14:32 (3 vezes)". */
+  function textoAberturaProposta(a) {
+    if (!a || !a.vezes) return '';
+    const d = new Date(a.ultima), p = n => String(n).padStart(2, '0');
+    return `Proposta aberta em ${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())} (${a.vezes} ${a.vezes === 1 ? 'vez' : 'vezes'})`;
+  }
+  /** Link enviado há 3 dias ou mais, sem nenhuma abertura, em negócio aberto: follow-up sugerido. */
+  function followUpsProposta(db, hoje) {
+    const h = hoje || hojeISO(), vistos = new Set(), out = [];
+    (db.propostaLinks || []).filter(Boolean).forEach(l => {
+      if (vistos.has(l.quoteId) || aberturasDaProposta(db, l.quoteId).vezes) return;
+      const dias = diasEntre(soData(l.criadoEm), h); if (dias == null || dias < 3) return;
+      const n = (db.crmOps || []).find(x => x && x.quoteId === l.quoteId);
+      if (!n || !negocioAberto(n)) return;
+      vistos.add(l.quoteId); out.push({ negocio: n, link: l, dias });
+    });
+    return out;
+  }
   /** Muda a fase e aplica as automações: registro na linha do tempo, follow-up automático e rótulo legado. */
   function moverNegocio(n, fase, por, agora, extra) {
     const t = agora || new Date().toISOString(), de = faseDe(n), f = faseMeta(fase);
@@ -1100,7 +1123,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, aberturasDaProposta, textoAberturaProposta, followUpsProposta, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

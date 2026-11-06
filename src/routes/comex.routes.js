@@ -3,7 +3,8 @@
  * webhook, extrato pelas APIs dos bancos, portais externos (cliente,
  * fornecedor, despachante), conferência de documentos por IA e servidor MCP.
  */
-const W = Object.assign({}, require('../../public/hub/js/regras.js'), require('../../public/hub/js/comex.js'));
+const W = Object.assign({}, require('../../public/hub/js/regras.js'), require('../../public/hub/js/comex.js'), require('../../public/hub/js/cotacao-regras.js'), require('../../public/hub/js/cambio-regras.js'));
+const propostaLink = require('../services/proposta-link.service');
 const cambio = require('../services/cambio.service');
 const shipsgo = require('../services/shipsgo.service');
 const bancos = require('../services/bancos.service');
@@ -138,6 +139,53 @@ module.exports = function registrar(app, ctx) {
     if (a.tipo === 'despachante' && acao === 'duimp-registrada' && texto) n.duimp = texto.slice(0, 30);
     if (a.tipo === 'despachante' && acao === 'canal' && texto) n.canal = texto.slice(0, 20);
     await gravarParcial({ ops: [n], hubRecados: [{ _id: 'portal-' + o.id + '-' + ev.id, para: 'todos', por: 'Portal · ' + a.tipo, prio: 'alta', feito: {}, texto: `${o.id} · ${a.tipo}: ${acao === 'mensagem' ? texto.slice(0, 140) : acao.replace(/-/g, ' ') + (ev.data ? ' ' + ev.data.split('-').reverse().join('/') : '') + (texto && acao !== 'mensagem' ? ' · ' + texto.slice(0, 80) : '')}`, em: ev.em }] });
+    res.json({ success: true });
+  });
+
+  /* Link rastreável da proposta */
+  const cotacaoDoLink = a => {
+    const q0 = (db().quotes || {})[a.q]; if (!q0) return null;
+    const q = Object.assign({ id: a.q }, q0);
+    if (a.c && W.ehMultiCliente(q)) { const cc = W.calcularPorCliente(q).clientes.find(x => x.id === a.c); if (!cc || cc.cliente.status !== 'ok') return null; return { q: cc.q, R: cc.R, liberada: true }; }
+    /* A margem pode ter sido digitada em % ou em R$: vale o modo que dá o preço aprovado. */
+    let R = W.calcular(q);
+    if (Math.abs((R.preco || 0) - (+q.preco || 0)) > 0.01) { const emReais = W.calcular(q, { modo: 'brl' }); if (Math.abs((emReais.preco || 0) - (+q.preco || 0)) <= 0.01) R = emReais; }
+    return { q, R, liberada: q.status === 'ok' };
+  };
+  app.post('/api/propostas/link', auth.exigirTokenSeAtiva, async (req, res) => {
+    await pronto(); const b = req.body || {}, a = { q: String(b.quoteId || ''), c: String(b.clienteId || '') }, c = cotacaoDoLink(a);
+    if (!c) return res.status(404).json({ success: false, message: 'Cotação não encontrada ou cliente ainda sem aprovação.' });
+    if (!c.liberada) return res.status(409).json({ success: false, message: 'A proposta só é liberada após a aprovação do Samir.' });
+    const dias = Math.min(Math.max(+b.dias || 30, 1), 180), t = propostaLink.gerar(a.q, a.c, dias), criadoEm = new Date().toISOString();
+    await gravarParcial({ propostaLinks: [{ _id: propostaLink.idDoLink(t), quoteId: a.q, clienteId: a.c, criadoEm, por: quemChat(req), dias }] });
+    res.json({ success: true, token: t, caminho: '/p/proposta/' + t, dias });
+  });
+  app.get('/p/proposta/:token', async (req, res) => {
+    res.set({ 'X-Robots-Tag': 'noindex, nofollow', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    const a = propostaLink.ler(req.params.token);
+    if (!a) return res.status(410).send(propostaLink.paginaAviso('Este link venceu ou é inválido. Peça um novo à WindGate.'));
+    await pronto(); const c = cotacaoDoLink(a);
+    if (!c || !c.liberada) return res.status(410).send(propostaLink.paginaAviso('Esta proposta está sendo revista. Fale com a WindGate.'));
+    const reg = (db().propostaLinks || []).find(x => x && x._id === propostaLink.idDoLink(req.params.token));
+    const p = W.resumoProposta(c.q, c.R, reg && reg.criadoEm);
+    p.cambio = W.textoCambio(W.tabelaCambio(c.q));
+    res.send(propostaLink.pagina(p, req.params.token));
+  });
+  /* A abertura vem do navegador do cliente: prévia de WhatsApp e robô não rodam o script e não contam. */
+  app.post('/p/proposta/:token/aberta', async (req, res) => {
+    const a = propostaLink.ler(req.params.token); if (!a) return res.status(410).json({ success: false });
+    await pronto();
+    const id = propostaLink.idDoLink(req.params.token), todas = (db().propostaAberturas || []).filter(x => x && x.linkId === id), agora = new Date();
+    const ultima = todas.map(x => x.em).sort().pop();
+    if (todas.length >= 500 || (ultima && agora - new Date(ultima) < 60000)) return res.json({ success: true });
+    const parcial = { propostaAberturas: [{ _id: 'pa-' + id + '-' + agora.getTime().toString(36), linkId: id, quoteId: a.q, clienteId: a.c || '', em: agora.toISOString() }] };
+    if (!todas.length) {
+      const n = (db().crmOps || []).find(x => x && x.quoteId === a.q), q = (db().quotes || {})[a.q] || {}, dono = String((n && n.resp) || q.criadoPor || '').trim();
+      const us = db().users || {}, chave = Object.keys(us).find(k => k.toLowerCase() === dono.toLowerCase() || String((us[k] && us[k].nome) || '').toLowerCase() === dono.toLowerCase());
+      const cliente = (n && n.clienteNome) || (q.fields && q.fields.cliente) || 'O cliente';
+      parcial.hubRecados = [{ _id: 'proposta-aberta-' + id, para: chave || 'todos', por: 'Proposta', prio: 'alta', feito: {}, em: agora.toISOString(), quoteId: a.q, texto: cliente + ' abriu a proposta pela primeira vez.' }];
+    }
+    await gravarParcial(parcial);
     res.json({ success: true });
   });
 

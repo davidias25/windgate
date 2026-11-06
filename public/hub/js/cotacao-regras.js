@@ -1053,6 +1053,19 @@ function triCalcular(e){
       const share = (it.q * it.u * txD) / tot; const t = +(preco * share).toFixed(2); acc += t; return { d: it.d || 'Item ' + (i + 1), ncm: it.ncm, q: it.q, total: t, unit: it.q > 0 ? t / it.q : t };
     }).map((x, i) => { if (i === ultimo) { x.total = +(preco - (acc - x.total)).toFixed(2); x.unit = x.q > 0 ? x.total / x.q : x.total; } return x; });
   }
+  /**
+   * Tudo o que o cliente vê na página da proposta. Só valores ao cliente: é a lista de campos que sai daqui,
+   * não a cotação. Mesma regra do PDF: DIFAL só para não contribuinte; o contribuinte recolhe o dele.
+   */
+  function resumoProposta(q, R, dataBase) {
+    const f = camposDe(q), tri = V(f, 'tipoOp') === 'triangular' && !!R.tri, difal = tri ? +(R.tri.difal || 0) : 0;
+    const investimento = (R.preco || 0) - (tri ? difal : +(R.st || 0));
+    const desconto = parseFloat(String(f.descontoProposta || '').replace(',', '.')) || 0;
+    const base = String(dataBase || W.hojeISO()).slice(0, 10);
+    return { cliente: V(f, 'cliente'), mercadoria: V(f, 'mercadoria') || 'mercadoria importada', incoterm: V(f, 'incoterm') || 'da operação', destino: V(f, 'destino'), validade: V(f, 'validade') || '7', prazo: String(f.prazoProposta || '').trim() || '90 a 100',
+      itens: propostaItens(q, R, investimento + desconto).map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })), desconto, investimento, difal, total: investimento + difal,
+      parcelas: [N(f, 'desR1'), N(f, 'desR2'), N(f, 'desR3')].map((valor, i) => ({ n: i + 1, valor, previsao: somaDias(base, CRONO_OP[i].dias) })) };
+  }
   /** Preços fixos não podem passar do total nem deixar sobra sem item para receber. */
   function conferirPrecosFixos(q, base) {
     const its = (q.items || []).filter(it => it && (it.d || it.q)), fixos = its.filter(it => +it.pf > 0);
@@ -1066,6 +1079,6 @@ function triCalcular(e){
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
-    conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
+    resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
     enviarClientes, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

@@ -554,6 +554,34 @@ Modelo para revisão jurídica antes da assinatura.`;
       return { k, l: W.stMeta(k).l, plan, real, passou, atraso: plan && real ? W.diasEntre(plan, real) : plan && !real && !passou && plan < W.hojeISO() ? W.diasEntre(plan, W.hojeISO()) : null, motivo: (o.planoMotivos || {})[k] || '' }; });
   }
 
+  /* ---------- Cenários do caixa projetado ----------
+     Base; dólar +10% (sobre o dólar ainda sem câmbio fechado: fábrica e frete previstos, na parte aberta de cada operação);
+     atraso de 15 dias nos recebimentos previstos; e os dois juntos. Só o previsto muda: o caixa de hoje é o mesmo. */
+  const CENARIOS_CAIXA = [['base', 'Base', {}], ['dolar', 'Dólar +10%', { dolar: true }], ['atraso', 'Atraso de 15 dias', { atraso: true }], ['ambos', 'Os dois juntos', { dolar: true, atraso: true }]];
+  function parteSemCambio(db, op, cache) {
+    if (cache[op] != null) return cache[op];
+    const o = (db.ops || []).find(x => x && x.id === op), c = o ? custeioOp(db, op) : null;
+    return (cache[op] = c && c.usdTotal > 0 ? Math.max(0, 1 - c.usdFechado / c.usdTotal) : 1);
+  }
+  function caixaNoCenario(db, h, empresa, o, cache, caixa) {
+    const fin = (db.fin || []).map(l => {
+      if (!l || W.realizado(l) || W.transferencia(l)) return l;
+      if (o.atraso && W.ehReceita(l)) return Object.assign({}, l, { vencimento: somaDias(W.vencDe(l), 15) });
+      if (o.dolar && !W.ehReceita(l) && ['fob', 'frete'].includes(classeDe(l))) return Object.assign({}, l, { valor: valorDe(l) * (1 + 0.10 * (l.op ? parteSemCambio(db, l.op, cache) : 1)) });
+      return l;
+    });
+    const fluxo = W.fluxoSemanal({ fin }, h, 13, empresa, true), venc = fluxo.find(p => p.vencido), semanas = fluxo.filter(p => !p.vencido);
+    let acum = caixa + venc.entra - venc.sai;
+    const serie = semanas.map(s => { acum += s.entra - s.sai; return { de: s.de, caixa: r2(acum) }; });
+    const menor = serie.reduce((a, b) => (b.caixa < a.caixa ? b : a), serie[0]);
+    return { menor: menor.caixa, semana: menor.de, semanasNegativas: serie.filter(s => s.caixa < 0).length, serie };
+  }
+  function cenariosCaixa(db, hoje, empresa) {
+    const h = hoje || W.hojeISO(), cache = {};
+    const caixa = (db.fin || []).filter(l => l && !W.transferencia(l) && W.realizado(l) && (!empresa || empresa === 'todas' || (l.empresa || 'WindGate') === empresa)).reduce((a, l) => a + (W.ehReceita(l) ? 1 : -1) * valorDe(l), 0);
+    return CENARIOS_CAIXA.map(([k, nome, o]) => Object.assign({ k, nome }, caixaNoCenario(db, h, empresa, o, cache, caixa)));
+  }
+
   /* ---------- Fila de exceções da Torre ----------
      Só entra o que pede ação. Cada item tem dono (perfil), nível e para onde ir. */
   function excecoes(db, k, hoje, extra) {
@@ -593,11 +621,12 @@ Modelo para revisão jurídica antes da assinatura.`;
       (db.hubCambio || []).filter(c => c && c.status === 'previsto' && W.ehISO(c.liquidacao) && W.diasEntre(h, c.liquidacao) <= 7).forEach(c => add({ tipo: 'cambio', nivel: 2, titulo: `Fechar câmbio: US$ ${Math.round(num(c.valorME)).toLocaleString('pt-BR')} (${c.op || ''})`, detalhe: `pagamento em ${W.dataBR(c.liquidacao)}${ptax && num(c.taxaPrevista) ? ` · PTAX ${ptax.toFixed(4)} × prevista ${num(c.taxaPrevista).toFixed(4)}` : ''}`, op: c.op, ir: ['cambio'] }));
       creditoClientes(db, h).filter(c => c.estourado).forEach(c => add({ tipo: 'credito', nivel: 3, titulo: `${c.cliente} acima do limite de crédito`, detalhe: `${W.fmtBRLk(c.usado)} de ${W.fmtBRLk(c.limite)}`, ir: ['credito'] }));
     }
+    if (meu(['comercial', 'operacoes'])) W.followUpsProposta(db, h).forEach(x => add({ tipo: 'followup', nivel: 1, titulo: `Follow-up: ${x.negocio.clienteNome || x.negocio.titulo || 'cliente'} não abriu a proposta`, detalhe: `link enviado há ${x.dias} dia(s)`, ir: ['crm'] }));
     if (meu(['operacoes'])) complianceVencendo(db, h, 30).forEach(c => add({ tipo: 'compliance', nivel: c.vencido ? 3 : 1, titulo: `${c.tipo}${c.empresa ? ' ' + c.empresa : ''} ${c.vencido ? 'VENCIDO' : `vence em ${c.dias} dia(s)`}`, detalhe: c.titulo || '', ir: ['compliance'] }));
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { cenariosCaixa, CENARIOS_CAIXA, CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };
