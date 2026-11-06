@@ -9,9 +9,19 @@
     [/guangzhou|nansha/i, 'Guangzhou', 22.75, 113.62], [/xiamen/i, 'Xiamen', 24.48, 118.08], [/dalian/i, 'Dalian', 38.92, 121.64],
     [/hamburg/i, 'Hamburgo', 53.54, 9.98], [/ho chi|vietn|hai ?phong/i, 'Vietnã', 10.77, 106.7], [/colombo|sri/i, 'Colombo', 6.95, 79.84],
     [/pec[eé]m/i, 'Pecém', -3.54, -38.81], [/mucuripe|fortaleza/i, 'Mucuripe', -3.71, -38.47], [/suape/i, 'Suape', -8.39, -34.96],
-    [/vit[oó]ria/i, 'Vitória', -20.32, -40.29], [/santos/i, 'Santos', -23.96, -46.33]
+    [/vit[oó]ria/i, 'Vitória', -20.32, -40.29], [/santos/i, 'Santos', -23.96, -46.33],
+    /* Os demais do sistema antigo (GEO), para a operação não sumir só por estar neles. */
+    [/busan/i, 'Busan', 35.1, 129.04], [/miami/i, 'Miami', 25.76, -80.19], [/mariel/i, 'Mariel', 23.0, -82.75],
+    [/itaja[ií]/i, 'Itajaí', -26.9, -48.66], [/navegantes/i, 'Navegantes', -26.9, -48.65], [/paranagu[aá]/i, 'Paranaguá', -25.5, -48.52], [/salvador/i, 'Salvador', -12.97, -38.5],
+    [/cangzhou/i, 'Cangzhou', 38.3, 116.85], [/tangshan/i, 'Tangshan', 39.63, 118.18], [/changsha/i, 'Changsha', 28.23, 112.94], [/xuzhou/i, 'Xuzhou', 34.26, 117.19],
+    [/yongkang/i, 'Yongkang', 28.9, 120.04], [/yiwu/i, 'Yiwu', 29.31, 120.07], [/hangzhou/i, 'Hangzhou', 30.27, 120.15], [/foshan/i, 'Foshan', 23.02, 113.12]
   ];
-  const porto = txt => { const p = PORTOS.find(x => x[0].test(String(txt || ''))); return p ? { nome: p[1], ll: [p[2], p[3]] } : null; };
+  /* Porto criado pela equipe (db.portos) vale primeiro, se tiver coordenadas. */
+  const porto = txt => {
+    const nome = String(txt || '').trim(), meu = nome && (H.db.portos || {})[nome];
+    if (Array.isArray(meu) && meu.length === 2) return { nome, ll: [+meu[0], +meu[1]] };
+    const p = PORTOS.find(x => x[0].test(nome)); return p ? { nome: p[1], ll: [p[2], p[3]] } : null;
+  };
   /* Rota marítima simplificada Ásia → Brasil (via Singapura e Cabo da Boa Esperança). */
   const VIA = [[1.25, 103.8], [-6, 80], [-34.6, 18.5], [-20, -15]];
 
@@ -38,20 +48,22 @@
     const db = H.db, hoje = W.hojeISO();
     const ops = db.ops.filter(o => o && W.ativa(o) && !['cotacao', 'contrato'].includes(o.status));
     const pos = ops.map(o => ({ o, p: posicaoEstimada(o, hoje) }));
+    const fora = pos.filter(x => !x.p).map(x => x.o);
     el.innerHTML = `
       <div class="head"><div><h1>Mapa & Tracking</h1><p class="sub">Onde está cada operação agora. Posição estimada pelo embarque e ETA até o tracking automático por contêiner entrar.</p></div></div>
+      ${fora.length ? `<div class="banner" style="margin-bottom:12px"><b>${fora.length} operação(ões) fora do mapa:</b> sem porto de origem, não dá para estimar a posição. Informe o porto ou a cidade da fábrica na aba Resumo: ${fora.map(o => `<a href="#" data-op="${esc(o.id)}">${esc(o.id)}</a>`).join(', ')}.</div>` : ''}
       <div class="box box-b"><div id="mapa" role="img" aria-label="Mapa com a posição das operações"></div>
         <p class="note" style="margin-top:8px">● magenta: no mar · ● azul: na fábrica ou no destino · operações no mesmo navio aparecem juntas.</p></div>
       <div class="box"><div class="box-h"><h2>Situação por operação</h2><span class="note">${ops.length} operação(ões) em andamento</span></div>
         <div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th>Rota</th><th>Navio</th><th>Embarque</th><th>ETA</th><th class="num">Chega em</th><th class="num">Viagem</th><th>Tracking</th></tr></thead><tbody>
         ${pos.map(({ o, p }) => { const d = W.diasEntre(hoje, o.eta);
           return `<tr class="click" data-op="${esc(o.id)}"><td class="mono"><b>${esc(o.id)}</b><br><small class="note">${esc(o.cliente || '')}</small></td><td>${H.pillStatus(o.status)}</td>
-          <td>${esc((p && p.ori && p.ori.nome) || o.origemPorto || '?')} → ${esc((p && p.dst && p.dst.nome) || o.destinoPorto || '?')}</td><td>${esc(o.navio || '—')}</td>
+          <td>${esc((p && p.ori && p.ori.nome) || o.origemPorto || '?')} → ${esc((p && p.dst && p.dst.nome) || o.destinoPorto || '?')}${p ? '' : '<br><span class="pill warn">fora do mapa</span>'}</td><td>${esc(o.navio || '—')}</td>
           <td class="mono">${W.dataBR(o.embarque)}</td><td class="mono">${W.dataBR(o.eta)}</td><td class="num">${d == null ? '—' : d < 0 ? 'chegou' : d + ' dias'}</td>
           <td class="num">${p && p.frac != null ? Math.round(p.frac * 100) + '%' : '—'}</td>
           <td>${o.tracking ? `<a href="${esc(o.tracking)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">armador ↗</a>` : '<span class="note">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="9" class="empty">Nenhuma operação em produção ou trânsito.</td></tr>'}
         </tbody></table></div></div>`;
-    el.querySelectorAll('[data-op]').forEach(x => x.onclick = () => H.ir('ficha', x.dataset.op));
+    el.querySelectorAll('[data-op]').forEach(x => x.onclick = e => { e.preventDefault(); H.ir('ficha', x.dataset.op); });
 
     if (typeof L === 'undefined') { el.querySelector('#mapa').innerHTML = '<p class="empty">Mapa indisponível sem internet.</p>'; return; }
     if (mapa) { mapa.remove(); mapa = null; }

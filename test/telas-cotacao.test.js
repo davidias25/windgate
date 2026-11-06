@@ -112,6 +112,20 @@ console.log('\nRelançar no Financeiro:');
   H.modal = m0; H.toast = t0;
 }
 
+console.log('\nMapa:');
+{
+  H.pillStatus = s => s; H.ir = () => {};
+  vm.runInContext(fs.readFileSync(path.join(raiz, 'public/hub/js/mapa.js'), 'utf8'), ctx);
+  H.db = { portos: { 'Porto Novo': [10, 20] }, ops: [{ id: 'OP24', cliente: 'A', status: 'embarcado', embarque: '2026-10-11', eta: '2026-12-22', origemPorto: '', fabricaCidade: '' }, { id: 'OP23', status: 'embarcado', origemPorto: 'Qingdao', destinoPorto: 'Pecém', embarque: '2026-10-11', eta: '2026-12-22' },
+    { id: 'OP30', status: 'producao', origemPorto: 'Itajaí' }, { id: 'OP31', status: 'producao', fabricaCidade: 'Tangshan (Hebei)' }, { id: 'OP32', status: 'producao', origemPorto: 'Porto Novo' }, { id: 'OP33', status: 'cotacao' }] };
+  const el = criarNo(); H.telas.mapa(el); const h = el.innerHTML;
+  ok(h.includes('1 operação(ões) fora do mapa') && h.includes('<a href="#" data-op="OP24">OP24</a>'), 'operação sem porto de origem é apontada, com link para a ficha');
+  ok(h.split('fora do mapa').length === 3, 'só ela fica fora: Itajaí, Tangshan e porto criado pela equipe entram no mapa');
+  ok(!h.includes('OP33'), 'operação em cotação continua fora do mapa, como antes');
+  H.db.ops[0].origemPorto = 'Qingdao'; const e2 = criarNo(); H.telas.mapa(e2);
+  ok(!e2.innerHTML.includes('fora do mapa'), 'com o porto informado, o aviso some');
+}
+
 console.log('\nSistema antigo:');
 {
   const html = fs.readFileSync(path.join(raiz, 'public/index.html'), 'utf8');
