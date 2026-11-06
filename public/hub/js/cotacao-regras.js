@@ -943,7 +943,11 @@ function triCalcular(e){
     const add = (k, tipo, desc, valor, custo) => { if (valor > 0.004) out.push({ k, tipo, desc, valor: +(+valor).toFixed(2), custo: custo || '' }); };
     const rec = [N(f, 'desR1'), N(f, 'desR2'), N(f, 'desR3')];
     if (rec.reduce((a, b) => a + b, 0) <= 0) { rec[0] = precoDesem(R); rec[1] = 0; rec[2] = 0; }
+    /* Parcelas abaixo do preço: a diferença entra em linha própria. Acima: sai da 3ª. A receita sempre fecha com o preço. */
+    const difPreco = +(precoDesem(R) - rec.reduce((a, b) => a + b, 0)).toFixed(2);
+    if (difPreco < 0) rec[2] = Math.max(0, rec[2] + difPreco);
     rec.forEach((v, i) => add(i, 'Receita', CRONO_OP[i].rot + ' recebimento do cliente — parcela ' + (i + 1), v));
+    if (difPreco > 0) add(2, 'Receita', 'Ajuste de valor — junto à 3ª parcela', difPreco);
     add(0, 'Despesa', '1º pagamento — Sinal da fábrica (' + (N(f, 'fabSinal') || 30) + '% do FOB)', o.o1, 'fob');
     add(1, 'Despesa', '2º pagamento — Saldo da fábrica · pré-embarque', o.o2, 'fob');
     const p = R.custoPor, parc = R.tri ? R.tri.apuracao.bloco6.parcelas : null, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
@@ -986,7 +990,7 @@ function triCalcular(e){
     const c = cc.cliente, cod = String(c.opNum || '').trim().toUpperCase();
     let f = (db.ops || []).find(x => x && x.quoteId === q.id && (x.clienteCotId || x.quoteClienteId) === cc.id), criouFilha = false;
     /* Operação solta com o mesmo código, sem outra cotação: passa a ser a filha, em vez de dar erro. */
-    if (!f && cod) { const solta = (db.ops || []).find(x => x && x.id === cod && !W.ehMae(x) && !x.maeId && (!x.quoteId || x.quoteId === q.id)); if (solta) { f = solta; f.maeId = maeId; f.quoteId = q.id; if (!f.cliente) f.cliente = cc.nome; } }
+    if (!f && cod) { const solta = (db.ops || []).find(x => x && x.id === cod && !W.ehMae(x) && (!x.maeId || x.maeId === maeId) && (!x.quoteId || x.quoteId === q.id)); if (solta) { f = solta; f.maeId = maeId; f.quoteId = q.id; if (!f.cliente) f.cliente = cc.nome; } }
     if (!f) {
       const r = W.criarFilha(db, maeId, { id: cod, cliente: cc.nome, nome: c.mercadoria || '', quoteId: q.id }, por, t, o.modeloChecklist);
       if (!r.ok) return { ok: false, msg: (cc.nome || cc.id) + ': ' + r.msg };

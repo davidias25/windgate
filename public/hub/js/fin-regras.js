@@ -212,6 +212,7 @@
     const c = ctx || {}, quem = c.quem || '', agora = c.agora || new Date().toISOString(), link = txt(c.link);
     const k = Object.assign({}, (s && s.campos) || {}), lt = normalizarLeitura(s && s.leitura);
     if (!(num(k.valor) > 0)) return { erro: 'Informe o valor.', codigo: 400 };
+    if (k.op && W.ehMae((db.ops || []).find(x => x && x.id === k.op))) return { erro: 'O contêiner não recebe lançamento: escolha a filha, ou use Pagamento do contêiner no Custeio dele.', codigo: 409 };
     if (!W.ehISO(k.data)) return { erro: 'Informe a data.', codigo: 400 };
     const outro = k.contraparte || {};
     const dup = duplicadoDe(db, { idTransacao: txt((k.comprovante || {}).idTransacao) || lt.idTransacao, valor: r2(k.valor), data: W.soData(k.data) }, { nome: outro.nome, documento: dig(outro.documento) });

@@ -147,10 +147,11 @@
     if (o.quoteId && qs[o.quoteId]) q = Object.assign({ id: o.quoteId }, qs[o.quoteId]);
     else { const k = Object.keys(qs).find(id => qs[id] && qs[id].fields && String(qs[id].fields.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase()); if (k) q = Object.assign({ id: k }, qs[k]); }
     /* Filha de cotação com vários clientes: só a parte daquele cliente, com o rateio comercial dele. */
-    const clienteCot = o.clienteCotId || o.quoteClienteId;
-    if (q && clienteCot && Array.isArray(q.clientes) && q.clientes.length > 1) {
-      const cc = (motorCotacao().calcularPorCliente(q).clientes || []).find(x => x.id === clienteCot);
-      if (cc) return Object.assign({}, cc.q, { id: q.id, preco: cc.R.preco, _custoPor: cc.R.custoPor, _RCliente: cc.R });
+    if (q && Array.isArray(q.clientes) && q.clientes.length > 1 && !W.ehMae(o)) {
+      const nome = s => String(s || '').trim().toLowerCase(), m = motorCotacao().clientesDe(q);
+      const clienteCot = o.clienteCotId || o.quoteClienteId || (m.find(c => String(c.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase() || (o.cliente && nome(c.nome) === nome(o.cliente))) || {}).id;
+      const cc = clienteCot && (motorCotacao().calcularPorCliente(q).clientes || []).find(x => x.id === clienteCot);
+      return cc ? Object.assign({}, cc.q, { id: q.id, preco: cc.R.preco, _custoPor: cc.R.custoPor, _RCliente: cc.R }) : null;
     }
     return q;
   }
@@ -366,11 +367,41 @@
     fs.forEach(f => {
       const v = val[f.id] || 0; if (!(v > 0)) return;
       const prev = (db.fin || []).find(l => l && l.op === f.id && !W.ehReceita(l) && !W.realizado(l) && l.custo === dd.classe && String(l.origem || '').startsWith('cotacao:'));
-      if (prev) { prev.valorPrevisto = prev.valorPrevisto != null ? prev.valorPrevisto : prev.valor; if (real) { W.realizar(prev, v, data); prev.baixaPor = por || ''; } else prev.valor = v; prev.comprovanteConteiner = dd.desc || ''; out.push(prev); return; }
+      if (prev) { prev.valorPrevisto = prev.valorPrevisto != null ? prev.valorPrevisto : prev.valor; if (real) { W.realizar(prev, v, data); prev.baixaPor = por || ''; } else prev.valor = v; prev.comprovanteConteiner = dd.desc || ''; if (dd.comp) prev.comp = dd.comp; out.push(prev); return; }
       const l = { _id: W.novoId(), data, vencimento: data, op: f.id, tipo: 'Despesa', categoria: '', fixo: false, empresa: dd.empresa || 'WindGate', desc: (dd.desc || CLASSE_ROTULO[dd.classe]) + ' · contêiner ' + maeId, valor: v, status: real ? 'Realizado' : 'Previsto', comp: dd.comp || '', nf: '', por: por || '', custo: dd.classe, origem: 'rateio:' + maeId, liquidadoEm: real ? data : null };
       db.fin.unshift(l); out.push(l);
     });
     return { ok: true, lancamentos: out, criterio: p.criterio, aviso: p.aviso || '' };
+  }
+  /* A mãe não recebe lançamento: ela só mostra a soma das filhas. */
+  const lancBloqueadoNaMae = (db, op) => !!op && W.ehMae((db.ops || []).find(x => x && x.id === op));
+  /** O que está lançado na mãe, gravado pela versão que lançava nela. Não altera nada. */
+  function diagnosticoMae(db, id) {
+    const ls = lancOp(db, id), real = l => W.realizado(l), daCotacao = l => String(l.origem || '').startsWith('cotacao:');
+    const duplicados = ls.filter(l => !real(l) && daCotacao(l)), realizados = ls.filter(l => real(l) && !W.ehReceita(l)), manuais = ls.filter(l => !duplicados.includes(l) && !realizados.includes(l));
+    const soma = xs => r2(xs.reduce((a, l) => a + valorDe(l), 0));
+    return { duplicados, realizados, manuais, total: ls.length, valorDuplicado: soma(duplicados), valorRealizado: soma(realizados), valorManual: soma(manuais) };
+  }
+  /**
+   * Conserta o contêiner: garante os lançamentos das filhas, tira da mãe o previsto que veio da cotação e divide
+   * entre as filhas o que já foi pago. Lançado à mão fica para alguém decidir. Pode rodar de novo sem mudar nada.
+   */
+  function repararMae(db, id, por, agora) {
+    const m = (db.ops || []).find(x => x && x.id === id); if (!W.ehMae(m)) return { ok: false, msg: 'Só o contêiner é corrigido.' };
+    const t = agora || new Date().toISOString(), qs = db.quotes || {}, q0 = m.quoteId && qs[m.quoteId], motor = motorCotacao();
+    let sincronizadas = 0;
+    if (q0 && motor.ehMultiCliente(q0)) { const q = Object.assign({ id: m.quoteId }, q0), r = motor.criarOperacoesDaMulti(db, q, { maeId: id, por, agora: t }); if (r.ok) sincronizadas = r.filhas.length; }
+    const dg = diagnosticoMae(db, id);
+    if (dg.realizados.length && !W.filhasDe(db, id).length) return { ok: false, msg: 'O contêiner não tem filhas para receber os pagamentos.' };
+    let divididos = 0;
+    dg.realizados.forEach(l => {
+      const r = lancarPagamentoConteiner(db, id, { classe: classeDe(l), valor: valorDe(l), data: W.soData(l.liquidadoEm || W.vencDe(l)), desc: l.desc || l.descricao, comp: l.comp, empresa: l.empresa }, por, t);
+      if (r.ok) { db.fin = db.fin.filter(x => x !== l); divididos++; }
+    });
+    const tirar = new Set(dg.duplicados.map(l => l._id));
+    db.fin = (db.fin || []).filter(l => !(l && tirar.has(l._id)));
+    if ((tirar.size || divididos) && Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: W.novoId(), op: id, de: '', para: '', em: t, por: por || '', tipo: 'correcao', origem: 'hub2', motivo: `Custos duplicados na mãe: ${tirar.size} previsto(s) removido(s), ${W.fmtBRL(dg.valorDuplicado)}; ${divididos} pagamento(s) dividido(s) entre as filhas, ${W.fmtBRL(dg.valorRealizado)}` });
+    return { ok: true, removidos: tirar.size, divididos, sincronizadas, manuais: dg.manuais };
   }
   /** Quanto cada filha já pagou por dentro: cota da fábrica (pago + este pagamento) contra o que ela já pagou à WindGate. */
   function coberturaFabrica(db, maeId, valorNovo) {
@@ -661,7 +692,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { partesDoPagamento, lancarPagamentoConteiner, cenariosCaixa, CENARIOS_CAIXA, CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { lancBloqueadoNaMae, diagnosticoMae, repararMae, partesDoPagamento, lancarPagamentoConteiner, cenariosCaixa, CENARIOS_CAIXA, CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };

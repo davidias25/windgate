@@ -56,7 +56,7 @@
     if (!o) { el.innerHTML = `<div class="banner">Operação ${esc(id)} não encontrada.</div>`; return; }
     const idx = W.FLUXO.indexOf(o.status);
     const pct = W.checklistPct(db, o.id);
-    const r = H.pode('fin.resultado') ? W.resultadoPorOp(db, 'todas').find(x => x.op === o.id) : null;
+    const r = !H.pode('fin.resultado') ? null : W.ehMae(o) ? W.consolidadoDaMae(db, o.id) : W.resultadoPorOp(db, 'todas').find(x => x.op === o.id);
     const abas = [['resumo', 'Resumo'], ['etapas', 'Etapas & histórico'], ['logistica', 'Logística & contêineres'], ['docs', `Documentos${pct != null ? ' · ' + pct + '%' : ''}`]];
     abas.splice(3, 0, ['comex', 'Comex, custo & câmbio']);
     abas.push(['chat', 'Conversa']);

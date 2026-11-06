@@ -266,6 +266,7 @@
         const s = W.novaSerie(H.db, Object.assign({ por: eu }, campos), 12, status === 'Realizado');
         H.salvar(); H.fecharModal(); H.toast(`Conta fixa criada: <b>${s.total} meses</b>`); H.render(); return;
       }
+      if (W.lancBloqueadoNaMae(H.db, campos.op) && (novo || (l.op || '') !== campos.op)) return H.toast('O contêiner não recebe lançamento. Lance na filha ou use <b>Pagamento do contêiner</b>, no Custeio dele.');
       if (novo) { const nl = Object.assign({ _id: W.novoId(), por: eu, fixo: false, nf: '', criadoEm: new Date().toISOString() }, campos); fisc.gravar(nl); H.db.fin.unshift(nl); }
       else {
         // Pagamento autorizado que muda de valor, vencimento ou destino volta para autorização.

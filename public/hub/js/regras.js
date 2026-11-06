@@ -268,8 +268,8 @@
   /** Soma das filhas, para a linha e a aba do contêiner. A mãe não tem lançamento próprio e nunca entra nos totais gerais. */
   function consolidadoDaMae(db, id, resultados) {
     const res = resultados || Object.fromEntries(resultadoPorOp(db, 'todas').map(r => [r.op, r])), filhas = filhasDe(db, id).map(o => Object.assign({ op: o.id, cliente: o.cliente || '', receita: 0, despesa: 0, resultado: 0, saldoReceber: 0 }, res[o.id] || {}, { op: o.id, cliente: o.cliente || '' }));
-    const soma = k => filhas.reduce((a, f) => a + (+f[k] || 0), 0);
-    return { filhas, receita: soma('receita'), despesa: soma('despesa'), resultado: soma('resultado'), saldoReceber: soma('saldoReceber') };
+    const soma = k => filhas.reduce((a, f) => a + (+f[k] || 0), 0), despesa = soma('despesa'), resultado = soma('resultado');
+    return { filhas, receita: soma('receita'), despesa, resultado, saldoReceber: soma('saldoReceber'), rr: soma('rr'), dr: soma('dr'), caixa: soma('caixa'), margem: despesa ? resultado / despesa : null };
   }
   /** A pesquisa do Financeiro também acha pelo cliente da operação. */
   function lancBatePesquisa(db, l, q) {

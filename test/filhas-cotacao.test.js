@@ -191,6 +191,48 @@ console.log('\nCotação de um cliente só:');
   ok(r.lancamentos.every(l => l.origem === 'cotacao:qs') && !r.lancamentos.some(l => /Reembolso/.test(l.desc)), 'lançamentos da operação sem nada novo');
 }
 
+console.log('\nDuplicidade: dados gravados pela versão anterior, com custos na mãe:');
+{
+  const q = cotacao(), d = banco(q); ['c1', 'c2'].forEach(id => aprova(d, q, id));
+  const limpo = W.custeioConsolidado(d, 'OP300').projetado, fobTot = W.calcularPorCliente(q).total.fob, nFilhas = d.fin.length;
+  const velho = (id, desc, valor, custo, extra) => Object.assign({ _id: id, op: 'OP300', tipo: 'Despesa', desc, valor, status: 'Previsto', vencimento: '2026-12-01', custo, origem: 'cotacao:q300' }, extra);
+  d.fin.push(velho('v1', '1º pagamento — Sinal da fábrica (30% do FOB)', fobTot * 0.3, 'fob'), velho('v2', '2º pagamento — Saldo da fábrica · pré-embarque', fobTot * 0.7, 'fob'), velho('v3', '3º pagamento — Seguro', 400, 'seguro'));
+  d.fin.push({ _id: 'man', op: 'OP300', tipo: 'Despesa', desc: 'Lançado à mão', valor: 10, status: 'Previsto', vencimento: '2026-12-01' });
+  d.fin.push(velho('pg', '3º pagamento — Frete internacional', 33660, 'frete', { status: 'Realizado', liquidadoEm: '2026-11-05', comp: 'comprovante-x', origem: 'cotacao:q300' }));
+  ok(W.custeioConsolidado(d, 'OP300').projetado > limpo + fobTot, 'reproduz: as linhas na mãe inflam o custo do contêiner');
+  const dg = W.diagnosticoMae(d, 'OP300');
+  ok(dg.duplicados.length === 3 && dg.realizados.length === 1 && dg.manuais.length === 1, 'o diagnóstico separa duplicado, realizado e lançado à mão');
+  ok(d.fin.some(l => l._id === 'v1'), 'o diagnóstico não altera nada');
+  const r = W.repararMae(d, 'OP300', 'Samir', T);
+  ok(r.ok && r.removidos === 3 && r.divididos === 1, 'remove os previstos duplicados e divide o pagamento real');
+  const naMae = d.fin.filter(l => l.op === 'OP300');
+  ok(naMae.length === 1 && naMae[0]._id === 'man', 'na mãe sobra só o lançado à mão, para alguém decidir');
+  const fr = d.fin.filter(l => (l.op === 'OP300.1' || l.op === 'OP300.2') && l.custo === 'frete');
+  ok(fr.length === 2 && fr.every(l => W.realizado(l)) && perto(fr.reduce((a, l) => a + l.valor, 0), 33660) && fr.every(l => l.comp === 'comprovante-x'), 'o pagamento real vira um realizado por filha, com o comprovante');
+  const fab = d.fin.filter(l => l.custo === 'fob');
+  ok(perto(fab.reduce((a, l) => a + l.valor, 0), fobTot, 0.03) && fab.every(l => l.op !== 'OP300'), 'fábrica nas filhas = FOB total do contêiner');
+  ok(d.opStatusHist.some(h => h.op === 'OP300' && /duplicad/i.test(h.motivo)), 'fica no histórico');
+  d.fin = d.fin.filter(l => l._id !== 'man');
+  const qtd = d.fin.length; W.repararMae(d, 'OP300', 'Samir', T);
+  ok(d.fin.length === qtd && W.diagnosticoMae(d, 'OP300').total === 0, 'corrigir de novo não muda nada');
+  ok(W.lancBloqueadoNaMae(d, 'OP300') && !W.lancBloqueadoNaMae(d, 'OP300.1') && !W.lancBloqueadoNaMae(d, ''), 'lançamento direto na mãe é barrado');
+
+  const q2 = cotacao(), d2 = banco(q2); ['c1', 'c2'].forEach(id => aprova(d2, q2, id));
+  const az = W.calcularPorCliente(q2).clientes[1], c2 = q2.clientes[1]; c2.desR3 = String(+c2.desR3 - 442.42);
+  const cc = W.calcularPorCliente(q2).clientes[1], ls = W.linhasDoCliente(cc).filter(l => l.tipo === 'Receita');
+  ok(perto(ls.reduce((a, l) => a + l.valor, 0), az.R.preco, 0.02) && perto(ls.find(l => /Ajuste/.test(l.desc)).valor, 442.42), 'parcelas abaixo do preço: a diferença vira uma linha de ajuste, e a receita fecha');
+  const q3 = cotacao(), f3 = W.criarFilha;
+  const d3 = banco(q3); ['c1', 'c2'].forEach(id => aprova(d3, q3, id));
+  const fx = d3.ops.find(o => o.clienteCotId === 'c1'); delete fx.clienteCotId;
+  ok(W.cotacaoDaOp(d3, fx).items.length === 1 && W.cotacaoDaOp(d3, fx).clienteId === 'c1', 'filha sem o vínculo acha o cliente pelo nome, e não lê a cotação inteira');
+  ok(W.cotacaoDaOp(d3, { id: 'x', maeId: 'OP300', quoteId: 'q300', cliente: 'Outro' }) === null, 'filha de cliente que não está na cotação: sem cotação, em vez da inteira');
+  ok(W.cotacaoDaOp(d3, d3.ops.find(o => o.id === 'OP300')).items.length === 2, 'a mãe continua vendo a cotação inteira');
+  W.criarOperacaoDoCliente(d3, q3, 'c1', { por: 'S', hoje: HJ, agora: T });
+  ok(fx.clienteCotId === 'c1' && d3.ops.filter(o => o.id === fx.id).length === 1, 'recriar religa a filha existente, sem criar outra');
+  const k = W.consolidadoDaMae(d3, 'OP300');
+  ok(k.caixa != null && k.rr === 0 && k.dr === 0 && k.margem != null, 'o consolidado traz recebido, pago, caixa e margem para a ficha da mãe');
+}
+
 /* Aceite com a cotação real da OP227, fora do repositório. */
 const ARQ = path.join(__dirname, '../backups/op227.json');
 if (fs.existsSync(ARQ)) {
