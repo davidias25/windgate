@@ -1027,7 +1027,7 @@ function triCalcular(e){
     { k: 'banco', l: 'Dados bancários para pagamento', d: 'Titular, banco, agência, conta, PIX e contato. Fora por padrão.', pad: false }
   ];
   const PROPOSTA_CUSTOS = [
-    { k: 'cFob', l: 'Mercadoria (FOB)', v: R => R.comp.fob }, { k: 'cFrete', l: 'Frete internacional', v: R => R.comp.freteInt },
+    { k: 'cFrete', l: 'Frete internacional', v: R => R.comp.freteInt },
     { k: 'cTerrestre', l: 'Transporte terrestre', v: R => R.comp.terrestre }, { k: 'cSeguro', l: 'Seguro internacional', v: R => R.comp.seguro },
     { k: 'cImpostos', l: 'Impostos de nacionalização', v: R => R.impostos, sub: 'II, IPI, PIS, COFINS e ICMS de importação' },
     { k: 'cPorto', l: 'Despesas portuárias e de nacionalização', v: R => R.comp.portuarias, sub: 'capatazia, Siscomex, AFRMM e despesas do processo' },
@@ -1039,18 +1039,33 @@ function triCalcular(e){
     Object.keys(out).forEach(k => { if (salvos[k] === true || salvos[k] === false) out[k] = salvos[k]; });
     return out;
   }
+  /** Item com preço final fixo (it.pf, por unidade) fica como está. Só o resto do total é rateado pelo FOB. */
   function propostaItens(q, R, base) {
-    const f = camposDe(q), txD = N(f, 'txDesp'), its = (q.items || []);
-    const tot = its.map(it => it.q * it.u * txD).reduce((s, v) => s + v, 0) || 1;
-    const preco = (base != null ? base : (R.preco || 0));
-    let acc = 0;
-    return its.filter(it => it.d || it.q).map((it, i) => { const share = (it.q * it.u * txD) / tot; const t = +(preco * share).toFixed(2); acc += t; return { d: it.d || 'Item ' + (i + 1), ncm: it.ncm, q: it.q, total: t, unit: it.q > 0 ? t / it.q : t }; })
-      .map((x, i, arr) => { if (i === arr.length - 1) { x.total = +(preco - (acc - x.total)).toFixed(2); x.unit = x.q > 0 ? x.total / x.q : x.total; } return x; });
+    const f = camposDe(q), txD = N(f, 'txDesp'), its = (q.items || []), fixo = it => +it.pf > 0;
+    const tot = its.filter(it => !fixo(it)).map(it => it.q * it.u * txD).reduce((s, v) => s + v, 0) || 1;
+    const fixos = its.filter(fixo).reduce((s, it) => s + (+it.pf) * it.q, 0);
+    const preco = (base != null ? base : (R.preco || 0)) - fixos;
+    let acc = 0, ultimo = -1;
+    const lista = its.filter(it => it.d || it.q);
+    lista.forEach((it, i) => { if (!fixo(it)) ultimo = i; });
+    return lista.map((it, i) => {
+      if (fixo(it)) { const tf = +((+it.pf) * it.q).toFixed(2); return { d: it.d || 'Item ' + (i + 1), ncm: it.ncm, q: it.q, total: tf, unit: +it.pf }; }
+      const share = (it.q * it.u * txD) / tot; const t = +(preco * share).toFixed(2); acc += t; return { d: it.d || 'Item ' + (i + 1), ncm: it.ncm, q: it.q, total: t, unit: it.q > 0 ? t / it.q : t };
+    }).map((x, i) => { if (i === ultimo) { x.total = +(preco - (acc - x.total)).toFixed(2); x.unit = x.q > 0 ? x.total / x.q : x.total; } return x; });
+  }
+  /** Preços fixos não podem passar do total nem deixar sobra sem item para receber. */
+  function conferirPrecosFixos(q, base) {
+    const its = (q.items || []).filter(it => it && (it.d || it.q)), fixos = its.filter(it => +it.pf > 0);
+    if (!fixos.length) return '';
+    const soma = fixos.reduce((s, it) => s + (+it.pf) * it.q, 0);
+    if (soma > base + 0.005) return 'Os preços fixos dos itens passam do total da proposta.';
+    if (fixos.length === its.length && Math.abs(soma - base) > 0.01) return 'Todos os itens têm preço fixo, e a soma deles não dá o total da proposta.';
+    return '';
   }
 
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
-    precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
+    conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
     enviarClientes, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

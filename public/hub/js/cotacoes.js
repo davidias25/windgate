@@ -107,7 +107,7 @@
           ${inp('servFora', 'Serviço WindGate por fora (R$)', { hidden: !tri })}
           ${inp('mercadoria', 'Mercadoria', { tipo: 'text', w: 'w2' })}`}${inp('origem', 'Origem', { tipo: 'text' })}${inp('destino', 'Destino', { tipo: 'text' })}
           ${sel('incoterm', 'Incoterm', [['FOB', 'FOB'], ['CIF', 'CIF'], ['EXW', 'EXW'], ['CFR', 'CFR']])}${sel('modalCntr', 'Contêiner', [['FCL', 'FCL: contêiner completo'], ['LCL', 'LCL: compartilhado']])}
-          ${inp('qtdCntr', 'Qtd. contêineres')}${inp('prazo', 'Prazo estimado (dias)')}${inp('validade', 'Validade da proposta (dias)')}${inp('validadeFrete', 'Validade do frete', { tipo: 'date' })}
+          ${inp('qtdCntr', 'Qtd. contêineres')}${inp('prazo', 'Prazo estimado (dias)')}${inp('validade', 'Validade da proposta (dias)')}${inp('validadeFrete', 'Validade do frete', { tipo: 'date' })}${inp('prazoProposta', 'Prazo na proposta (dias)', { tipo: 'text' })}${inp('descontoProposta', 'Desconto comercial (R$)')}
           ${tri ? '<p class="note w4">Triangular: a SF importa com o benefício de AL, vende à <b>JeT (ES)</b> com o mark-up mínimo, e a JeT vende ao cliente e recolhe o <b>DIFAL</b>.</p>' : ''}</div></div>
         <div class="box"><div class="box-h"><h2>Fotos do produto</h2><span class="note">${(ed.fotos || []).length} / 6</span></div><div class="box-b">
           <p class="note" style="margin-bottom:8px">Até 6 fotos numa página da proposta. Sem foto, a proposta sai sem essa página.</p>
@@ -121,10 +121,10 @@
           <p class="note w4" id="cnotadifal"></p>
           <p class="note w4" id="cavisoinv" style="color:var(--warn)"></p></div></div>
         <div class="box"><div class="box-h"><h2>Itens da invoice</h2>${bloq ? '' : '<button class="btn sm" id="citem">+ Item</button>'}</div>
-          <div class="tw"><table><thead><tr>${multi ? '<th>Cliente</th>' : ''}<th style="min-width:180px">Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Unit. USD</th><th class="num">Peso (kg)</th>${multi ? '<th class="num" title="Por unidade, como o peso">CBM (m³)</th>' : ''}<th class="num">II %</th><th class="num">IPI %</th><th class="num">PIS %</th><th class="num">COFINS %</th><th title="Convênio 52/91">52/91</th><th title="PIS/COFINS monofásico">Mono</th><th class="num">FOB R$</th><th></th></tr></thead><tbody>
+          <div class="tw"><table><thead><tr>${multi ? '<th>Cliente</th>' : ''}<th style="min-width:180px">Descrição</th><th>NCM</th><th class="num">Qtd</th><th class="num">Unit. USD</th><th class="num" title="Preço final por unidade na proposta. Item com preço fixo, como um acessório, fica fora do rateio.">Preço fixo (R$)</th><th class="num">Peso (kg)</th>${multi ? '<th class="num" title="Por unidade, como o peso">CBM (m³)</th>' : ''}<th class="num">II %</th><th class="num">IPI %</th><th class="num">PIS %</th><th class="num">COFINS %</th><th title="Convênio 52/91">52/91</th><th title="PIS/COFINS monofásico">Mono</th><th class="num">FOB R$</th><th></th></tr></thead><tbody>
           ${ed.items.map((it, i) => { const n = (k, w, step) => `<input class="inp" data-it="${i}" data-c="${k}" value="${esc(it[k] == null ? (k === 'pis' ? 2.1 : k === 'cofins' ? 9.65 : '') : it[k])}" inputmode="decimal" style="width:${w}px;text-align:right">`;
             return `<tr>${multi ? `<td><select class="inp" data-it="${i}" data-c="clienteId" style="min-width:110px"><option value="">— cliente —</option>${ed.clientes.map((c, k) => `<option value="${esc(c.id)}" ${it.clienteId === c.id ? 'selected' : ''}>${esc(c.nome || 'Cliente ' + (k + 1))}</option>`).join('')}</select></td>` : ''}<td><textarea class="inp" data-it="${i}" data-c="d" rows="1" style="width:100%;min-width:170px;resize:vertical">${esc(it.d || '')}</textarea></td><td><input class="inp mono" data-it="${i}" data-c="ncm" value="${esc(it.ncm || '')}" style="width:100px" maxlength="10"></td>
-            <td>${n('q', 70)}</td><td>${n('u', 90)}</td><td>${n('p', 80)}</td>${multi ? `<td>${n('cbm', 70)}</td>` : ''}<td>${n('ii', 60)}</td><td>${n('ipi', 60)}</td><td>${n('pis', 60)}</td><td>${n('cofins', 66)}</td>
+            <td>${n('q', 70)}</td><td>${n('u', 90)}</td><td>${n('pf', 90)}</td><td>${n('p', 80)}</td>${multi ? `<td>${n('cbm', 70)}</td>` : ''}<td>${n('ii', 60)}</td><td>${n('ipi', 60)}</td><td>${n('pis', 60)}</td><td>${n('cofins', 66)}</td>
             <td style="text-align:center"><input type="checkbox" data-it="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td style="text-align:center"><input type="checkbox" data-it="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
             <td class="num" id="cfob_${i}">—</td><td>${bloq ? '' : `<button class="btn ghost sm" data-rmit="${i}" title="Remover item">✕</button>`}</td></tr>`; }).join('')}</tbody></table></div>
           <div class="box-b"><p class="note" id="cncm"></p><p class="note" id="cncmcurto" style="color:var(--warn)"></p></div></div>
@@ -648,6 +648,9 @@
     if (ed.status !== 'ok' && !clienteOk) return H.toast('A proposta só é liberada após a <b>aprovação da margem pelo Samir</b>.');
     const alvo0 = alvoProposta();
     const errs = W.desemErros(alvo0.q, alvo0.R); if (errs.length) return H.toast('⛔ <b>Desembolso bloqueado:</b> ' + esc(errs[0]));
+    const descP = parseFloat(String(W.camposDe(alvo0.q).descontoProposta || '').replace(',', '.')) || 0;
+    const baseP = (alvo0.R.preco || 0) - (alvo0.R.tri ? alvo0.R.tri.difal || 0 : alvo0.R.st || 0) + descP;
+    const fx = W.conferirPrecosFixos(alvo0.q, baseP); if (fx) return H.toast('⛔ ' + esc(fx));
     const b = W.propostaBlocos(ed), temFoto = (alvo0.q.fotos || []).length > 0;
     const caixa = (x, desab, nota) => `<label class="row" style="justify-content:flex-start;gap:10px;${desab ? 'opacity:.55' : ''}"><input type="checkbox" data-pb="${x.k}" ${b[x.k] && !desab ? 'checked' : ''} ${desab ? 'disabled' : ''}><span><b>${esc(x.l)}</b><br><small class="note">${nota}</small></span></label>`;
     const m = H.modal('O que entra na proposta', `<p class="note" style="margin-bottom:8px">Desmarque o que não deve aparecer no PDF deste cliente. A escolha fica salva na cotação.</p>
@@ -707,7 +710,7 @@
       crmDocAnexarProposta: anexarNoCRM, desemErrors: () => W.desemErros(alvo.q, alvo.R),
       carregarFotosDaProposta: async () => { const out = []; for (const f of (alvo.q.fotos || [])) { try { out.push(await fotoParaPDF(f.url)); } catch (e) { console.warn('foto ignorada', f.url, e); } } return out; },
       openModal: () => {}, closeModal: H.fecharModal, saveDB: H.salvar, DB: H.db,
-      state: { items: alvo.q.items, fotos: alvo.q.fotos, blocos: ed.blocos, status: 'ok', id: ed.id }, R: alvo.R
+      state: { items: alvo.q.items, fotos: alvo.q.fotos, blocos: ed.blocos, status: 'ok', id: ed.id, tabelaCambio: W.textoCambio(W.tabelaCambio(alvo.q)) }, R: alvo.R
     });
     P.gerarPropostaPDF();
   }

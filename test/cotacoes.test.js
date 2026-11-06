@@ -150,6 +150,51 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   }
   ok(difPdf.length === 0, '12 propostas (direta, triangular, com e sem cada bloco): o PDF do Hub desenha traço a traço o mesmo do sistema atual' + (difPdf.length ? ' — ' + difPdf.slice(0, 2).join(' || ') : ''));
 
+  console.log('\nProposta em PDF: conteúdo:');
+  {
+    const gerar = async (q, st) => {
+      const log = [], R3 = C.calcular(q), ctxP = { document: { getElementById: () => ({}) }, console }; ctxP.window = ctxP; vm.createContext(ctxP);
+      vm.runInContext(pdfHub, ctxP); ctxP.jspdf = { jsPDF: fakePDF(log) };
+      const cp = C.camposDe(q);
+      const P = ctxP.HUB_PROPOSTA({ V: k => cp[k] == null ? '' : String(cp[k]), N: k => parseFloat(cp[k]) || 0, fmt: v => (isFinite(v) ? v : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), esc: s => String(s), toast: () => {}, cnpjFmt: app.cnpjFmt, crmDocAnexarProposta: async () => null, desemErrors: () => C.desemErros(q, R3), carregarFotosDaProposta: async () => [],
+        state: Object.assign({ items: q.items, fotos: [], blocos: C.propostaBlocosPadrao(), status: 'ok', id: 'q' }, st), R: R3 });
+      await P.gerarPropostaPDF();
+      return { log, txt: log.filter(x => x.startsWith('text')).join(' '), R: R3 };
+    };
+    const it = (d, q, u, pf) => Object.assign(C.ITEM_PADRAO(), { d, q, u, p: 10, ii: 14, ipi: 5, pf });
+    const nova = (extra, itens) => { const q = { fields: Object.assign({}, C.PADRAO, { txDesp: '5.5', txFrete: '5.61', cliente: 'Cliente', freteUSD: '3000', aliqST: '16' }, extra), items: itens || [it('Empilhadeira', 4, 5000)], exps: [] }; Object.assign(q.fields, C.desemSugerir(q, C.calcular(q))); return q; };
+    const dir = await gerar(nova({ tipoOp: 'direta' }));
+    ok(dir.R.st > 0 && !dir.txt.includes('ICMS-DIFAL'), 'cliente contribuinte: sem o bloco de DIFAL, mesmo com valor');
+    const zero = await gerar(nova({ tipoOp: 'triangular', ufDestino: 'ES', icmsDest: '17' }));
+    const tri = await gerar(nova({ tipoOp: 'triangular' }));
+    ok(tri.txt.includes('ICMS-DIFAL') && tri.R.tri.difal > 0, 'cliente não contribuinte: bloco de DIFAL com o valor do motor');
+    ok(!zero.R.tri.difal ? !zero.txt.includes('ICMS-DIFAL') : true, 'DIFAL zero: sem o bloco');
+    ok(!tri.txt.includes('exclusivo') && tri.txt.includes('Incoterm'), 'sem "exclusivo desta carga", e a entrega segue o Incoterm');
+    ok(!/spread|remessa|contrato de c[aâ]mbio|margem/i.test(tri.txt + dir.txt) && !C.PROPOSTA_CUSTOS.some(x => x.k === 'cFob'), 'sem remessa, contrato de câmbio, spread, margem ou FOB');
+    ok(tri.txt.includes('90 a 100') && !tri.txt.includes('110 a 120'), 'prazo padrão: 90 a 100 dias');
+    ok((await gerar(nova({ tipoOp: 'triangular', prazoProposta: '75 a 85' }))).txt.includes('75 a 85'), 'prazo configurável por proposta');
+    ok(tri.txt.includes('Previsão: '), 'previsão de data em cada parcela');
+    const desc = await gerar(nova({ tipoOp: 'direta', descontoProposta: '1500' }));
+    ok(desc.txt.includes('Desconto comercial') && !dir.txt.includes('Desconto comercial'), 'desconto comercial em linha própria, só quando há');
+    /* Box amarelo: 3 linhas ou 30, a caixa acompanha. */
+    const caixa = r => { const i = r.log.findIndex(x => x.includes('Validade e câmbio.')); return JSON.parse(r.log.slice(0, i).reverse().find(x => x.startsWith('rect')).slice(4))[3]; };
+    const linhasTexto = r => { const i = r.log.findIndex(x => x.includes('Validade e câmbio.')); return JSON.parse(r.log.slice(i).find(x => x.startsWith('text') && x.includes('Os valores')).slice(4))[0].length; };
+    ok(caixa(dir) >= 25 + linhasTexto(dir) * 9.5, 'a altura da caixa amarela sai do número de linhas');
+    /* Preço fixo: exemplo do carregador. */
+    const qf = nova({ tipoOp: 'direta' }, [it('Empilhadeira', 4, 5000), it('Carregador', 1, 3000, 4031)]), Rf = C.calcular(qf), baseF = Rf.preco - Rf.st;
+    const li = C.propostaItens(qf, Rf, baseF), li2 = C.propostaItens(Object.assign({}, qf, { items: qf.items.map(x => Object.assign({}, x, { pf: undefined })) }), Rf, baseF);
+    ok(li[1].unit === 4031 && li[1].total === 4031, 'acessório com preço fixo: continua R$ 4.031');
+    ok(li2[1].unit > 4031, 'sem o preço fixo, o rateio pelo FOB mudaria esse preço');
+    ok(Math.abs(li[0].total + li[1].total - baseF) < 0.01, 'os itens continuam somando o total, ao centavo');
+    ok(C.conferirPrecosFixos(qf, baseF) === '' && /passam/.test(C.conferirPrecosFixos(qf, 100)), 'preço fixo acima do total é recusado');
+    /* Câmbio */
+    const Cb = Object.assign({}, require('../public/hub/js/regras.js'), require('../public/hub/js/comex.js'), C, require('../public/hub/js/cambio-regras.js'));
+    const qc = nova({ tipoOp: 'direta' }); qc.cambioProposta = Cb.congelarCambio(qc, 5.4, '2026-11-06');
+    const tx = Cb.textoCambio(Cb.tabelaCambio(qc)), comT = await gerar(qc, { tabelaCambio: tx });
+    ok(comT.txt.includes('5,4500') && tx.linhas.every(l => comT.txt.includes(l[1])) && !comT.txt.includes('câmbio do dia'), 'a proposta mostra a referência e a tabela do item 3, sem o texto antigo');
+    ok(!comT.txt.includes('5,5000') && !comT.txt.includes('5,61'), 'não mostra o dólar de custo');
+  }
+
   console.log('\nGravação, aprovação e operação:');
   const base = cotacaoAleatoria(9); const Rb = C.calcular(base);
   const aprovada = C.snapshot(Object.assign({}, base, { status: 'ok', aprovadoPor: 'Samir' }), Rb);
