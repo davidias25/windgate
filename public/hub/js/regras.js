@@ -520,7 +520,7 @@
       caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver', 'nfe.emitir'],
       torre: ['excecoes', 'resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
-      caps: ['fin.lancar', 'sourcing.ver'],
+      caps: ['fin.lancar', 'sourcing.ver', 'fiscal.ver'],
       torre: ['excecoes', 'resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
     rh: { nome: 'Pessoas & Cultura (RH)', foco: 'Desenvolvimento da equipe, cultura, comunicação interna e ponto',
       caps: ['equipe.ver', 'rh.ver', 'chat.aviso', 'recado.outros', 'cultura.editar', 'reuniao.editar'], torre: ['equipe', 'recados', 'tarefas', 'alertas'], restrito: true },
