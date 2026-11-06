@@ -156,8 +156,9 @@ module.exports = function registrar(app, ctx) {
     try {
       const p = W.preencherModelo(modelo, d), agora = new Date().toISOString(), anterior = W.contratoPadraoDaOp(db(), d.op.id), versao = ((anterior && +anterior.versao) || 0) + 1;
       const nome = `Contrato_${d.op.id.replace(/[^\w.-]+/g, '_')}_v${versao}`, por = quemChat(req);
+      if (b.editados) b.editados = Object.assign({}, b.editados);
       const [docx, pdf] = await Promise.all([guardarArquivoGerado(contratoDoc.gerarDocx(p), nome + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'), guardarArquivoGerado(contratoDoc.gerarPdf(p), nome + '.pdf', 'application/pdf')]);
-      const c = { _id: 'ct-' + d.op.id.replace(/[^\w.-]+/g, '_') + '-v' + versao, padrao: true, op: d.op.id, cliente: d.op.cliente || '', tipo: 'operacao', modalidade: 'propria', estrutura: d.estrutura, versao, status: 'gerado', clausulaTributaria: true, por, em: agora, link: pdf, linkDocx: docx, editados: b.editados || {}, pendentes: p.pendentes, digital: W.digitalDaCotacao(d.q), revisao: null };
+      const c = { _id: 'ct-' + d.op.id.replace(/[^\w.-]+/g, '_') + '-v' + versao, padrao: true, op: d.op.id, cliente: d.op.cliente || '', tipo: 'operacao', modalidade: 'propria', estrutura: d.estrutura, versao, status: 'gerado', clausulaTributaria: true, por, em: agora, link: pdf, linkDocx: docx, editados: b.editados || {}, pendentes: p.pendentes, freteBase: modelo.freteIncluso, digital: W.digitalDaCotacao(d.q), revisao: null };
       const docOf = (id, link, ext) => ({ _id: c._id + '-' + id, op: d.op.id, grupo: 'contratos', cat: 'Contrato com o cliente', nome: nome + '.' + ext, link, status: 'recebido', por, obs: 'Gerado pelo sistema', data: agora.slice(0, 10) });
       const parcial = { hubContratos: [c], docs: [docOf('pdf', pdf, 'pdf'), docOf('docx', docx, 'docx')] };
       if (anterior) parcial.hubContratos.push(Object.assign({}, anterior, { status: 'cancelado', substituidoPor: c._id }));

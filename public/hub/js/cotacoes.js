@@ -241,7 +241,7 @@
   }
   /* ================= CÂMBIO DA PROPOSTA: painel interno, nunca vai para o cliente ================= */
   const num4 = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-  const ptaxDaProposta = () => (ed.cambioProposta && ed.cambioProposta.ptax) || parseFloat(String(F('ptaxProposta') || '').replace(',', '.')) || (H.ptax && +H.ptax.compra) || 0;
+  const ptaxDaProposta = () => (ed.cambioProposta && ed.cambioProposta.ptax) || parseFloat(String(F('ptaxProposta') || '').replace(',', '.')) || (H.ptax && +H.ptax.venda) || 0;
   function tabelaSimulacao(q, nome) {
     const s = W.simulacaoCambio(q, ptaxDaProposta()); if (!s) return '';
     return `${nome ? `<p class="lbl" style="margin-top:10px">${esc(nome)}</p>` : ''}<div class="tw"><table><thead><tr><th>Dólar</th><th>Parcela</th><th class="num">Cliente</th><th class="num">Custo</th><th class="num">Lucro</th></tr></thead><tbody>
@@ -252,7 +252,7 @@
     const congelado = !!ed.cambioProposta, ptax = ptaxDaProposta(), ref = W.referenciaDaProposta(ptax), bloq = travada();
     const campoAtivo = document.activeElement && document.activeElement.id === 'cptaxprop';
     if (!campoAtivo) box.innerHTML = `<h3 class="h3">Câmbio da proposta</h3>
-      <div class="f" style="margin:6px 0"><label class="lbl" for="cptaxprop">PTAX do dia da proposta</label><input class="inp" id="cptaxprop" inputmode="decimal" value="${ptax ? ptax.toFixed(4).replace('.', ',') : ''}" ${congelado || bloq ? 'disabled' : ''}></div><div id="ccamb2"></div>`;
+      <div class="f" style="margin:6px 0"><label class="lbl" for="cptaxprop">PTAX de venda do dia da proposta</label><input class="inp" id="cptaxprop" inputmode="decimal" value="${ptax ? ptax.toFixed(4).replace('.', ',') : ''}" ${congelado || bloq ? 'disabled' : ''}></div><div id="ccamb2"></div>`;
     const b2 = el.querySelector('#ccamb2');
     b2.innerHTML = ref ? `<p class="note">Referência <b>${num4(ref.referencia)}</b> · faixa ${num4(ref.piso)} a ${num4(ref.teto)}${congelado ? ' · fixada na aprovação' : ''}. Simulação interna: não vai para o cliente.</p>${clientes ? clientes.map(c => tabelaSimulacao(c.q, c.nome)).join('') : tabelaSimulacao(ed)}` : '<p class="note">Informe a PTAX do dia para ver a simulação. A aprovação fixa a referência.</p>';
     const i = el.querySelector('#cptaxprop');
@@ -261,7 +261,7 @@
   /** Fixa a referência na aprovação. Sem PTAX, a aprovação espera. */
   function fixarCambio() {
     if (ed.cambioProposta) return true;
-    const ptax = ptaxDaProposta(); if (!ptax) { H.toast('Informe a <b>PTAX do dia da proposta</b> antes de aprovar.'); return false; }
+    const ptax = ptaxDaProposta(); if (!ptax) { H.toast('Informe a <b>PTAX de venda do dia da proposta</b> antes de aprovar.'); return false; }
     ed.cambioProposta = W.congelarCambio(ed, ptax, W.hojeISO());
     return true;
   }

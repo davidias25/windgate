@@ -100,7 +100,7 @@
   async function buscarPtaxes(datas) {
     for (const d of datas) {
       if (ptaxesDia[d]) continue;
-      try { const j = await (await H.api('/api/cambio/ptax/' + d)).json(); if (j.success && j.ptax) ptaxesDia[d] = j.ptax.compra; } catch (e) { /* tenta de novo ao voltar à tela */ }
+      try { const j = await (await H.api('/api/cambio/ptax/' + d)).json(); if (j.success && j.ptax) ptaxesDia[d] = j.ptax.venda; } catch (e) { /* tenta de novo ao voltar à tela */ }
     }
   }
   async function blocoCambio(box, hoje) {

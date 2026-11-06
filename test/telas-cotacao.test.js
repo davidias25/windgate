@@ -56,7 +56,7 @@ console.log('\nCâmbio da proposta:');
 {
   const el = abrir('q2', true);
   ok(el.querySelector('#ccambio').innerHTML.includes('Câmbio da proposta'), 'a cotação mostra o painel de câmbio');
-  H.ptax = { compra: 5.4, em: '2026-11-06' };
+  H.ptax = { compra: 5.3, venda: 5.4, em: '2026-11-06' };
   const c = abrir('q2', true).querySelector('#ccamb2').innerHTML; H.ptax = null;
   ok(c.includes('5,4500') && c.includes('não vai para o cliente'), 'com a PTAX: referência + R$ 0,05 e o aviso de que é interno');
 }

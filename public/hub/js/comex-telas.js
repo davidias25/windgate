@@ -374,7 +374,7 @@
   };
   /* Dados da J&T e da SF ficam no banco, não no código: o repositório é público. */
   function dadosContratadas() {
-    const p = painel('_contrato'), campos = [['razao', 'Razão social'], ['cnpj', 'CNPJ'], ['endereco', 'Endereço'], ['banco', 'Banco'], ['agencia', 'Agência'], ['conta', 'Conta'], ['pix', 'PIX']];
+    const p = painel('_contrato'), campos = [['razao', 'Razão social'], ['cnpj', 'CNPJ'], ['endereco', 'Endereço completo, com CEP'], ['socioNome', 'Sócio administrador'], ['socioCpf', 'CPF do sócio'], ['banco', 'Banco'], ['agencia', 'Agência'], ['conta', 'Conta corrente'], ['pix', 'PIX (chave CNPJ)']];
     const m = H.modal('Dados das contratadas', ['jt', 'sf'].map(e => `<h3 class="h3">${esc(W.ESTRUTURAS[e].nome)}</h3><div class="fields" style="margin-bottom:12px">${campos.map(([k, l]) => `<div class="f"><label class="lbl" for="ct_${e}_${k}">${esc(l)}</label><input id="ct_${e}_${k}" data-e="${e}" data-k="${k}" value="${esc((p[e] || {})[k] || '')}"></div>`).join('')}</div>`).join(''), '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="ctok">Salvar</button>');
     m.querySelector('#ctok').onclick = () => { m.querySelectorAll('[data-e]').forEach(i => { p[i.dataset.e] = p[i.dataset.e] || {}; p[i.dataset.e][i.dataset.k] = i.value.trim(); }); H.salvar(); H.fecharModal(); H.toast('Dados salvos.'); };
   }

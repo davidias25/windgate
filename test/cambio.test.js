@@ -72,7 +72,7 @@ console.log('\nProposta e contrato com os mesmos números:');
   q.cambioProposta = W.congelarCambio(q, 5.40, '2026-11-06');
   const t = W.tabelaCambio(q), tx = W.textoCambio(t);
   ok(t.referencia === 5.45 && t.parcelas.length === 3 && t.parcelas[0].fixa && t.parcelas[0].por010 === 0 && t.parcelas[1].por010 > 0, 'referência e tabela de cada parcela');
-  ok(tx.linhas.length === 3 && tx.linhas[0][2] === '—' && /5,4500/.test(tx.referencia), 'texto com a tabela "R$ por R$ 0,10"');
+  ok(tx.linhas.length === 3 && tx.linhas[0][1] === 'Fixa' && tx.linhas[0][2] === 'Fixa' && /5,4500/.test(tx.referencia) && /venda/.test(tx.regra), 'texto com a tabela "R$ por R$ 0,10"');
   const tudo = JSON.stringify(tx);
   ok(!/5,5000|5,6100|spread|remet|f[aá]brica|margem/i.test(tudo), 'não mostra dólar de custo, spread, remessa à fábrica nem margem');
   const editada = JSON.parse(JSON.stringify(q)); editada.fields.txDesp = '6.00';

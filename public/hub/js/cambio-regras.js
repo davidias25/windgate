@@ -3,7 +3,7 @@
 
    Não mexe na composição de custos. Muda o que o cliente vê e como a parcela
    é corrigida:
-   - Dólar de referência = PTAX do dia da proposta + R$ 0,05.
+   - Dólar de referência = PTAX de venda do dia da proposta + R$ 0,05.
    - Faixa de 1% sobre a referência: dentro dela, a parcela não muda.
    - Fora da faixa: ajuste integral desde a referência, proporcional por
      fração de R$ 0,10. Alta repassada 100%; queda, 70%.
@@ -124,14 +124,14 @@
   }
   const moeda = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const taxa = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-  /** O texto e as linhas da tabela, iguais na proposta e no contrato. */
+  /** O texto e as linhas da tabela, iguais na proposta e no contrato: o mesmo quadro do Anexo II. */
   function textoCambio(t) {
     if (!t) return null;
     return {
       referencia: `Dólar de referência: R$ ${taxa(t.referencia)}.`,
-      regra: `Dentro da faixa de R$ ${taxa(t.piso)} a R$ ${taxa(t.teto)} (1% sobre a referência), a parcela não muda. Fora dela, o ajuste é integral desde a referência, proporcional por fração de R$ 0,10: a alta é repassada 100% e a queda, 70%. Cliente em atraso: vale a maior PTAX entre a data da parcela e o dia útil anterior ao pagamento.`,
-      colunas: ['Parcela', 'Valor (R$)', 'R$ por R$ 0,10', 'PTAX'],
-      linhas: t.parcelas.map(p => [`${p.n}ª`, moeda(p.valor), p.fixa ? '—' : moeda(p.por010), p.regra])
+      regra: `Vale a PTAX de venda do Banco Central: a 1ª parcela é fixa; a 2ª usa o dia útil anterior ao vencimento; a 3ª, o dia útil anterior ao registro da DI. Dentro da faixa de R$ ${taxa(t.piso)} a R$ ${taxa(t.teto)} (1% sobre a referência), a parcela não muda. Fora dela, o ajuste é integral desde a referência, proporcional por fração de R$ 0,10. Cliente em atraso: vale a maior PTAX entre a data da parcela e o dia útil anterior ao pagamento.`,
+      colunas: ['Parcela', `Alta (acima de R$ ${taxa(t.teto)})`, `Queda (abaixo de R$ ${taxa(t.piso)})`],
+      linhas: t.parcelas.map(p => [`${p.n}ª parcela`, p.fixa ? 'Fixa' : 'R$ ' + moeda(p.por010), p.fixa ? 'Fixa' : 'R$ ' + moeda(p.por010 * REPASSE_QUEDA)])
     };
   }
 

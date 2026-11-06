@@ -9819,7 +9819,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_NAVY);
       doc.text('Câmbio das parcelas. '+tcC.referencia,36,yN);
       yN+=12;
-      const colC=[44,110,270,300], alC=['left','left','right','left'];
+      const colC=[44,150,340], alC=['left','left','left'];
       doc.setFontSize(7); doc.setTextColor(...PDF_GRAY);
       tcC.colunas.forEach((c,i)=>doc.text(c,colC[i],yN,{align:alC[i]}));
       doc.setDrawColor(27,42,91); doc.setLineWidth(.8); doc.line(36,yN+3,559,yN+3); yN+=13;

@@ -1,0 +1,337 @@
+{
+ "versao": "1",
+ "origem": "gen.py",
+ "freteIncluso": true,
+ "blocos": [
+  {
+   "t": "titulo",
+   "texto": "CONTRATO DE COMPRA E VENDA DE EQUIPAMENTOS IMPORTADOS"
+  },
+  {
+   "t": "centro",
+   "texto": "Referência: {{operacao}} – {{razaoSocial}}"
+  },
+  {
+   "t": "clausula",
+   "texto": "PARTES"
+  },
+  {
+   "t": "p",
+   "texto": "**CONTRATADA (VENDEDORA): {{contratadaRazao}}**, inscrita no CNPJ sob o nº {{contratadaCnpj}}, com sede na {{contratadaEndereco}}, neste ato representada por seu sócio administrador, **{{socioNome}}**, inscrito no CPF sob o nº {{socioCpf}}, doravante denominada **CONTRATADA**."
+  },
+  {
+   "t": "p",
+   "texto": "**CONTRATANTE (COMPRADORA): {{razaoSocial}}**, inscrita no {{docTipo}} sob o nº {{cnpj}}, com endereço na {{endereco}}, CEP {{cep}}, neste ato representada por {{representante}}, {{representanteNacionalidade}}, {{representanteCargo}}, portador(a) do CPF nº {{cpf}}, doravante denominada **CONTRATANTE**."
+  },
+  {
+   "t": "p",
+   "texto": "As partes, em conjunto denominadas PARTES, resolvem firmar o presente Contrato, que se regerá pelas cláusulas e condições a seguir."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 1 – DO OBJETO"
+  },
+  {
+   "t": "p",
+   "texto": "1.1. O presente Contrato tem por objeto a venda, pela CONTRATADA à CONTRATANTE, de **{{objeto}}**, importados da China e nacionalizados pela CONTRATADA, com as características constantes do **Anexo I**, ao preço e condições abaixo."
+  },
+  {
+   "t": "p",
+   "texto": "1.2. A importação será realizada por conta própria da CONTRATADA, para revenda, nos termos da IN RFB nº 1.861/2018. A CONTRATANTE não é importadora e não participa do despacho aduaneiro."
+  },
+  {
+   "t": "p",
+   "texto": "1.3. Os equipamentos poderão ser embarcados em contêiner com cargas de outros clientes da CONTRATADA, o que não altera as condições deste Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "1.4. Eventuais diferenças de cor, acabamento e detalhes estéticos entre as imagens da proposta e o equipamento entregue não constituem descumprimento, desde que preservadas as especificações técnicas do Anexo I."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 2 – DO PREÇO"
+  },
+  {
+   "t": "p",
+   "texto": "2.1. O preço global dos equipamentos é de **R$ {{investimento}} ({{investimentoExtenso}})**, assim composto: {{composicao}}."
+  },
+  {
+   "t": "p",
+   "texto": "2.2. O valor global é o valor negociado e vinculante entre as PARTES. Os valores unitários do Anexo I servem apenas de referência."
+  },
+  {
+   "t": "p",
+   "texto": "2.3. Estão incluídos no preço global: o custo dos equipamentos, o frete internacional, os tributos federais de importação, o ICMS da operação de importação e de saída (observada a cláusula 4), as despesas de desembaraço aduaneiro e o transporte do {{porto}} até o endereço da CONTRATANTE, em {{localEntrega}}."
+  },
+  {
+   "t": "p",
+   "texto": "2.4. Não estão incluídos: (i) o DIFAL de ICMS, tratado na cláusula 4; (ii) a descarga e a movimentação dos equipamentos no local de entrega, incluindo guindaste, munck ou equipamento equivalente, por conta da CONTRATANTE; e (iii) qualquer serviço não descrito neste Contrato."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 3 – DA FORMA E DAS DATAS DE PAGAMENTO"
+  },
+  {
+   "t": "p",
+   "texto": "3.1. O pagamento será feito em 3 (três) parcelas, conforme o quadro abaixo e o **Anexo II**:"
+  },
+  {
+   "t": "cronograma",
+   "fatos": [
+    "Assinatura e início da produção",
+    "Comprovação de que o equipamento está pronto para embarque",
+    "Chegada da carga ao {{porto}}"
+   ],
+   "pct": true
+  },
+  {
+   "t": "p",
+   "texto": "3.2. **As datas são previsões.** Podem sofrer alterações, adiantamentos ou atrasos que não dependem da CONTRATADA, como prazo de produção na fábrica, janelas de embarque, trânsito marítimo, greves, condições portuárias e liberação aduaneira. A 2ª parcela vence em até 2 (dois) dias úteis após a CONTRATADA enviar a comprovação de que o equipamento está pronto para embarque (fotos, relatório da fábrica ou documento equivalente). A 3ª parcela vence em até 2 (dois) dias úteis após o aviso de chegada da carga ao {{porto}}, e deve estar paga antes da liberação para entrega."
+  },
+  {
+   "t": "p",
+   "texto": "3.3. Os pagamentos serão feitos exclusivamente por transferência ou PIX para a conta da CONTRATADA indicada no Anexo II. A CONTRATADA não se responsabiliza por pagamentos feitos a outras contas. Qualquer alteração de dados bancários só vale se comunicada por escrito pelo sócio administrador, por meio de e-mail institucional, com confirmação telefônica."
+  },
+  {
+   "t": "p",
+   "texto": "3.4. O atraso no pagamento de qualquer parcela sujeita a CONTRATANTE a multa de 2% (dois por cento) sobre o valor em atraso, juros de 1% (um por cento) ao mês, calculados pro rata die, e correção pelo IPCA. Persistindo o atraso por mais de 10 (dez) dias, a CONTRATADA poderá suspender a produção, o embarque, o desembaraço e a entrega, sem que isso gere responsabilidade ou prazo adicional a seu favor. Persistindo por mais de 30 (trinta) dias, poderá rescindir o Contrato, aplicando-se a cláusula 10."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 4 – DO ICMS E DO DIFAL"
+  },
+  {
+   "t": "p",
+   "texto": "4.1. A CONTRATANTE declara que **não possui inscrição estadual** e que **não é contribuinte do ICMS**. Por isso, a operação será estruturada com o faturamento da CONTRATADA para a CONTRATANTE, e a venda interestadual a consumidor final não contribuinte sujeita-se ao diferencial de alíquotas (DIFAL) em favor do Estado do {{estadoDestino}}."
+  },
+  {
+   "t": "p",
+   "texto": "4.2. A CONTRATADA recolherá o DIFAL junto ao Estado do {{estadoDestino}} e a CONTRATANTE o **reembolsará integralmente**, como parte da 3ª parcela. A estimativa atual do DIFAL é de **R$ {{difal}} ({{difalExtenso}})**, calculada com os valores e a legislação vigentes na data deste Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "4.3. O valor devido será o **efetivamente recolhido**, conforme a guia de recolhimento (GNRE ou equivalente), podendo ser maior ou menor que a estimativa por variação cambial, alteração de base de cálculo, alíquota, benefício ou legislação. A CONTRATADA apresentará a guia e a memória de cálculo, e a diferença para mais ou para menos será acertada na 3ª parcela."
+  },
+  {
+   "t": "p",
+   "texto": "4.4. A CONTRATANTE compromete-se a informar imediatamente, por escrito, qualquer alteração em sua situação cadastral perante a {{sefazDestino}}, como a obtenção de inscrição estadual ou o enquadramento como contribuinte, antes da emissão da nota fiscal de venda. Nesse caso, o tratamento tributário será recalculado e o preço ajustado, para mais ou para menos, pela diferença apurada. A CONTRATANTE responde por qualquer tributo, multa ou diferença decorrente de declaração inexata sobre sua condição cadastral."
+  },
+  {
+   "t": "p",
+   "texto": "4.5. As PARTES reconhecem que a CONTRATADA e a {{grupoRazao}} (CNPJ {{grupoCnpj}}) integram o mesmo grupo econômico, tendo o mesmo sócio administrador, e que a {{grupoRazao}} realiza a importação e a nacionalização das mercadorias. O faturamento da venda e o recebimento dos valores serão feitos pela CONTRATADA, sem que isso configure cobrança em duplicidade, transferência de responsabilidade ou alteração do preço."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 5 – DA VARIAÇÃO CAMBIAL"
+  },
+  {
+   "t": "p",
+   "texto": "5.1. O preço foi formado com o **dólar de referência de R$ {{refDolar}}** por dólar norte-americano, tomado como base da PTAX de venda do Banco Central do Brasil na data da proposta."
+  },
+  {
+   "t": "p",
+   "texto": "5.2. **Faixa de tolerância:** enquanto a PTAX de venda apurada para a parcela permanecer dentro de **1% (para mais ou para menos) do dólar de referência**, isto é, **entre R$ {{refPiso}} e R$ {{refTeto}}**, o valor da parcela permanece fixo."
+  },
+  {
+   "t": "p",
+   "texto": "5.3. Se a PTAX apurada ficar fora da faixa de tolerância, o valor da parcela será ajustado, **para mais ou para menos**, pela **variação total em relação ao dólar de referência**, de forma **proporcional** (inclusive por frações de R$ 0,10), aplicando-se os valores por R$ 0,10 de variação constantes do **Anexo II**, distintos para alta e para queda do dólar."
+  },
+  {
+   "t": "p",
+   "texto": "5.4. **A 1ª parcela é fixa.** A PTAX de apuração é a PTAX de venda do Banco Central do **dia útil anterior ao vencimento** da 2ª parcela e do **dia útil anterior ao registro da declaração de importação** para a 3ª parcela. O ajuste incide somente sobre parcela a vencer, sem efeito retroativo sobre parcelas já pagas. Em caso de pagamento em atraso pelo CONTRATANTE, aplica-se a maior entre a PTAX do dia útil anterior ao vencimento e a do dia útil anterior ao pagamento."
+  },
+  {
+   "t": "p",
+   "texto": "5.5. A CONTRATADA informará o ajuste, com o cálculo, antes do vencimento da parcela. Exemplo: com a PTAX em R$ {{refExAlta}} na data de apuração da 2ª parcela, a variação é de R$ 0,10 acima de R$ {{refDolar}} e o valor da parcela aumenta um bloco de R$ 0,10 da tabela de alta; com a PTAX em R$ {{refExQueda}}, a variação é de R$ 0,20 abaixo e a parcela reduz dois blocos da tabela de queda."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 6 – DO FRETE INTERNACIONAL"
+  },
+  {
+   "t": "p",
+   "texto": "6.1. O frete internacional foi cotado com base na tarifa vigente na data deste Contrato. A CONTRATADA absorve integralmente variações de até 5% (cinco por cento)."
+  },
+  {
+   "t": "p",
+   "texto": "6.2. Se a variação entre a data da contratação e o efetivo embarque exceder 5%, por elevação de mercado, General Rate Increase (GRI), sobretaxa de alta temporada (Peak Season), risco de guerra (War Risk) ou sobretaxas equivalentes impostas pelos armadores, o valor que exceder a banda será ajustado no preço, **para mais ou para menos**, mediante comprovação documental (cotação do agente de carga na data da contratação e na data do embarque, em documento oficial), com reflexo na 3ª parcela."
+  },
+  {
+   "t": "p",
+   "texto": "6.3. A partir da confirmação do embarque, o frete fica travado e nenhuma variação posterior é repassada à CONTRATANTE."
+  },
+  {
+   "t": "p",
+   "texto": "6.4. Despesas de armazenagem, sobrestadia (demurrage) e detenção de contêiner decorrentes de atraso da CONTRATANTE em receber a carga ou em pagar a 3ª parcela serão de sua responsabilidade."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 7 – DO PRAZO E DA ENTREGA"
+  },
+  {
+   "t": "p",
+   "texto": "7.1. O prazo da operação é uma **estimativa**, contado da assinatura deste Contrato e do pagamento da 1ª parcela, e depende de produção, embarque, trânsito e liberação aduaneira. A previsão de chegada ao {{porto}} é de aproximadamente {{previsaoChegada}} ({{prazo}} dias contados da 1ª parcela), sem que isso caracterize obrigação de resultado ou prazo fatal."
+  },
+  {
+   "t": "p",
+   "texto": "7.2. A CONTRATANTE será avisada da chegada e da data prevista de entrega. Deverá indicar um responsável para receber os equipamentos e disponibilizar o local e os meios de descarga. A entrega é considerada cumprida quando os equipamentos forem disponibilizados no endereço indicado. Se a CONTRATANTE não receber os equipamentos no prazo de 5 (cinco) dias após o aviso, correrão por sua conta os custos de armazenagem e de nova entrega."
+  },
+  {
+   "t": "p",
+   "texto": "7.3. A CONTRATANTE deverá conferir os equipamentos no ato do recebimento e registrar por escrito, no comprovante de entrega, qualquer avaria aparente ou divergência de quantidade. Reclamações posteriores sobre vícios aparentes não serão aceitas após 5 (cinco) dias corridos do recebimento."
+  },
+  {
+   "t": "p",
+   "texto": "7.4. A propriedade e os riscos dos equipamentos passam à CONTRATANTE com a entrega, desde que quitadas todas as parcelas e os valores devidos nos termos da cláusula 4. Até a quitação integral, a CONTRATADA mantém a propriedade e a posse dos equipamentos."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 8 – DA GARANTIA"
+  },
+  {
+   "t": "p",
+   "texto": "8.1. Os equipamentos possuem garantia do fabricante de **12 (doze) meses**, contada da data de entrega, contra defeitos de fabricação, nos termos do Anexo I. A CONTRATADA repassará à CONTRATANTE o suporte e as peças de reposição disponibilizados pelo fabricante, nas condições dele."
+  },
+  {
+   "t": "p",
+   "texto": "8.2. Estão excluídos da garantia: desgaste natural de peças (pneus, garfos, pastilhas, correias e similares), mau uso, sobrecarga, falta de manutenção, uso de peças não originais, reparos por terceiros não autorizados e danos de transporte interno ou de descarga pela CONTRATANTE."
+  },
+  {
+   "t": "p",
+   "texto": "8.3. A responsabilidade da CONTRATADA limita-se ao valor efetivamente pago pela CONTRATANTE, não respondendo por lucros cessantes, perda de produção, paralisação de atividades ou danos indiretos."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 9 – DAS OBRIGAÇÕES DA CONTRATANTE"
+  },
+  {
+   "t": "p",
+   "texto": "9.1. São obrigações da CONTRATANTE: (i) pagar as parcelas e o DIFAL nas condições deste Contrato; (ii) fornecer corretamente os dados cadastrais e documentos necessários à emissão das notas fiscais e ao desembaraço; (iii) receber os equipamentos e prover descarga adequada; (iv) cumprir as normas de segurança e operação, incluindo habilitação e treinamento dos operadores; e (v) comunicar à CONTRATADA qualquer alteração de sua situação cadastral ou fiscal."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 10 – DA RESCISÃO E DA DESISTÊNCIA"
+  },
+  {
+   "t": "p",
+   "texto": "10.1. A produção dos equipamentos é feita sob encomenda, com adiantamento não reembolsável à fábrica. Em caso de desistência ou rescisão por culpa da CONTRATANTE: (i) antes do pagamento da 1ª parcela, o Contrato se extingue sem ônus; (ii) após o pagamento da 1ª parcela e antes do embarque, a CONTRATANTE perde o valor já pago e responde, ainda, pelos custos comprovados que o superarem; (iii) após o embarque, responde pela totalidade do preço, deduzido o valor obtido com eventual revenda dos equipamentos, descontados os custos dessa revenda."
+  },
+  {
+   "t": "p",
+   "texto": "10.2. Se a CONTRATADA der causa à rescisão por descumprimento injustificado, restituirá os valores recebidos, corrigidos pelo IPCA, em até 30 (trinta) dias, deduzidos os custos já incorridos que não possam ser aproveitados, não havendo outra indenização."
+  },
+  {
+   "t": "p",
+   "texto": "10.3. Não constituem descumprimento da CONTRATADA os atrasos ou impedimentos decorrentes de caso fortuito ou força maior, ato de autoridade, greve, fato do armador ou do porto, interdição, retenção ou fiscalização aduaneira, restrições legais ou sanitárias e demais eventos fora do seu controle razoável."
+  },
+  {
+   "t": "clausula",
+   "texto": "CLÁUSULA 11 – DAS DISPOSIÇÕES GERAIS"
+  },
+  {
+   "t": "p",
+   "texto": "11.1. A CONTRATADA não divulgará a identidade do fabricante, e a CONTRATANTE não poderá contatar diretamente o fabricante ou fornecedores da CONTRATADA para tratar deste objeto, sem autorização prévia por escrito."
+  },
+  {
+   "t": "p",
+   "texto": "11.2. As PARTES manterão sigilo sobre as condições comerciais deste Contrato e tratarão os dados pessoais envolvidos em conformidade com a Lei nº 13.709/2018 (LGPD), exclusivamente para a execução deste Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "11.3. Este Contrato é firmado em caráter irrevogável e irretratável, obrigando as PARTES e seus sucessores. Qualquer alteração dependerá de aditivo escrito. A tolerância de uma parte não importa renúncia a direito. A nulidade de uma cláusula não afeta as demais."
+  },
+  {
+   "t": "p",
+   "texto": "11.4. Este Contrato substitui qualquer proposta, tratativa ou entendimento anterior sobre o objeto, prevalecendo sobre eles em caso de divergência. A proposta comercial e os Anexos integram o Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "11.5. Este Contrato poderá ser assinado eletronicamente, nos termos da MP nº 2.200-2/2001 e da Lei nº 14.063/2020, sendo válido e eficaz com as assinaturas eletrônicas das PARTES e de 2 (duas) testemunhas."
+  },
+  {
+   "t": "p",
+   "texto": "11.6. Fica eleito o foro da Comarca de Fortaleza/CE, com exclusão de qualquer outro, por mais privilegiado que seja, para dirimir as controvérsias deste Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "E, por estarem de acordo, firmam este Contrato."
+  },
+  {
+   "t": "p",
+   "texto": "Local e data: ______________, ____ de ____________ de {{ano}}."
+  },
+  {
+   "t": "assinaturas",
+   "linhas": [
+    [
+     "CONTRATADA\n\n\n______________________________\n{{contratadaRazao}}\n{{socioNome}} – Sócio Administrador\nCPF {{socioCpf}}",
+     "CONTRATANTE\n\n\n______________________________\n{{razaoSocial}}\n{{representante}} – CPF {{cpf}}"
+    ]
+   ]
+  },
+  {
+   "t": "assinaturas",
+   "linhas": [
+    [
+     "Testemunha 1\n\n______________________________\nNome:\nCPF:",
+     "Testemunha 2\n\n______________________________\nNome:\nCPF:"
+    ]
+   ]
+  },
+  {
+   "t": "quebra"
+  },
+  {
+   "t": "titulo",
+   "texto": "ANEXO I – ESPECIFICAÇÃO DOS EQUIPAMENTOS"
+  },
+  {
+   "t": "anexoItens",
+   "rotuloTotal": "TOTAL DOS EQUIPAMENTOS"
+  },
+  {
+   "t": "p",
+   "seCampo": "obsItens",
+   "texto": "{{obsItens}}"
+  },
+  {
+   "t": "p",
+   "texto": "Garantia do fabricante: 12 meses, contados da entrega. Cor e logomarca conforme definição da CONTRATANTE até a confirmação da produção, quando aplicável."
+  },
+  {
+   "t": "quebra"
+  },
+  {
+   "t": "titulo",
+   "texto": "ANEXO II – CRONOGRAMA DE DESEMBOLSO E DADOS PARA PAGAMENTO"
+  },
+  {
+   "t": "anexoCronograma",
+   "fatos": [
+    "Assinatura e início da produção",
+    "Equipamento pronto para embarque",
+    "Chegada ao {{porto}}"
+   ],
+   "pct": true,
+   "difal": true
+  },
+  {
+   "t": "p",
+   "texto": "*As datas são previsões e podem sofrer alterações, adiantamentos ou atrasos que não dependem da CONTRATADA. Os valores das parcelas estão sujeitos aos ajustes das cláusulas 4, 5 e 6."
+  },
+  {
+   "t": "p",
+   "texto": "**Tabela de ajuste cambial (cláusula 5) – valor por R$ 0,10 de variação em relação ao dólar de referência (R$ {{refDolar}}), quando fora da faixa**"
+  },
+  {
+   "t": "anexoCambio"
+  },
+  {
+   "t": "p",
+   "texto": "**Dados para pagamento**"
+  },
+  {
+   "t": "anexoBanco"
+  }
+ ]
+}
