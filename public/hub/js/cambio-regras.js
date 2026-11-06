@@ -87,7 +87,7 @@
     const f = W.camposDe(q);
     return Object.assign({}, q, { fields: Object.assign({}, f, { txDesp: String((parseFloat(f.txDesp) || 0) + delta), txFrete: String((parseFloat(f.txFrete) || 0) + delta) }) });
   }
-  const saidas = q => { const o = W.desemOuts(q, W.calcular(q)); return [o.o1, o.o2, o.o3]; };
+  const saidas = q => { const R = W.calcular(q); if (q.clienteId) W.separarDifal(R); const o = W.desemOuts(q, R); return [o.o1, o.o2, o.o3]; };
   /** Quanto muda o custo de cada parcela quando o dólar sobe R$ 0,10. A 1ª é fixa para o cliente: valor 0 na tabela. */
   function valoresPor010(q) {
     const a = saidas(q), b = saidas(comCambio(q, PASSO)), custo = b.map((v, i) => r2(v - a[i]));

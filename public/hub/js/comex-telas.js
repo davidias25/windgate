@@ -114,7 +114,7 @@
   /* Mãe: margem do contêiner, ocupação, rateio editável e alocação da fábrica. */
   function custeioDaMae(el, o, p) {
     const x = W.custeioConsolidado(H.db, o.id, { ptax: p }), oc = x.ocupacao, fs = x.filhas, edita = H.pode('fin.autorizar');
-    el.innerHTML = cab(`Custeio · contêiner ${esc(o.id)}`, fs.map(f => esc(f.op.cliente || f.op.id)).join(' + ') || 'sem filhas', `<button class="btn" data-irp="ficha|${esc(o.id)}">Abrir operação</button>`, '<a href="#custeio" data-volta>Custeio</a>') +
+    el.innerHTML = cab(`Custeio · contêiner ${esc(o.id)}`, fs.map(f => esc(f.op.cliente || f.op.id)).join(' + ') || 'sem filhas', `<button class="btn" data-irp="ficha|${esc(o.id)}">Abrir operação</button>${H.pode('fin.lancar') ? '<button class="btn blue" id="pgct">Pagamento do contêiner</button>' : ''}`, '<a href="#custeio" data-volta>Custeio</a>') +
       `<div class="kpis">${kpi('Receita do contêiner', W.fmtBRLk(x.receita), W.fmtBRLk(x.recebido) + ' recebido')}${kpi('Custo projetado', W.fmtBRLk(x.projetado), 'previsto ' + W.fmtBRLk(x.previsto))}${kpi('Margem do contêiner', pct(x.margem), 'prevista ' + pct(x.margemPrevista), x.margem != null && x.margem < 0.10 ? 'neg' : '')}${kpi('Ocupação', oc.capM3 ? (oc.m3 / oc.capM3 * 100).toFixed(0).replace('.', ',') + '%' : '—', oc.capM3 ? `${oc.m3.toLocaleString('pt-BR')} de ${oc.capM3.toLocaleString('pt-BR')} m³` : 'capacidade não informada', oc.excedeu ? 'neg' : '')}</div>
       ${x.rateio.avisos.length ? `<div class="banner">${x.rateio.avisos.map(esc).join(' ')}</div>` : ''}
       ${x.rateio.receitaNaMae ? `<div class="banner">Há <b>${W.fmtBRL(x.rateio.receitaNaMae)}</b> de recebimento lançado no contêiner. Recebimento é do cliente: mova para a filha, senão a margem de cada um fica errada.</div>` : ''}
@@ -125,6 +125,17 @@
     el.querySelector('[data-volta]').onclick = e => { e.preventDefault(); H.ir('custeio'); };
     el.querySelectorAll('[data-irp]').forEach(b => b.onclick = () => { const [t, y] = b.dataset.irp.split('|'); H.ir(t, y || null); });
     el.querySelectorAll('[data-fi]').forEach(r => r.onclick = () => H.ir('custeio', r.dataset.fi));
+    /* Pagamento real de uma vez: vira um lançamento por filha, e o previsto daquela classe é baixado. */
+    const pg = el.querySelector('#pgct'); if (pg) pg.onclick = () => {
+      const m = H.modal('Pagamento do contêiner', `<div class="fields"><div class="f"><label class="lbl" for="pgc">Classe</label><select id="pgc">${W.CLASSES.filter(([k]) => !['cambio', 'outros'].includes(k)).map(([k, t]) => `<option value="${k}" ${k === 'frete' ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <div class="f"><label class="lbl" for="pgv">Valor (R$)</label><input id="pgv" inputmode="decimal"></div><div class="f"><label class="lbl" for="pgd">Data do pagamento</label><input id="pgd" type="date" value="${hoje()}"></div>
+        <div class="f w4"><label class="lbl" for="pgt">Descrição</label><input id="pgt" placeholder="Ex.: frete real, DI, despachante"></div></div><p class="note">Divide entre as filhas pela regra do rateio. Nada fica lançado na mãe.</p>`, '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="pgok">Lançar</button>');
+      m.querySelector('#pgok').onclick = () => {
+        const r = W.lancarPagamentoConteiner(H.db, o.id, { classe: val(m, '#pgc'), valor: numIn(m, '#pgv'), data: val(m, '#pgd'), desc: val(m, '#pgt') }, eu());
+        if (!r.ok) return H.toast(esc(r.msg));
+        H.salvar(); H.fecharModal(); H.toast(`Lançado em ${r.lancamentos.length} filha(s).`); H.render();
+      };
+    };
     el.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => {
       const k = b.dataset.rt, fabrica = k === 'fob', atual = fabrica ? (o.alocacaoFabrica || {}) : ((o.rateio || {})[k] || {});
       const m = H.modal(fabrica ? 'Alocação do pagamento à fábrica' : 'Rateio: ' + esc(W.CLASSE_ROTULO[k]), `<div class="f"><label class="lbl" for="rtc">Critério</label><select id="rtc">${fabrica ? '<option value="padrao">Pelo FOB de cada filha</option><option value="manual">Manual (%)</option>' : '<option value="padrao">Padrão</option>' + W.CRITERIOS_MAE.map(([v, t]) => `<option value="${v}" ${atual.criterio === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>

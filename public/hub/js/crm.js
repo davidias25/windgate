@@ -227,7 +227,7 @@
     const ativs = (n.atividades || []).slice().sort((a, b) => String(b.em).localeCompare(String(a.em)));
     const m = H.modal(`${W.nomeCliente(c) || 'Negócio'} · ${n.titulo || ''}`, `
       <div class="steps" style="margin-bottom:14px">${W.CRM_FASES.filter(f => f.k !== 'perdido').map((f, i) => `<div class="st ${fase === 'perdido' ? '' : i < idx ? 'done' : i === idx ? 'cur' : ''}"><span class="dot">${i < idx && fase !== 'perdido' ? '✓' : i + 1}</span>${esc(f.l)}</div>`).join('')}</div>
-      ${(ab => ab.vezes ? `<p class="banner ok">${esc(W.textoAberturaProposta(ab))}.</p>` : '')(W.aberturasDaProposta(H.db, n.quoteId))}${W.followUpsProposta(H.db, W.hojeISO()).some(x => x.negocio._id === n._id) ? '<p class="banner"><b>Follow-up sugerido:</b> o link da proposta foi enviado há 3 dias ou mais, e o cliente ainda não abriu.</p>' : ''}
+      ${(ab => ab.vezes ? `<p class="banner ok">${esc(W.textoAberturaProposta(ab))}.</p>` : '')(W.aberturasDaProposta(H.db, n.quoteId, n.clienteCotId))}${W.followUpsProposta(H.db, W.hojeISO()).some(x => x.negocio._id === n._id) ? '<p class="banner"><b>Follow-up sugerido:</b> o link da proposta foi enviado há 3 dias ou mais, e o cliente ainda não abriu.</p>' : ''}
       ${fase === 'perdido' ? `<p class="banner">Perdido${n.motivoPerda ? ': ' + esc(n.motivoPerda) : ''}.</p>` : ''}${n.opId ? `<p class="banner ok">Virou a operação <a href="#" data-op="${esc(n.opId)}"><b>${esc(n.opId)}</b></a>.</p>` : ''}
       <div class="g2" style="gap:16px"><div><div class="fields">
         <div class="f w4"><label class="lbl" for="et2">Produto / negócio</label><input id="et2" value="${esc(n.titulo || '')}"></div>

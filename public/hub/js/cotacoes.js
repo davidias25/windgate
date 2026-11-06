@@ -215,11 +215,11 @@
     const opt = (lista, v) => lista.map(([k, l]) => `<option value="${esc(k)}" ${String(v) === String(k) ? 'selected' : ''}>${esc(l)}</option>`).join('');
     return `<div class="box"><div class="box-h"><h2>Clientes deste contêiner</h2>${bloq ? '' : '<button class="btn sm" id="cladd">+ Cliente</button>'}</div>
       <datalist id="cdlcli">${nomes.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
-      <div class="tw"><table><thead><tr><th>Cliente</th><th>UF</th><th>Tipo</th><th>Nº op.</th><th>Mercadoria</th><th class="num">DIFAL %</th><th class="num">Margem %</th><th class="num">Margem R$</th><th></th></tr></thead><tbody>
+      <div class="tw"><table><thead><tr><th>Cliente</th><th>UF</th><th>Tipo</th><th>Nº op.</th><th>Mercadoria</th><th class="num">DIFAL %</th><th class="num" title="ICMS de entrada. Vazio: o do contêiner.">ICMS ent. %</th><th class="num" title="Mark-up SF → JeT, em reais. Só na triangular.">Mk SF</th><th class="num" title="Mark-up JeT → cliente, em reais. Só na triangular.">Mk JeT</th><th class="num">Margem %</th><th class="num">Margem R$</th><th></th></tr></thead><tbody>
       ${ed.clientes.map(c => `<tr><td>${inpCli(c, 'nome', 130, { lista: 'cdlcli' })}</td>
         <td><select class="inp" id="ccl_${esc(c.id)}_ufDestino" data-cli="${esc(c.id)}" data-cc="ufDestino" style="width:66px">${opt(ufs.map(([k]) => [k, k === W.SEM_DIFAL ? 'sem DIFAL' : k]), c.ufDestino)}</select></td>
         <td><select class="inp" data-cli="${esc(c.id)}" data-cc="tipoOperacao" style="width:96px">${opt([['direta', 'Direta'], ['triangular', 'Triangular']], c.tipoOperacao)}</select></td>
-        <td>${inpCli(c, 'opNum', 70)}</td><td>${inpCli(c, 'mercadoria', 110)}</td><td>${inpCli(c, 'aliqST', 50, { num: true })}</td><td>${inpCli(c, 'margemPct', 50, { num: true })}</td><td>${inpCli(c, 'margemRS', 88, { num: true })}</td>
+        <td>${inpCli(c, 'opNum', 70)}</td><td>${inpCli(c, 'mercadoria', 110)}</td><td>${inpCli(c, 'aliqST', 50, { num: true })}</td><td>${inpCli(c, 'icmsEnt', 50, { num: true })}</td><td>${inpCli(c, 'mkSF', 62, { num: true })}</td><td>${inpCli(c, 'mkJT', 62, { num: true })}</td><td>${inpCli(c, 'margemPct', 50, { num: true })}</td><td>${inpCli(c, 'margemRS', 88, { num: true })}</td>
         <td>${bloq ? '' : `<button class="btn ghost sm" data-clrm="${esc(c.id)}" title="Tirar este cliente">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
   }
   function blocoRateio() {
@@ -279,13 +279,16 @@
     if (rm.erros.length) { resumo.innerHTML = `<p class="note">Falta completar a cotação: ${esc(rm.erros[0])}</p>`; preco.innerHTML = ''; W.GRUPOS_RATEIO.forEach(([g]) => { const v = el.querySelector('#crv_' + g); if (v) v.textContent = '—'; }); return; }
     const lin = (a, b, forte) => `<div style="display:flex;justify-content:space-between;gap:8px${forte ? ';font-weight:700' : ''}"><span${forte ? '' : ' class="note"'}>${a}</span><span class="num">${b}</span></div>`;
     resumo.innerHTML = `${rm.clientes.map((c, k) => `<div style="padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px"><b>${nome(c, k)}</b>${c.R.tri ? pill('triangular', 'info') : ''}</div>
-        ${(st => st === 'ok' ? `<div style="display:flex;justify-content:space-between;gap:8px;margin:4px 0">${pill('aprovado', 'ok')}<span><button class="btn sm" data-linkc="${esc(c.id)}">Link</button> <button class="btn sm" data-pdfc="${esc(c.id)}">Proposta (PDF)</button></span></div>` : ed.status === 'wait' ? (podeAprovar() ? `<div style="margin:4px 0"><button class="btn pri sm" data-aprc="${esc(c.id)}">Aprovar este cliente</button></div>` : `<div style="margin:4px 0">${pill('aguardando o Samir', 'warn')}</div>`) : '')((clienteEd(c.id) || {}).status)}
-        ${lin('FOB', fmt(c.R.fob))}${lin('Custo', fmt(c.custo))}${lin('DIFAL', fmt(c.R.tri ? c.R.tri.difal : c.R.st))}${lin('Margem s/ custo', pct(c.R.margemPctCampo) + ' · ' + fmt(c.R.margem))}${lin('Preço', fmt(c.R.preco), true)}
+        ${(st => `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;margin:4px 0">${st === 'ok' ? pill('aprovado', 'ok') : st === 'wait' ? pill('aguardando o Samir', 'warn') : pill('rascunho')}<span>${st === 'ok' ? `<button class="btn sm" data-linkc="${esc(c.id)}">Link</button> <button class="btn sm" data-pdfc="${esc(c.id)}">Proposta (PDF)</button>` : st === 'wait' ? (podeAprovar() ? `<button class="btn pri sm" data-aprc="${esc(c.id)}">Aprovar</button> <button class="btn sm" data-devc="${esc(c.id)}">Devolver</button>` : '') : `<button class="btn blue sm" data-envc="${esc(c.id)}">Enviar</button>`} <button class="btn ghost sm" data-desc="${esc(c.id)}">Desistiu</button></span></div>`)((clienteEd(c.id) || {}).status)}
+        ${lin('FOB', fmt(c.R.fob))}${lin('Custo', fmt(c.custo))}${lin('DIFAL', fmt(c.R.tri ? c.R.tri.difal : c.R.st))}${lin('Margem s/ custo', pct(c.R.margemPctCampo) + ' · ' + fmt(c.R.margem))}${lin('Preço', fmt(c.R.preco), true)}${(s => s ? lin('Se ficasse sozinho', 'custo ' + fmt(s.custo) + ' · margem ' + fmt(s.margem)) : '')(W.sozinhoNoConteiner(ed, c.id, W.precoDesem(c.R)))}
         ${c.R.warnMargem ? '<p class="note" style="color:var(--warn);margin-top:4px">⚠ Margem abaixo de 10%.</p>' : ''}</div>`).join('')}
       ${lin('Total FOB', fmt(rm.total.fob))}${lin('Total de custo', fmt(rm.total.custo), true)}`;
     resumo.onclick = ev => {
-      const a = ev.target.closest('[data-aprc]'), p = ev.target.closest('[data-pdfc]'), lk = ev.target.closest('[data-linkc]');
+      const a = ev.target.closest('[data-aprc]'), p = ev.target.closest('[data-pdfc]'), lk = ev.target.closest('[data-linkc]'), en = ev.target.closest('[data-envc]'), dv = ev.target.closest('[data-devc]'), ds = ev.target.closest('[data-desc]');
       if (lk) linkProposta(lk.dataset.linkc);
+      if (en) enviarCli(el, en.dataset.envc);
+      if (dv) { W.devolverCliente(ed, dv.dataset.devc); ed.status = W.statusDaCotacao(ed); salvar(true, true); H.toast('Cliente devolvido para ajuste.'); editor(el); }
+      if (ds) desistiuModal(el, ds.dataset.desc);
       if (a) aprovarCli(el, a.dataset.aprc);
       if (p) { pdfCliente = p.dataset.pdfc; propostaModal(); }
     };
@@ -467,9 +470,10 @@
     const r = W.prepararGravacao(ed, R, forcar && anterior && anterior.status === 'ok' && ed.status !== 'ok' ? Object.assign({}, anterior, { status: 'x' }) : anterior, editando, eu());
     if (!r.ok) { H.toast(esc(r.msg)); return false; }
     /* Vários clientes: o total pode não mudar e o preço de um deles, sim. Só quem mudou volta para aprovação. */
-    if (W.ehMultiCliente(ed) && anterior && anterior.status === 'ok' && editando) {
-      if (r.revogou) ed.clientes.forEach(c => { c.status = 'wait'; c.aprovadoPor = null; });
-      else if (W.revisarAprovacoes(ed).length) { r.revogou = true; r.registro.status = 'wait'; r.registro.aprovadoPor = null; }
+    if (W.ehMultiCliente(ed) && anterior) {
+      const mudaram = W.revisarAprovacoes(ed), st = W.statusDaCotacao(ed);
+      if (mudaram.length) H.toast(`O preço mudou: <b>${esc(mudaram.join(', '))}</b> voltou para a aprovação do Samir.`);
+      r.revogou = false; r.registro.status = st; if (st !== 'ok') r.registro.aprovadoPor = null;
       r.registro.clientes = ed.clientes;
     }
     // Preço mudou e voltou para aprovação: a nova aprovação fixa a referência de novo.
@@ -493,13 +497,43 @@
     H.db.hubRecados.push({ _id: W.novoId(), texto: `Cotação ${F('opNum') || 'sem nº'} · ${F('cliente') || ''} aguarda a sua aprovação (${fmt(R.preco)}).`, para: 'samir', prio: 'alta', por: eu() + ' · Cotações', em: new Date().toISOString(), feito: {}, quoteId: ed.id });
     H.salvar();
   }
+  function enviarCli(el, id) {
+    const rm = W.calcularPorCliente(ed, { usuario: eu() });
+    if (rm.erros.length) return H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(rm.erros[0]));
+    const cc = rm.clientes.find(x => x.id === id), e = W.desemErros(cc.q, cc.R);
+    if (e.length) return H.toast(`⛔ <b>${esc(cc.nome || cc.id)}:</b> ${esc(e[0])}`);
+    ed.criadoPor = ed.criadoPor || eu(); W.enviarClientes(ed, id); ed.status = W.statusDaCotacao(ed);
+    if (salvar(true, true)) { avisarSamir(); H.toast(`<b>${esc(cc.nome || cc.id)}</b> enviado para aprovação do Samir.`); editor(el); }
+  }
+  /* Antes de confirmar, mostra o que acontece com quem fica. */
+  function desistiuModal(el, id) {
+    const c = clienteEd(id), s = W.simularDesistencia(ed, id);
+    if (s.erro) return H.toast(esc(s.erro));
+    const m = H.modal(`${esc(c.nome || 'Cliente')} desistiu`, `<p>Os itens e o FOB dele saem da cotação. O preço de quem fica não muda: mudam o custo e a margem.${s.dedicado ? ' Quem fica passa a ter o <b>contêiner dedicado</b>, como operação comum, com 100% dos custos.' : ''}</p>
+      <div class="tw" style="margin-top:8px"><table><thead><tr><th>Cliente</th><th class="num">Preço</th><th class="num">Custo hoje</th><th class="num">Custo depois</th><th class="num">Margem hoje</th><th class="num">Margem depois</th></tr></thead><tbody>${s.fica.map(x => `<tr><td>${esc(x.nome || '')}</td><td class="num">${fmt(x.preco)}</td><td class="num">${fmt(x.custoAntes)}</td><td class="num">${fmt(x.custo)}</td><td class="num">${fmt(x.margemAntes)}</td><td class="num"><b>${fmt(x.margem)}</b></td></tr>`).join('')}</tbody></table></div>
+      <p class="note" style="margin-top:8px">O que já foi pago ou recebido fica como está. Os previstos são recalculados, sem duplicar.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="dsok">Confirmar a desistência</button>');
+    m.querySelector('.modal').classList.add('larga');
+    m.querySelector('#dsok').onclick = () => {
+      const r = W.desistirCliente(H.db, ed, id, { por: eu(), hoje: W.hojeISO() });
+      if (!r.ok) return H.toast(esc(r.msg));
+      if (W.ehMultiCliente(ed)) ed.status = W.statusDaCotacao(ed);
+      // O total da cotação caiu porque um cliente saiu: isso não é mudança de preço de quem ficou.
+      const gravada = H.db.quotes[ed.id]; if (gravada && !W.ehMultiCliente(ed)) gravada.preco = ed.preco;
+      editando = true; H.fecharModal(); salvar(true, true); editando = false;
+      W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
+      H.salvar();
+      H.toast(r.dedicado ? 'Desistência registrada: a operação de quem ficou passou a ter o contêiner dedicado.' : 'Desistência registrada.');
+      editor(el);
+    };
+  }
   function enviar(el) {
     if (W.ehMultiCliente(ed)) {
       const rm = W.calcularPorCliente(ed, { usuario: eu() });
       if (rm.erros.length) return H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(rm.erros[0]));
       if (rm.travas.length) return H.toast('⛔ <b>Não dá para enviar:</b> ' + esc(rm.travas[0].msg));
       for (const cc of rm.clientes) { const e = W.desemErros(cc.q, cc.R); if (e.length) return H.toast(`⛔ <b>${esc(cc.nome || cc.id)}:</b> ${esc(e[0])}`); }
-      ed.criadoPor = ed.criadoPor || eu(); ed.status = 'wait'; W.enviarClientes(ed);
+      ed.criadoPor = ed.criadoPor || eu(); W.enviarClientes(ed); ed.status = W.statusDaCotacao(ed);
       R = { preco: rm.total.preco };
       if (salvar(true)) { avisarSamir(); H.toast('Enviada para aprovação do <b>Samir</b>.'); editor(el); }
       return;
@@ -510,40 +544,41 @@
     ed.criadoPor = ed.criadoPor || eu(); ed.status = 'wait';
     if (salvar(true)) { avisarSamir(); H.toast('Enviada para aprovação do <b>Samir</b>.'); editor(el); }
   }
-  /* Aprova um cliente. Com o último, a cotação fica aprovada e segue o caminho de sempre. */
+  /* Aprova um cliente e já cria a filha dele. Pendentes ficam na cotação, sem filha. */
   function aprovarCli(el, id) {
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
     if (!fixarCambio()) return;
     const r = W.aprovarCliente(ed, id, eu());
+    if (r.rateio) {
+      const m = H.modal('Rateio sem medida', `<p>${esc(r.msg)}</p><p class="note" style="margin-top:8px">O ideal é preencher CBM e peso dos itens. Aprovar assim significa ratear pelo que está disponível.</p>`, '<button class="btn" data-x>Voltar e preencher</button><button class="btn pri" id="rfok">Ratear assim e aprovar</button>');
+      m.querySelector('#rfok').onclick = () => { ed.aceitaRateioSemMedida = true; H.fecharModal(); aprovarCli(el, id); };
+      return;
+    }
     if (!r.ok) return H.toast('⛔ <b>Não aprova:</b> ' + esc(r.msg));
-    if (!r.todos) { salvar(true); H.toast('Cliente aprovado.'); return editor(el); }
-    ed.aprovadoPor = eu(); ed.status = 'ok';
+    ed.status = W.statusDaCotacao(ed); if (ed.status === 'ok') ed.aprovadoPor = eu();
     const anterior = H.db.quotes[ed.id];
     if (anterior) H.db.quotes[ed.id] = Object.assign({}, anterior, { status: 'wait' });
     if (!salvar(true)) return;
-    (H.db.hubRecados || []).filter(x => x && x.quoteId === ed.id && x.para === 'samir').forEach(x => { x.feito = Object.assign({}, x.feito, { samir: new Date().toISOString() }); });
-    W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
-    const ent = H.db.qindex.find(x => x && x.id === ed.id); if (ent) ent.funilEm = new Date().toISOString();
-    H.salvar();
-    H.toast('Todos os clientes aprovados: propostas liberadas e negócio no <b>Funil</b>.');
-    editor(el);
-    criarOperacao();
+    (H.db.hubRecados || []).filter(x => x && x.quoteId === ed.id && x.para === 'samir' && ed.status === 'ok').forEach(x => { x.feito = Object.assign({}, x.feito, { samir: new Date().toISOString() }); });
+    const fim = () => { W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { por: eu() }); H.salvar(); editor(el); };
+    criarOperacoesMulti(fim);
   }
-  /* Vários clientes: pede o código do contêiner, cria mãe e filhas e lança o previsto. */
-  function criarOperacoesMulti() {
-    const ja = H.db.ops.find(o => o && o.quoteId === ed.id && W.ehMae(o));
-    const sug = ja ? ja.id : String((ed.clientes.map(c => c.opNum).find(Boolean) || '')).toUpperCase().split('.')[0];
-    const m = H.modal('Contêiner compartilhado', `<p>Cria o contêiner (operação-mãe), uma filha para cada cliente e o previsto no Financeiro: a fábrica, o frete, o seguro e o porto na mãe; as parcelas, os impostos e o frete nacional em cada filha.</p>
-      <div class="f" style="margin-top:8px"><label class="lbl" for="mcod">Código do contêiner</label><input id="mcod" value="${esc(sug)}" ${ja ? 'disabled' : ''}></div>`,
-      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="mcok">Criar</button>');
-    m.querySelector('#mcok').onclick = () => {
-      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: m.querySelector('#mcod').value, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO });
-      if (!r.ok) return H.toast('⛔ ' + esc(r.msg));
-      if (H.db.quotes[ed.id]) { H.db.quotes[ed.id].clientes = ed.clientes; W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() }); }
-      H.salvar(); H.fecharModal();
-      H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b> com ${r.filhas.length} filhas · ${r.lancamentos.length} lançamento(s) previstos.`);
+  /* Cria o que falta para os clientes aprovados. Pede o código do contêiner só se não der para saber. */
+  function criarOperacoesMulti(depois) {
+    const executar = codigo => {
+      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: codigo, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO });
+      if (!r.ok) { if (r.semCodigo) return false; H.toast('⛔ ' + esc(r.msg)); return true; }
+      if (H.db.quotes[ed.id]) H.db.quotes[ed.id].clientes = ed.clientes;
+      H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b>: ${r.filhas.length} filha(s) · ${r.lancamentos.length} lançamento(s) previstos.`);
+      if (depois) depois(); else { W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { por: eu() }); H.salvar(); }
       if (!r.jaLancado && H.gerarContratos) H.gerarContratos(r.filhas.map(f => f.id));
+      return true;
     };
+    if (executar('')) return;
+    const m = H.modal('Contêiner compartilhado', `<p>Qual é o código do contêiner (operação-mãe)? Cada cliente aprovado vira uma filha dele, com as parcelas e os custos só daquele cliente.</p>
+      <div class="f" style="margin-top:8px"><label class="lbl" for="mcod">Código do contêiner</label><input id="mcod"></div>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="mcok">Criar</button>');
+    m.querySelector('#mcok').onclick = () => { const cod = m.querySelector('#mcod').value.trim(); if (!cod) return H.toast('Informe o código.'); ed.fields.opMae = cod.toUpperCase(); H.fecharModal(); executar(cod); };
   }
   function aprovar(el) {
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');

@@ -128,7 +128,7 @@
     const db = H.db;
     const q = F.q.trim().toLowerCase();
     const lista = db.fin.filter(l => l && (F.empresa === 'todas' || (l.empresa || 'WindGate') === F.empresa)
-      && (q ? [l.desc, l.op, l.categoria, l.por, String(l.valor)].join(' ').toLowerCase().includes(q) : W.mesDe(W.vencDe(l)) === F.mes)
+      && (q ? W.lancBatePesquisa(db, l, q) : W.mesDe(W.vencDe(l)) === F.mes)
       && (!F.tipo || l.tipo === F.tipo) && (!F.status || l.status === F.status) && (!F.op || l.op === F.op))
       .sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
     const ops = [...new Set(db.fin.map(l => l && l.op).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));

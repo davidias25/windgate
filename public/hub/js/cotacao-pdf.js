@@ -269,7 +269,7 @@ async function gerarPropostaPDF(){
       doc.text('+ ICMS-DIFAL · valor previsto',44,y+17);
       doc.setFontSize(12); doc.text(fmt(difalV),551,y+17,{align:'right'});
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8);
-      const dtxt=doc.splitTextToSize((triProposta?'Não está incluído no investimento acima: é pago em guia à SEFAZ e reembolsado na 3ª parcela. ':'Não está incluído no investimento acima: é imposto do estado de destino, recolhido em guia própria à SEFAZ e não é receita da WindGate. ')+'O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.',505);
+      const dtxt=doc.splitTextToSize((triProposta?'Não está incluído no investimento acima: é pago em guia à SEFAZ e reembolsado junto à 3ª parcela. ':'Não está incluído no investimento acima: é imposto do estado de destino, recolhido em guia própria à SEFAZ e não é receita da WindGate. ')+'O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.',505);
       doc.text(dtxt,44,y+29);
       y+=62;
       doc.setFillColor(...PDF_NAVY); doc.rect(36,y,523,26,'F');
@@ -414,7 +414,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
       doc.text('+ ICMS-DIFAL na chegada · '+fmt(difalV)+' (previsto)',44,yN+2);
       doc.setFont('helvetica','normal'); doc.setFontSize(7.3);
-      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado na 3ª parcela acima. Valor sujeito à alíquota da guia definitiva.':'Recolhido em guia à SEFAZ, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
+      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado junto à 3ª parcela. Valor sujeito à alíquota da guia definitiva.':'Recolhido em guia à SEFAZ, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
       yN+=34;
     }
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);

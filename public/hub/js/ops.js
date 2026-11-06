@@ -13,7 +13,7 @@
       ${lista.map(o => { const pct = W.checklistPct(db, o.id); const r = res[o.id];
         return `<tr class="click" data-op="${esc(o.id)}"><td class="mono">${o.maeId ? '<span class="note">↳ </span>' : ''}<b>${esc(o.id)}</b>${W.ehMae(o) ? '<br><span class="pill info">contêiner</span>' : ''}</td><td><div class="cli" title="${esc(o.cliente || '')}">${W.ehMae(o) ? esc(W.filhasDe(db, o.id).map(f => f.cliente).join(' + ') || 'sem filhas') : esc(o.cliente || '—')}</div><small class="note cli" style="display:block">${esc(o.nome || '')}</small></td>
         <td>${H.pillStatus(o.status)}</td><td>${H.semaforo(db, o)}</td><td class="mono">${W.dataBR(o.eta)}</td>${opt && opt.compacta ? '' : `<td>${esc(o.navio || '—')}</td>`}
-        <td class="num">${pct == null ? '—' : pct + '%'}</td>${comFin ? `<td class="num">${r ? W.fmtBRL(r.saldoReceber) : '—'}</td><td class="num ${r && r.resultado < 0 ? 'neg' : ''}">${r ? W.fmtBRL(r.resultado) : '—'}</td>` : ''}
+        <td class="num">${pct == null ? '—' : pct + '%'}</td>${comFin ? (x => `<td class="num">${x ? W.fmtBRL(x.saldoReceber) : '—'}</td><td class="num ${x && x.resultado < 0 ? 'neg' : ''}">${x ? W.fmtBRL(x.resultado) : '—'}</td>`)(W.ehMae(o) ? W.consolidadoDaMae(db, o.id, res) : r) : ''}
         <td>${esc(o.resp || '—')}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   }
@@ -271,6 +271,7 @@
         <div class="kpi"><span class="lbl">Peso ocupado</span><span class="v">${num(oc.kg)} kg</span><span class="d">${oc.capKg ? 'de ' + num(oc.capKg) + ' kg' : 'sem capacidade definida'}</span></div>
         <div class="kpi"><span class="lbl">Peso livre</span><span class="v ${oc.livreKg < 0 ? 'neg' : ''}">${oc.livreKg == null ? '—' : num(oc.livreKg) + ' kg'}</span><span class="d">FOB das filhas: US$ ${num(oc.fobUSD)}</span></div></div>
       ${oc.excedeu ? '<div class="banner crit" style="margin-bottom:12px">⛔ As filhas somam mais do que cabe no contêiner. Confira as medidas.</div>' : ''}
+      ${H.pode('fin.resultado') ? (c => `<div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px"><div class="kpi"><span class="lbl">Receita das filhas</span><span class="v">${W.fmtBRLk(c.receita)}</span><span class="d">${W.fmtBRLk(c.saldoReceber)} a receber</span></div><div class="kpi"><span class="lbl">Custo das filhas</span><span class="v">${W.fmtBRLk(c.despesa)}</span></div><div class="kpi"><span class="lbl">Resultado do contêiner</span><span class="v ${c.resultado < 0 ? 'neg' : ''}">${W.fmtBRLk(c.resultado)}</span><span class="d">soma das filhas, sem contar em dobro</span></div></div>`)(W.consolidadoDaMae(H.db, o.id)) : ''}
       <div class="box"><div class="box-h"><h2>Operações-filhas</h2>${edita ? '<button class="btn sm" data-addf>+ Filha</button>' : ''}</div>
         ${oc.filhas.length ? `<div class="tw"><table><thead><tr><th>Filha</th><th>Cliente</th><th>Etapa</th><th class="num">m³</th><th class="num">Peso (kg)</th><th class="num">FOB (US$)</th><th></th></tr></thead><tbody>
           ${oc.filhas.map(({ o: f, med }) => `<tr><td class="mono"><a href="#" data-ver="${esc(f.id)}"><b>${esc(f.id)}</b></a></td><td>${esc(f.cliente || '—')}<br><small class="note">${esc(f.nome || '')}</small></td><td>${H.pillStatus(f.status)}</td>

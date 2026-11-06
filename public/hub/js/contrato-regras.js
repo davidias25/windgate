@@ -86,8 +86,8 @@
     const endereco = [end.logradouro, end.numero, end.bairro, end.cidade, end.uf].filter(Boolean).join(', ');
     const res = q && R ? W.resumoProposta(q, R) : null;
     /* Na J&T, o DIFAL é reembolsado junto à 3ª parcela, em linha própria: a parcela do contrato é sem ele, e a soma das três dá o preço dos equipamentos. */
-    const difalNaTerceira = res && !contribuinte ? res.difal : 0;
-    const parcelas = e.parcelas || (res ? res.parcelas.map(p => ({ n: p.n, valor: p.n === 3 ? Math.round((p.valor - difalNaTerceira) * 100) / 100 : p.valor })) : []);
+    const difalNaTerceira = res && !contribuinte ? res.difal : 0, difalEmbutido = R && R.aReceber != null ? 0 : difalNaTerceira;
+    const parcelas = e.parcelas || (res ? res.parcelas.map(p => ({ n: p.n, valor: p.n === 3 ? Math.round((p.valor - difalEmbutido) * 100) / 100 : p.valor })) : []);
     const lancs = (db.fin || []).filter(l => l && l.op === o.id && W.ehReceita(l));
     const dataDa = (p, i) => { const l = lancs.find(x => String(x.desc || '').startsWith((i + 1) + 'º recebimento')); return (i === 2 && o.eta) || (l && W.vencDe(l)) || (res ? res.parcelas[i].previsao : ''); };
     const campos = {
@@ -104,7 +104,7 @@
       porto: v('porto', o.destinoPorto ? 'Porto de ' + o.destinoPorto : '', f.portoDestino), previsaoChegada: v('previsaoChegada', datas[2] ? W.dataBR(datas[2]) : ''), objeto: v('objeto', itens.map(i => i.q + ' ' + i.d).join(', ')), obsItens: v('obsItens'),
       composicao, investimentoExtenso: res ? valorExtenso(res.investimento) : '', difalExtenso: res ? valorExtenso(res.difal) : '', estadoDestino: ESTADOS[uf] || '', sefazDestino: uf ? 'SEFAZ-' + uf : '', ano: W.hojeISO().slice(0, 4),
       refDolar: tab ? taxaTxt(tab.referencia) : '', refPiso: tab ? taxaTxt(tab.piso) : '', refTeto: tab ? taxaTxt(tab.teto) : '', refExAlta: tab ? taxaTxt(tab.referencia + 0.10) : '', refExQueda: tab ? taxaTxt(tab.referencia - 0.20) : '' });
-    return { op: o, q, R, resumo: res, estrutura, contribuinte, uf: end.uf || W.camposDe(q || {}).ufDestino || '', campos, parcelas, datas, difalNaTerceira,
+    return { op: o, q, R, resumo: res, estrutura, contribuinte, uf: end.uf || W.camposDe(q || {}).ufDestino || '', campos, parcelas, datas, difalNaTerceira, difalEmbutido,
       itens: res ? res.itens.map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })) : [], tabela: q ? W.textoCambio(W.tabelaCambio(q)) : null, tabelaRaw: q ? W.tabelaCambio(q) : null };
   }
 
@@ -175,9 +175,9 @@
     } else if (!(dados.resumo && dados.resumo.difal > 0)) add('bloqueante', 'Não contribuinte sem DIFAL calculado');
     /* Iguais à proposta e à cotação. */
     if (q) {
-      const f = W.camposDe(q), R = dados.R, cot = [f.desR1, f.desR2, f.desR3].map(x => parseFloat(x) || 0); cot[2] -= dados.difalNaTerceira || 0;
+      const f = W.camposDe(q), R = dados.R, cot = [f.desR1, f.desR2, f.desR3].map(x => parseFloat(x) || 0); cot[2] -= dados.difalEmbutido || 0;
       dados.parcelas.forEach((p, i) => { if (Math.abs((+p.valor || 0) - (cot[i] || 0)) > 0.005) add('bloqueante', `Parcela ${p.n} diferente da cotação`, `contrato ${moeda(p.valor)} × cotação ${moeda(cot[i])}`); });
-      if (Math.abs(dados.parcelas.reduce((a, p) => a + (+p.valor || 0), 0) + (dados.difalNaTerceira || 0) - W.precoDesem(R)) > 0.05) add('bloqueante', 'A soma das parcelas não dá o valor a receber', moeda(W.precoDesem(R)));
+      if (Math.abs(dados.parcelas.reduce((a, p) => a + (+p.valor || 0), 0) + (dados.difalEmbutido || 0) - W.precoDesem(R)) > 0.05) add('bloqueante', 'A soma das parcelas não dá o valor a receber', moeda(W.precoDesem(R)));
       const proposta = W.textoCambio(W.tabelaCambio(q));
       if (!dados.tabelaRaw) add('bloqueante', 'Sem tabela de câmbio', 'A aprovação da cotação fixa a referência.');
       else {

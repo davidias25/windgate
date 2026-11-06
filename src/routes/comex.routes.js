@@ -232,7 +232,7 @@ module.exports = function registrar(app, ctx) {
     if (todas.length >= 500 || (ultima && agora - new Date(ultima) < 60000)) return res.json({ success: true });
     const parcial = { propostaAberturas: [{ _id: 'pa-' + id + '-' + agora.getTime().toString(36), linkId: id, quoteId: a.q, clienteId: a.c || '', em: agora.toISOString() }] };
     if (!todas.length) {
-      const n = (db().crmOps || []).find(x => x && x.quoteId === a.q), q = (db().quotes || {})[a.q] || {}, dono = String((n && n.resp) || q.criadoPor || '').trim();
+      const n = (db().crmOps || []).find(x => x && x.quoteId === a.q && (!a.c || x.clienteCotId === a.c)), q = (db().quotes || {})[a.q] || {}, dono = String((n && n.resp) || q.criadoPor || '').trim();
       const us = db().users || {}, chave = Object.keys(us).find(k => k.toLowerCase() === dono.toLowerCase() || String((us[k] && us[k].nome) || '').toLowerCase() === dono.toLowerCase());
       const cliente = (n && n.clienteNome) || (q.fields && q.fields.cliente) || 'O cliente';
       parcial.hubRecados = [{ _id: 'proposta-aberta-' + id, para: chave || 'todos', por: 'Proposta', prio: 'alta', feito: {}, em: agora.toISOString(), quoteId: a.q, texto: cliente + ' abriu a proposta pela primeira vez.' }];

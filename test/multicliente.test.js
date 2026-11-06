@@ -120,7 +120,7 @@ console.log('\nTriangular, sem mark-up fixo (NF de saída = NF de entrada ÷ 0,9
   ok(perto(rs.total.custo, ints.tri.custoGrupo), 'sem IPI nos itens, a soma é igual à da triangular inteira');
   ok(perto(b.R.preco, b.custo * 1.25), 'preço da triangular = custo dele + margem');
   const qs = C.desemOuts(b.q, b.R);
-  ok(perto(qs.base, b.custo), 'o desembolso da triangular usa o custo já com o rateio');
+  ok(perto(qs.base, b.custo - b.R.difalCliente), 'o desembolso da triangular usa o custo já com o rateio, sem o DIFAL, que é reembolsado à parte');
 }
 
 console.log('\nCliente direto e triangular no mesmo contêiner:');
@@ -147,13 +147,13 @@ console.log('\nVirar vários clientes e voltar:');
   ok(q.fields.cliente === 'Márcio + Bruno' && q.fields.opNum === 'OP91 + OP92' && q.fields.mercadoria === 'Escoras + Betoneira', 'a lista mostra os nomes juntos');
   const s = C.snapshot(q, { preco: 1 });
   ok(s.clientes.length === 2 && s.regraRateio.frete === 'cbm' && s.items[3].clienteId === 'c2' && s.items[0].cbm === 15, 'gravar preserva clientes, regra de rateio, dono e CBM');
-  q.clientes[0].opNum = ''; q.clientes[0].mercadoria = '';
+  q.clientes[0].opNum = ''; q.clientes[0].mercadoria = ''; q.items[3].clienteId = 'c1';
   C.removerCliente(q, 'c2');
   ok(!q.clientes && !q.regraRateio && q.items.every(i => i.clienteId === undefined) && q.fields.cliente === 'Márcio' && q.fields.opNum === '', 'tirando o 2º cliente, volta ao formato de sempre');
   ok(JSON.stringify(C.calcular(q)) === antes, 'e dá exatamente os mesmos números de antes');
   const tres = cotacao(); C.adicionarCliente(tres); tres.items[3].clienteId = 'c3';
   C.removerCliente(tres, 'c3');
-  ok(tres.clientes.length === 2 && tres.items[3].clienteId === '' && C.conferirClientes(tres).erros.some(e => /sem cliente/.test(e)), 'com mais clientes restando, o item do removido fica sem dono e isso é cobrado');
+  ok(tres.clientes.length === 2 && !tres.items.some(i => i.clienteId === 'c3') && !C.conferirClientes(tres).erros.some(e => /sem cliente/.test(e)), 'o cliente que sai leva os itens e o FOB dele');
   ok(C.multiClienteLigado({ hubPainel: { _flags: { multiCliente: true } } }) && C.multiClienteLigado({}) && C.multiClienteLigado({ hubPainel: {} }) && !C.multiClienteLigado({ hubPainel: { _flags: { multiCliente: false } } }), 'a função vem ligada, e só o desligamento explícito fecha');
 }
 

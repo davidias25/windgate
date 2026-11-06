@@ -265,6 +265,18 @@
     return { ok: true, op: f };
   }
 
+  /** Soma das filhas, para a linha e a aba do contêiner. A mãe não tem lançamento próprio e nunca entra nos totais gerais. */
+  function consolidadoDaMae(db, id, resultados) {
+    const res = resultados || Object.fromEntries(resultadoPorOp(db, 'todas').map(r => [r.op, r])), filhas = filhasDe(db, id).map(o => Object.assign({ op: o.id, cliente: o.cliente || '', receita: 0, despesa: 0, resultado: 0, saldoReceber: 0 }, res[o.id] || {}, { op: o.id, cliente: o.cliente || '' }));
+    const soma = k => filhas.reduce((a, f) => a + (+f[k] || 0), 0);
+    return { filhas, receita: soma('receita'), despesa: soma('despesa'), resultado: soma('resultado'), saldoReceber: soma('saldoReceber') };
+  }
+  /** A pesquisa do Financeiro também acha pelo cliente da operação. */
+  function lancBatePesquisa(db, l, q) {
+    const o = (db.ops || []).find(x => x && x.id === l.op);
+    return [l.desc, l.op, l.categoria, l.por, String(l.valor), o && o.cliente].join(' ').toLowerCase().includes(q);
+  }
+
   /* ---------- Código e exclusão da operação ---------- */
   const codigoOp = v => String(v == null ? '' : v).trim().toUpperCase();
   /** O que fica ligado à operação: é o que a tela mostra antes de renomear ou excluir. */
@@ -690,8 +702,8 @@
     return { abertos: abertos.length, pipeline, previsao, conversao, ganhos: ganhos.length, fechados: fechadosPeriodo.length, ticket, ciclo, parados, porOrigem, perdas };
   }
   /* Link rastreável da proposta. Cada abertura é um registro novo: uma gravação de outra pessoa nunca apaga a contagem. */
-  function aberturasDaProposta(db, quoteId) {
-    const xs = (db.propostaAberturas || []).filter(a => a && a.quoteId === quoteId).sort((a, b) => String(a.em).localeCompare(String(b.em)));
+  function aberturasDaProposta(db, quoteId, clienteId) {
+    const xs = (db.propostaAberturas || []).filter(a => a && a.quoteId === quoteId && (!clienteId || !a.clienteId || a.clienteId === clienteId)).sort((a, b) => String(a.em).localeCompare(String(b.em)));
     return { vezes: xs.length, primeira: xs.length ? xs[0].em : '', ultima: xs.length ? xs[xs.length - 1].em : '' };
   }
   /** "Proposta aberta em 06/11 14:32 (3 vezes)". */
@@ -704,11 +716,11 @@
   function followUpsProposta(db, hoje) {
     const h = hoje || hojeISO(), vistos = new Set(), out = [];
     (db.propostaLinks || []).filter(Boolean).forEach(l => {
-      if (vistos.has(l.quoteId) || aberturasDaProposta(db, l.quoteId).vezes) return;
+      const chave = l.quoteId + '|' + (l.clienteId || ''); if (vistos.has(chave) || aberturasDaProposta(db, l.quoteId, l.clienteId).vezes) return;
       const dias = diasEntre(soData(l.criadoEm), h); if (dias == null || dias < 3) return;
-      const n = (db.crmOps || []).find(x => x && x.quoteId === l.quoteId);
+      const n = (db.crmOps || []).find(x => x && x.quoteId === l.quoteId && (!l.clienteId || x.clienteCotId === l.clienteId));
       if (!n || !negocioAberto(n)) return;
-      vistos.add(l.quoteId); out.push({ negocio: n, link: l, dias });
+      vistos.add(chave); out.push({ negocio: n, link: l, dias });
     });
     return out;
   }
@@ -1123,7 +1135,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, aberturasDaProposta, textoAberturaProposta, followUpsProposta, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

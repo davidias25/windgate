@@ -147,8 +147,9 @@
     if (o.quoteId && qs[o.quoteId]) q = Object.assign({ id: o.quoteId }, qs[o.quoteId]);
     else { const k = Object.keys(qs).find(id => qs[id] && qs[id].fields && String(qs[id].fields.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase()); if (k) q = Object.assign({ id: k }, qs[k]); }
     /* Filha de cotação com vários clientes: só a parte daquele cliente, com o rateio comercial dele. */
-    if (q && o.quoteClienteId && Array.isArray(q.clientes) && q.clientes.length > 1) {
-      const cc = (motorCotacao().calcularPorCliente(q).clientes || []).find(x => x.id === o.quoteClienteId);
+    const clienteCot = o.clienteCotId || o.quoteClienteId;
+    if (q && clienteCot && Array.isArray(q.clientes) && q.clientes.length > 1) {
+      const cc = (motorCotacao().calcularPorCliente(q).clientes || []).find(x => x.id === clienteCot);
       if (cc) return Object.assign({}, cc.q, { id: q.id, preco: cc.R.preco, _custoPor: cc.R.custoPor, _RCliente: cc.R });
     }
     return q;
@@ -345,6 +346,32 @@
     return { mae: m, filhas, rateio, ocupacao: ocupacaoDaMae(db, id), receita, recebido: soma(c => c.receitaRecebida), previsto, projetado, realizado: soma(c => c.realizado), aPagar: soma(c => c.aPagar),
       margem: receita ? (receita - projetado) / receita : null, margemPrevista: receita && previsto > 0 ? (receita - previsto) / receita : null };
   }
+  /** Parte de cada filha num pagamento real: a do rateio da cotação; sem cotação por cliente, o critério da mãe. */
+  function partesDoPagamento(db, m, classe) {
+    const fs = W.filhasDe(db, m.id), de = { frete: p => p.frete, seguro: p => p.seguro, porto: p => p.capatazia + p.siscomex + p.afrmm + p.honorarios + p.demais, demurrage: p => p.capatazia + p.siscomex + p.afrmm + p.honorarios + p.demais, nacional: p => p.terrestre }[classe];
+    if (de) { const qs = fs.map(f => ({ f, q: cotacaoDaOp(db, f) })); if (qs.length && qs.every(x => x.q && x.q._custoPor)) { const pesos = Object.fromEntries(qs.map(x => [x.f.id, de(x.q._custoPor)])); if (Object.values(pesos).some(v => v > 0)) return { criterio: 'cotacao', pesos }; } }
+    return partesDe(db, m, classe);
+  }
+  /**
+   * Pagamento real do contêiner: um lançamento por filha, pela mesma regra do rateio. Se a filha tem o previsto
+   * daquela classe em aberto, é ele que vira realizado, para o custo não contar duas vezes. Nada fica na mãe.
+   */
+  function lancarPagamentoConteiner(db, maeId, d, por, agora) {
+    const m = (db.ops || []).find(x => x && x.id === maeId), dd = d || {};
+    if (!W.ehMae(m)) return { ok: false, msg: 'Só o contêiner rateia pagamento.' };
+    const fs = W.filhasDe(db, maeId); if (!fs.length) return { ok: false, msg: 'Este contêiner não tem filhas.' };
+    if (!(+dd.valor > 0)) return { ok: false, msg: 'Informe o valor.' };
+    if (!CLASSE_ROTULO[dd.classe]) return { ok: false, msg: 'Escolha a classe.' };
+    const p = partesDoPagamento(db, m, dd.classe), val = ratearCentavos(dd.valor, p.pesos), data = dd.data || W.hojeISO(), real = dd.status !== 'Previsto', out = [];
+    fs.forEach(f => {
+      const v = val[f.id] || 0; if (!(v > 0)) return;
+      const prev = (db.fin || []).find(l => l && l.op === f.id && !W.ehReceita(l) && !W.realizado(l) && l.custo === dd.classe && String(l.origem || '').startsWith('cotacao:'));
+      if (prev) { prev.valorPrevisto = prev.valorPrevisto != null ? prev.valorPrevisto : prev.valor; if (real) { W.realizar(prev, v, data); prev.baixaPor = por || ''; } else prev.valor = v; prev.comprovanteConteiner = dd.desc || ''; out.push(prev); return; }
+      const l = { _id: W.novoId(), data, vencimento: data, op: f.id, tipo: 'Despesa', categoria: '', fixo: false, empresa: dd.empresa || 'WindGate', desc: (dd.desc || CLASSE_ROTULO[dd.classe]) + ' · contêiner ' + maeId, valor: v, status: real ? 'Realizado' : 'Previsto', comp: dd.comp || '', nf: '', por: por || '', custo: dd.classe, origem: 'rateio:' + maeId, liquidadoEm: real ? data : null };
+      db.fin.unshift(l); out.push(l);
+    });
+    return { ok: true, lancamentos: out, criterio: p.criterio, aviso: p.aviso || '' };
+  }
   /** Quanto cada filha já pagou por dentro: cota da fábrica (pago + este pagamento) contra o que ela já pagou à WindGate. */
   function coberturaFabrica(db, maeId, valorNovo) {
     const m = (db.ops || []).find(x => x && x.id === maeId); if (!m) return [];
@@ -359,6 +386,13 @@
   /** Pagamento à fábrica lançado na mãe: filha sem recebimento segura o pagamento até o Samir liberar. */
   function travaFabrica(db, l) {
     const m = l && (db.ops || []).find(x => x && x.id === l.op);
+    if (m && m.maeId && !W.ehReceita(l) && classeDe(l) === 'fob' && !W.realizado(l)) {
+      /* Filha: a fábrica desta filha contra o que ela já recebeu do cliente. */
+      const pago = lancOp(db, m.id).filter(x => !W.ehReceita(x) && classeDe(x) === 'fob' && W.realizado(x)).reduce((a, x) => a + valorDe(x), 0);
+      const recebido = r2(lancOp(db, m.id).filter(x => W.ehReceita(x) && W.realizado(x)).reduce((a, x) => a + valorDe(x), 0)), cota = r2(pago + valorDe(l));
+      const f = { op: m.id, cliente: m.cliente || '', cota, recebido, descoberto: r2(Math.max(0, cota - recebido)) }, ab = f.descoberto > 0.005 ? [f] : [];
+      return { bloqueia: ab.length > 0 && !l.liberacaoFabrica, liberado: !!l.liberacaoFabrica, liberacao: l.liberacaoFabrica || null, filhas: [f], abertas: ab, descoberto: f.descoberto };
+    }
     if (!W.ehMae(m) || W.ehReceita(l) || classeDe(l) !== 'fob' || W.realizado(l)) return { bloqueia: false, filhas: [] };
     const filhas = coberturaFabrica(db, m.id, valorDe(l)), abertas = filhas.filter(f => f.descoberto > 0.005);
     return { bloqueia: abertas.length > 0 && !l.liberacaoFabrica, liberado: !!l.liberacaoFabrica, liberacao: l.liberacaoFabrica || null, filhas, abertas, descoberto: r2(abertas.reduce((a, f) => a + f.descoberto, 0)) };
@@ -627,7 +661,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { cenariosCaixa, CENARIOS_CAIXA, CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { partesDoPagamento, lancarPagamentoConteiner, cenariosCaixa, CENARIOS_CAIXA, CRITERIOS_MAE, RATEIO_MAE_PADRAO, ratearCentavos, rateioDaMae, partesFabrica, alocarFabrica, definirRateioMae, definirAlocacaoFabrica, custeioConsolidado, coberturaFabrica, travaFabrica, liberarFabrica, classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };
