@@ -70,6 +70,11 @@ if (fs.existsSync(FOTO)) {
   const chaves = Object.keys(foto).filter(k => reais[k]);
   const mudou = chaves.filter(k => !iguais(resultado(reais[k]), foto[k]));
   ok(chaves.length > 0 && !mudou.length, `${chaves.length} cotações reais do backup local: nenhum número mudou` + (mudou.length ? ' — mudou: ' + mudou.length : ''));
+  // Margem do Custeio igual à do motor, nas cotações reais do backup local (que não vão para o repositório).
+  const CX = require('../public/hub/js/comex.js'), MOT = require('../public/hub/js/cotacao-regras.js');
+  let dif = 0, n = 0;
+  chaves.forEach(k => { const q = reais[k], R0 = MOT.calcular(q); if (!(R0.preco > 0) || !(q.items || []).length) return; n++; const c = CX.custoCotacao(q); if (Math.abs((R0.preco - c.total) / R0.preco - R0.margem / R0.preco) > 0.0005) dif++; });
+  ok(n > 0 && dif === 0, `margem do Custeio igual à do motor em ${n} cotações reais (${dif} diferentes)`);
 } else console.log('  ⚠️  sem backups/foto-cotacoes.json nesta máquina: a parte com cotações reais foi pulada.');
 
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);

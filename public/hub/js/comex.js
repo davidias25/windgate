@@ -31,25 +31,59 @@
     ['impVenda', 'Impostos de venda'], ['cambio', 'Variação cambial'], ['outros', 'Outros']
   ];
   const CLASSE_ROTULO = Object.fromEntries(CLASSES);
+  /* Da expressão mais específica para a mais geral: o que casa sai do texto, e "frete nacional" não conta também como frete
+     nem "imposto de venda" como imposto de importação. Impostos vêm antes de frete. */
+  const PADROES_CLASSE = [
+    ['demurrage', /demurrage|detention|sobreestadia/g],
+    ['impVenda', /difal|icms\s*(de\s*)?sa[ií]da|pis[^,;]*cofins[^,;]*(venda|sa[ií]da)|imposto(s)?\s*de\s*venda/g],
+    ['cambio', /varia[çc][aã]o\s*cambial/g],
+    ['seguro', /seguro/g],
+    ['nacional', /frete\s*(rodovi[aá]rio|nacional|terrestre)|transporte|carreta|rodovi[aá]rio/g],
+    ['impostos', /impostos?(\s*de\s*importa[çc][aã]o)?|tributos?|\bii\b|\bipi\b|icms|\bpis\b|cofins/g],
+    ['frete', /frete(\s*internacional)?|freight|ocean|agente\s*de\s*carga/g],
+    ['porto', /despachante|capatazia|armazen\w*|siscomex|afrmm|porto|terminal|\bthc\b|honor[aá]rios?|desconsolida\w*|libera[çc][aã]o|despesas?/g],
+    ['fob', /f[aá]brica|\bfob\b|proforma|fornecedor|sinal|saldo|mercadoria/g]
+  ];
+  /** Classes que o texto cita, na ordem de prioridade. */
+  function classesDoTexto(texto) {
+    let t = String(texto || '').toLowerCase(); const achadas = [];
+    PADROES_CLASSE.forEach(([k, re]) => { const sem = t.replace(re, ' '); if (sem !== t) achadas.push(k); t = sem; });
+    return achadas;
+  }
+  /** Lançamento sem classe escolhida cuja descrição cita mais de uma: a tela pede para escolher ou dividir. */
+  const classesAmbiguas = l => {
+    if (!l || (l.custo && CLASSE_ROTULO[l.custo])) return [];
+    const c = classesDoTexto(l.desc || l.descricao || '');
+    return c.length > 1 ? c : [];
+  };
   /** Classe de custo de um lançamento: o campo `custo` vence; sem ele, a descrição decide. */
   function classeDe(l) {
     if (l && l.custo && CLASSE_ROTULO[l.custo]) return l.custo;
-    const t = ((l && (l.desc || l.descricao || '')) + ' ' + ((l && l.categoria) || '')).toLowerCase();
-    if (/demurrage|detention|sobreestadia/.test(t)) return 'demurrage';
-    if (/difal|icms\s*(de\s*)?sa[ií]da|pis.*cofins.*(venda|sa[ií]da)|imposto(s)?\s*de\s*venda/.test(t)) return 'impVenda';
-    if (/varia[çc][aã]o\s*cambial/.test(t)) return 'cambio';
-    if (/seguro/.test(t)) return 'seguro';
-    if (/frete\s*(rodovi|nacional|terrestre)|transporte|carreta|rodovi/.test(t)) return 'nacional';
-    if (/frete|freight|ocean|agente\s*de\s*carga/.test(t)) return 'frete';
-    if (/imposto|tributo|\bii\b|\bipi\b|icms|pis|cofins|duimp\s*-?\s*impostos/.test(t)) return 'impostos';
-    if (/despachante|capatazia|armazen|siscomex|afrmm|porto|terminal|thc|honor[aá]rio|desconsolida|liberação|libera[çc][aã]o/.test(t)) return 'porto';
-    if (/f[aá]brica|fob|proforma|fornecedor|sinal|saldo\s*(da\s*)?(f[aá]brica|fornecedor)|mercadoria|\d+\s*%/.test(t)) return 'fob';
-    return 'outros';
+    const desc = (l && (l.desc || l.descricao)) || '';
+    const c = classesDoTexto(desc + ' ' + ((l && l.categoria) || ''));
+    if (c.length) return c[0];
+    return /\d+\s*%/.test(String(desc)) ? 'fob' : 'outros';
+  }
+  /** Divide um lançamento previsto em partes de classe definida, sem mudar o total. */
+  function dividirLancamento(db, id, partes) {
+    const l = (db.fin || []).find(x => x && x._id === id);
+    if (!l) return { ok: false, msg: 'Lançamento não encontrado.' };
+    if (W.realizado(l)) return { ok: false, msg: 'Lançamento já realizado não é dividido.' };
+    const ps = (partes || []).filter(p => p && +p.valor > 0 && CLASSE_ROTULO[p.custo]);
+    if (ps.length < 2) return { ok: false, msg: 'Informe ao menos duas partes com classe e valor.' };
+    if (Math.abs(ps.reduce((a, p) => a + +p.valor, 0) - valorDe(l)) > 0.005) return { ok: false, msg: `As partes precisam somar ${W.fmtBRL(valorDe(l))}.` };
+    const base = String(l.desc || l.descricao || '').split(' — ')[0];
+    const novos = ps.slice(1).map(p => Object.assign({}, l, { _id: W.novoId(), desc: base + ' — ' + CLASSE_ROTULO[p.custo], valor: r2(+p.valor), custo: p.custo, divididoDe: l._id }));
+    Object.assign(l, { desc: base + ' — ' + CLASSE_ROTULO[ps[0].custo], valor: r2(+ps[0].valor), custo: ps[0].custo });
+    db.fin.push(...novos);
+    return { ok: true, partes: [l].concat(novos) };
   }
 
   const num = v => { if (v == null || v === '') return 0; if (typeof v === 'number') return isFinite(v) ? v : 0; const t = String(v).trim(); const n = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : +t; return isFinite(n) ? n : 0; };
   const numF = v => (typeof v === 'number' ? v : num(v));
-  /** Custo da cotação (sistema atual), com as MESMAS fórmulas da tela de cotação. */
+  /* O motor da cotação é carregado junto no navegador; no Node, sob demanda. */
+  const motorCotacao = () => (typeof W.calcular === 'function' ? W : require('./cotacao-regras.js'));
+  /** Custo da cotação (sistema atual), com as MESMAS fórmulas da tela de cotação; o imposto de venda vem do motor. */
   function custoCotacao(q) {
     if (!q || !q.fields) return null;
     const f = q.fields, N = k => numF(f[k]);
@@ -71,8 +105,17 @@
       II += ii; IPI += ipi; PIS += pis; COF += cof; ICMSent += ce * icmsE;
     });
     const despExtra = (Array.isArray(q.exps) ? q.exps : []).reduce((s, e) => s + numF(e && e.v), 0);
-    const v = { fob: fobBRLtot, frete: freteBRL, seguro, impostos: II + IPI + PIS + COF + ICMSent, porto: despExtra + sisc + afrmm + honor + capat, nacional: terrestre };
-    return { valores: v, total: Object.values(v).reduce((a, b) => a + b, 0), fobUSD, freteUSD: N('freteUSD'), taxa: txD, taxaFrete: txF, preco: numF(q.preco), tributos: { II, IPI, PIS, COF, ICMS: ICMSent } };
+    const v = { fob: fobBRLtot, frete: freteBRL, seguro, impostos: II + IPI + PIS + COF + ICMSent, porto: despExtra + sisc + afrmm + honor + capat, nacional: terrestre, impVenda: 0 };
+    /* Imposto de venda: resultante de saída e DIFAL, lidos do motor.
+       Triangular: as parcelas do custo do grupo. Direta: o resultante; o DIFAL/ST o cliente paga à parte,
+       então entra dos dois lados (preço e custo) e não aparece como lucro nem como saída de caixa. */
+    let difalCliente = 0, R = null;
+    try { R = motorCotacao().calcular(q); } catch (e) { R = null; }
+    if (R && R.tri) {
+      const parc = R.tri.apuracao.bloco6.parcelas, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
+      Object.assign(v, { fob: de(/^FOB/), frete: de(/^Frete internacional/), seguro: de(/^Seguro/), impostos: de(/^Impostos de importa/), porto: de(/^Despesas de nacional/), nacional: de(/^Frete terrestre/), impVenda: de(/^Resultante|^ICMS l[ií]quido|^DIFAL/) });
+    } else if (R) { difalCliente = R.st || 0; v.impVenda = (R.resultante || 0) + difalCliente; }
+    return { valores: v, total: Object.values(v).reduce((a, b) => a + b, 0), fobUSD, freteUSD: N('freteUSD'), taxa: txD, taxaFrete: txF, preco: numF(q.preco), difalCliente, tributos: { II, IPI, PIS, COF, ICMS: ICMSent } };
   }
   /* Capacidade padrão, editável na operação-mãe. */
   const CAPACIDADE_CONTEINER = [[/20/, 33, 28000], [/H[QC]/i, 76, 26500], [/40/, 67, 26500]];
@@ -166,12 +209,16 @@
     const impactoAberto = ptax && taxaPrevista ? usdAberto * (ptax - taxaPrevista) : 0;
     const soma = o2 => Object.values(o2).reduce((a, b) => a + b, 0);
     const totPrev = soma(previsto), totReal = soma(realizado), totAPagar = soma(aPagar);
-    const receitaTotal = receita.prevista + receita.recebida || (cq ? cq.preco : 0) || num(cus.receitaPrevista);
+    // DIFAL que o cliente paga à parte fica fora das parcelas: volta para a receita e para o custo lançado, sem virar lucro.
+    const difalFora = cq ? cq.difalCliente || 0 : 0, receitaLancada = receita.prevista + receita.recebida;
+    const receitaTotal = (receitaLancada ? receitaLancada + difalFora : 0) || (cq ? cq.preco : 0) || num(cus.receitaPrevista);
     // Projetado por classe: o que já foi lançado (pago + a pagar); classe ainda sem lançamento
     // continua valendo o previsto, para a margem não parecer melhor do que é. Operação
     // encerrada vale só o lançado.
     const encerrada = !W.ativa(o);
-    const proj = k => { const lanc = realizado[k] + aPagar[k]; return lanc > 0.005 || encerrada ? lanc : previsto[k]; };
+    // Cronograma por classe já lançado: o imposto de venda está nele (ou virou crédito na linha de impostos), e não volta a valer o previsto.
+    const cronoPorClasse = lancOp(db, opId).some(l => l.custo && String(l.origem || '').startsWith('cotacao:'));
+    const proj = k => { const lanc = realizado[k] + aPagar[k], venda = k === 'impVenda'; return lanc > 0.005 || encerrada || (venda && cronoPorClasse) ? lanc + (venda ? difalFora : 0) : previsto[k]; };
     const linhas = CLASSES.map(([k, l]) => ({ k, l, simulado: simulado[k], previsto: previsto[k], realizado: realizado[k], aPagar: aPagar[k], projetado: proj(k), semLancamento: !(realizado[k] + aPagar[k]) && previsto[k] > 0, desvio: previsto[k] ? (proj(k) - previsto[k]) / previsto[k] : null,
       origem: k === 'impostos' && impostosDuimp != null ? 'duimp' : '' }));
     const custoProjetado = linhas.reduce((a, x) => a + x.projetado, 0) + impactoAberto;
@@ -399,7 +446,7 @@ Modelo para revisão jurídica antes da assinatura.`;
     return out.sort((a, b) => b.nivel - a.nivel);
   }
 
-  return { capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
+  return { classesDoTexto, classesAmbiguas, dividirLancamento, capacidadeDoTipo, medidasFilha, ocupacaoDaMae, numDuimp, retratoDuimp, opsDaDuimp, duimpDaOp, impostosFederais, MODALIDADES, modalidadeDe, CLASSES, CLASSE_ROTULO, classeDe, custoCotacao, cotacaoDaOp, custeioOp, cambioOp, aprovarPrevisto, exposicaoCambio,
     FREE_TIME_PADRAO, freeTimeDe, relogioConteiner, conteineres, contaCorrente, creditoClientes,
     REGRAS_TRIBUTARIAS, regrasTributarias, tributosNaData, avisosTributarios, simularTransicao,
     COMPLIANCE_TIPOS, complianceVencendo, contratoDaOp, modeloContrato, marcos, excecoes };

@@ -816,6 +816,27 @@ function triCalcular(e){
     return { ok: true, revogou, registro: s };
   }
 
+  /* ==== 3ª despesa do cronograma por classe ====
+     Lê do motor, e a soma fecha com os custos de chegada ao centavo (a sobra de arredondamento fica na maior classe). */
+  const ROTULO_CHEGADA = { frete: 'Frete internacional', seguro: 'Seguro', impostos: 'Impostos de importação', porto: 'Porto, armazenagem e despachante', nacional: 'Frete nacional', impVenda: 'Imposto de venda (resultante e DIFAL)' };
+  function classesDaChegada(q, R) {
+    const { o3 } = desemOuts(q, R); if (!(o3 > 0)) return [];
+    let v;
+    if (R.tri) {
+      const parc = R.tri.apuracao.bloco6.parcelas, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
+      v = { frete: de(/^Frete internacional/), seguro: de(/^Seguro/), impostos: de(/^Impostos de importa/), porto: de(/^Despesas de nacional/), nacional: de(/^Frete terrestre/), impVenda: de(/^Resultante|^ICMS l[ií]quido|^DIFAL/) };
+    } else {
+      const c = R.comp || {};
+      v = { frete: c.freteInt || 0, seguro: c.seguro || 0, impostos: R.impostos || 0, porto: (c.portuarias || 0) + (c.honorarios || 0), nacional: c.terrestre || 0, impVenda: R.resultante || 0 };
+    }
+    /* Resultante negativo é crédito dos impostos de importação: abate deles, e a despesa de cada classe fica positiva. */
+    if (v.impVenda < 0) { v.impostos += v.impVenda; v.impVenda = 0; }
+    const linhas = Object.keys(ROTULO_CHEGADA).map(k => [k, ROTULO_CHEGADA[k], +Math.max(v[k] || 0, 0).toFixed(2)]).filter(x => x[2] > 0);
+    if (!linhas.length) return [['outros', 'Custos de chegada', +o3.toFixed(2)]];
+    const maior = linhas.reduce((a, b) => (b[2] > a[2] ? b : a));
+    maior[2] = +(maior[2] + (+o3.toFixed(2) - linhas.reduce((a, x) => a + x[2], 0))).toFixed(2);
+    return linhas;
+  }
   /* ==== Operação + cronograma no Financeiro a partir da cotação aprovada (criarOpDaCotacao) ==== */
   const CRONO_OP = [{ dias: 5, rot: '1º' }, { dias: 35, rot: '2º' }, { dias: 95, rot: '3º' }];
   const somaDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -825,6 +846,9 @@ function triCalcular(e){
    * em outra operação não conta como "já lançado", mas é mostrado, porque pode ser a mesma operação renomeada.
    * Aprovar de novo não duplica o cronograma (marca origem 'cotacao:<id>'): só volta o que foi
    * excluído, com as datas do cronograma original. Lançamento que continua lá não é tocado.
+   * A 3ª despesa sai separada por classe, com a classe gravada em `custo`. Cronograma antigo, com a linha
+   * única de custos de chegada, conta como lançado: não duplica. Lançamento da cotação ainda sem operação
+   * é devolvido em `soltos`, para ser ligado a esta.
    */
   function operacaoDaCotacao(db, q, R, por, hoje) {
     const f = camposDe(q);
@@ -833,7 +857,8 @@ function triCalcular(e){
     const op = existe ? null : { _id: W.novoId(), id, nome: f.mercadoria || f.cliente, cliente: f.cliente, status: '', prox: 'Emitir contrato e cobrar 1ª parcela', resp: 'Davi', obs: 'Criada a partir da cotação aprovada', criadaEm: new Date().toISOString(), quoteId: q.id };
     const marca = 'cotacao:' + (q.id || id);
     const daCotacao = (db.fin || []).filter(l => l && l.origem === marca), mesmaOp = l => String(l.op || '').trim().toUpperCase() === id.trim();
-    const existentes = daCotacao.filter(mesmaOp), emOutraOp = daCotacao.filter(l => !mesmaOp(l));
+    const soltos = daCotacao.filter(l => !String(l.op || '').trim());
+    const existentes = daCotacao.filter(mesmaOp).concat(soltos), emOutraOp = daCotacao.filter(l => !mesmaOp(l) && String(l.op || '').trim());
     // Mesma parcela: mesmo tipo e o começo da descrição ("2º pagamento"), que é o que o sistema antigo também grava.
     const jaTem = (tipo, rot, palavra) => existentes.some(l => l.tipo === tipo && String(l.desc || '').startsWith(rot + ' ' + palavra));
     const origens = existentes.map(l => l.data).filter(W.ehISO).sort();
@@ -842,15 +867,19 @@ function triCalcular(e){
     const recebe = [N(f, 'desR1'), N(f, 'desR2'), N(f, 'desR3')];
     const paga = [o1, o2, o3];
     if (recebe.reduce((a, b) => a + b, 0) <= 0) { recebe[0] = R.preco || 0; recebe[1] = 0; recebe[2] = 0; }
-    const descPag = ['Sinal da fábrica (' + (N(f, 'fabSinal') || 30) + '% do FOB)', 'Saldo da fábrica · pré-embarque', 'Custos de chegada — impostos de importação, frete e despesas'];
+    const descPag = ['Sinal da fábrica (' + (N(f, 'fabSinal') || 30) + '% do FOB)', 'Saldo da fábrica · pré-embarque'];
     const out = [];
-    const lancar = (venc, tipo, desc, valor) => { if (!(valor > 0)) return; out.push({ _id: W.novoId(), data: hj, vencimento: venc, op: id, tipo, categoria: '', fixo: false, empresa: 'WindGate', desc, valor: +(+valor).toFixed(2), status: 'Previsto', comp: '', nf: '', por: por || '', origem: marca }); };
+    const lancar = (venc, tipo, desc, valor, custo) => { if (!(valor > 0)) return; const l = { _id: W.novoId(), data: hj, vencimento: venc, op: id, tipo, categoria: '', fixo: false, empresa: 'WindGate', desc, valor: +(+valor).toFixed(2), status: 'Previsto', comp: '', nf: '', por: por || '', origem: marca }; if (custo) l.custo = custo; out.push(l); };
+    /* 3ª despesa por classe. A linha antiga e única já cobre tudo; só volta o que foi excluído da divisão nova. */
+    const linhaUnica = existentes.some(l => l.tipo === 'Despesa' && String(l.desc || '').startsWith('3º pagamento') && !l.custo);
+    const classes3 = classesDaChegada(q, R);
     for (let k = 0; k < CRONO_OP.length; k++) {
       const venc = somaDias(hj, CRONO_OP[k].dias);
       if (!jaTem('Receita', CRONO_OP[k].rot, 'recebimento')) lancar(venc, 'Receita', CRONO_OP[k].rot + ' recebimento do cliente — parcela ' + CRONO_OP[k].rot.replace('º', ''), recebe[k]);
-      if (!jaTem('Despesa', CRONO_OP[k].rot, 'pagamento')) lancar(venc, 'Despesa', CRONO_OP[k].rot + ' pagamento — ' + descPag[k], paga[k]);
+      if (k < 2) { if (!jaTem('Despesa', CRONO_OP[k].rot, 'pagamento')) lancar(venc, 'Despesa', CRONO_OP[k].rot + ' pagamento — ' + descPag[k], paga[k], 'fob'); continue; }
+      if (!linhaUnica) classes3.forEach(([custo, rot, valor]) => { if (!existentes.some(l => l.tipo === 'Despesa' && l.custo === custo && String(l.desc || '').startsWith('3º pagamento'))) lancar(venc, 'Despesa', '3º pagamento — ' + rot, valor, custo); });
     }
-    return { id, op, lancamentos: out, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
+    return { id, op, lancamentos: out, soltos, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
   }
 
   /* ==== Cotação aprovada no funil do CRM ====
@@ -946,5 +975,5 @@ function triCalcular(e){
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     precoDesem, desemOuts, desemSugerir, desemErros, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
-    operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

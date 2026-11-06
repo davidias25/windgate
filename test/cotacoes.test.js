@@ -167,7 +167,7 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   const qOp = Object.assign({}, base, { fields: Object.assign({}, base.fields, C.desemSugerir(base, Rb), { opNum: 'op77' }) });
   const r1 = C.operacaoDaCotacao({ ops: [], fin: [] }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   const o = C.desemOuts(qOp, C.calcular(qOp));
-  ok(r1.id === 'OP77' && r1.op && r1.lancamentos.length === 6 && r1.lancamentos[0].tipo === 'Receita' && r1.lancamentos[0].vencimento === '2026-11-03' && igual(r1.lancamentos[1].valor, +o.o1.toFixed(2)), 'aprovada vira operação com as 3 parcelas e os 3 pagamentos (5, 35 e 95 dias)');
+  ok(r1.id === 'OP77' && r1.op && r1.lancamentos.filter(l => l.tipo === 'Receita').length === 3 && r1.lancamentos.filter(l => l.tipo === 'Despesa' && !l.desc.startsWith('3º')).length === 2 && r1.lancamentos.some(l => l.desc.startsWith('3º pagamento') && l.custo) && r1.lancamentos[0].tipo === 'Receita' && r1.lancamentos[0].vencimento === '2026-11-03' && igual(r1.lancamentos[1].valor, +o.o1.toFixed(2)), 'aprovada vira operação com as 3 parcelas e os 3 pagamentos (5, 35 e 95 dias)');
   const r2 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   ok(r2.jaLancado && !r2.op && r2.lancamentos.length === 0, 'aprovar de novo não duplica a operação nem o cronograma');
 
@@ -180,9 +180,10 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     ok(r3.lancamentos[0].vencimento === '2026-11-05' && r3.lancamentos[0].status === 'Previsto' && r3.lancamentos[0].origem === r1.lancamentos[0].origem, 'com a data do cronograma original (35 dias do lançamento), como previsto');
     const pago = fin().map((l, i) => i === 0 ? Object.assign(l, { status: 'Realizado' }) : l).filter(l => !l.desc.startsWith('3º'));
     const r4 = C.operacaoDaCotacao({ ops: [r1.op], fin: pago }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
-    ok(r4.lancamentos.length === 2 && r4.lancamentos.every(l => l.desc.startsWith('3º')) && r4.jaExistem === 4, 'o que já foi pago continua e não é relançado; voltam só os 2 excluídos');
+    const qtd3 = fin().filter(l => l.desc.startsWith('3º')).length;
+    ok(r4.lancamentos.length === qtd3 && r4.lancamentos.every(l => l.desc.startsWith('3º')) && r4.jaExistem === fin().length - qtd3, 'o que já foi pago continua e não é relançado; voltam só os excluídos');
     const r5 = C.operacaoDaCotacao({ ops: [r1.op], fin: [] }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
-    ok(!r5.relancar && !r5.jaLancado && r5.lancamentos.length === 6 && r5.lancamentos[0].vencimento === '2026-11-25', 'todos excluídos: lança o cronograma inteiro, a partir de hoje');
+    ok(!r5.relancar && !r5.jaLancado && r5.lancamentos.length === r1.lancamentos.length && r5.lancamentos[0].vencimento === '2026-11-25', 'todos excluídos: lança o cronograma inteiro, a partir de hoje');
     const r6 = C.operacaoDaCotacao({ ops: [], fin: semUm }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
     ok(r6.op && r6.relancar && r6.lancamentos.length === 1, 'operação excluída e recriada: volta a operação e só o que falta');
   }
@@ -191,11 +192,11 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   {
     const qNova = Object.assign({}, qOp, { fields: Object.assign({}, qOp.fields, { opNum: 'op77.2' }) });
     const r7 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qNova, C.calcular(qNova), 'Samir', '2026-11-20');
-    ok(r7.id === 'OP77.2' && r7.op && !r7.jaLancado && r7.outraOp && r7.lancamentos.length === 6 && r7.lancamentos.every(l => l.op === 'OP77.2'), 'OP77.2 não conta os lançamentos da OP77: oferece o cronograma inteiro');
-    ok(r7.emOutraOp.length === 6 && r7.emOutraOp[0].op === 'OP77', 'e mostra os que estão na OP77');
+    ok(r7.id === 'OP77.2' && r7.op && !r7.jaLancado && r7.outraOp && r7.lancamentos.length === r1.lancamentos.length && r7.lancamentos.every(l => l.op === 'OP77.2'), 'OP77.2 não conta os lançamentos da OP77: oferece o cronograma inteiro');
+    ok(r7.emOutraOp.length === r1.lancamentos.length && r7.emOutraOp[0].op === 'OP77', 'e mostra os que estão na OP77');
     const fin8 = r1.lancamentos.concat(r7.lancamentos);
     const r8 = C.operacaoDaCotacao({ ops: [r1.op, r7.op], fin: fin8 }, qNova, C.calcular(qNova), 'Samir', '2026-11-20');
-    ok(r8.jaLancado && !r8.outraOp && !r8.lancamentos.length && r8.existentes.length === 6, 'depois de lançada, a OP77.2 não duplica');
+    ok(r8.jaLancado && !r8.outraOp && !r8.lancamentos.length && r8.existentes.length === r7.lancamentos.length, 'depois de lançada, a OP77.2 não duplica');
     const r9 = C.operacaoDaCotacao({ ops: [r1.op, r7.op], fin: fin8 }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');
     ok(r9.jaLancado && r9.existentes.every(l => l.op === 'OP77'), 'e a OP77 continua vendo só os dela');
     const r10 = C.operacaoDaCotacao({ ops: [], fin: r1.lancamentos.map(l => Object.assign({}, l, { op: ' op77 ' })) }, qOp, C.calcular(qOp), 'Samir', '2026-11-20');

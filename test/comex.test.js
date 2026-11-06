@@ -15,7 +15,8 @@ const perto = (a, b, t) => Math.abs(a - b) < (t || 0.01);
   const q = { fields: { opNum: 'OP50', txFrete: '5', txDesp: '5', pctInv: '100', icmsEnt: '0', freteUSD: '200', seguro: '0', capatazia: '0', siscomex: '100', afrmm: '0', honorarios: '0', transporte: '0' }, items: [{ q: 10, u: 100, p: 1, ii: 10, ipi: 5, pis: 2.1, cofins: 9.65 }], exps: [], preco: 10000 };
   const cq = W.custoCotacao(q);
   // FOB 5.000 · frete 1.000 · CIF 6.000 · II 600 · IPI 330 · PIS 126 · COFINS 579 · Siscomex 100
-  ok(perto(cq.valores.fob, 5000) && perto(cq.valores.frete, 1000) && perto(cq.valores.impostos, 1635) && perto(cq.valores.porto, 100) && perto(cq.total, 7735), 'custo da cotação com as mesmas fórmulas da tela: FOB 5.000 + frete 1.000 + impostos 1.635 + Siscomex 100 = 7.735');
+  ok(perto(cq.valores.fob, 5000) && perto(cq.valores.frete, 1000) && perto(cq.valores.impostos, 1635) && perto(cq.valores.porto, 100) && perto(cq.total - cq.valores.impVenda, 7735), 'custo da cotação com as mesmas fórmulas da tela: FOB 5.000 + frete 1.000 + impostos 1.635 + Siscomex 100 = 7.735, fora o imposto de venda');
+  const iv = cq.valores.impVenda, dfc = cq.difalCliente;
   ok(perto(cq.fobUSD, 1000) && cq.taxa === 5, 'dólar da cotação: US$ 1.000 a R$ 5,00');
   const cqE = W.custoCotacao({ fields: Object.assign({}, q.fields, { icmsEnt: '12' }), items: q.items, exps: [] });
   // ICMS por dentro: (5000+1000+600+330+126+579+100)/0,88 × 12%
@@ -39,11 +40,50 @@ const perto = (a, b, t) => Math.abs(a - b) < (t || 0.01);
   ok(W.classeDe(db.fin[2]) === 'fob' && W.classeDe(db.fin[3]) === 'frete' && W.classeDe(db.fin[4]) === 'impostos' && W.classeDe(db.fin[5]) === 'porto' && W.classeDe({ desc: 'Demurrage MSC' }) === 'demurrage', 'classe de custo pela descrição: fábrica, frete, impostos, porto, demurrage');
   ok(W.classeDe({ desc: 'Frete internacional', custo: 'nacional' }) === 'nacional', 'classe corrigida à mão vence a da descrição');
   const c = W.custeioOp(db, 'OP50', { ptax: 5.4 });
-  ok(c.temCotacao && perto(c.simulado, 7735) && perto(c.previsto, 7735), 'sem previsto aprovado, o previsto parte do simulado da cotação');
+  ok(c.temCotacao && perto(c.simulado, 7735 + iv) && perto(c.previsto, 7735 + iv), 'sem previsto aprovado, o previsto parte do simulado da cotação');
   ok(perto(c.realizado, 6200) && perto(c.aPagar, 2000), 'realizado R$ 6.200 (fábrica + frete) e a pagar R$ 2.000 (impostos + porto)');
   ok(perto(c.usdFechado, 1000) && perto(c.usdAberto, 200) && perto(c.variacaoCambial, 200) && perto(c.impactoAberto, 80), 'câmbio: US$ 1.000 fechados a 5,20 (+R$ 200) e US$ 200 abertos pela PTAX 5,40 (+R$ 80)');
-  ok(perto(c.projetado, 8280) && perto(c.receita, 10000) && perto(c.margemProjetada, 0.172), 'custo projetado R$ 8.280 contra receita de R$ 10.000: margem 17,2%');
-  ok(perto(c.desvio, (8280 - 7735) / 7735, 1e-6), 'desvio do custo contra o previsto: +7,0%');
+  ok(perto(c.projetado, 8280 + iv) && perto(c.receita, 10000 + dfc) && perto(c.margemProjetada, (10000 + dfc - 8280 - iv) / (10000 + dfc)), 'custo projetado R$ 8.280 + imposto de venda, contra a receita mais o DIFAL pago pelo cliente');
+  ok(perto(c.desvio, (8280 - 7735) / (7735 + iv), 1e-6), 'desvio do custo contra o previsto');
+
+  console.log('\nPrevisto e Custeio por classe:');
+  {
+    const C = require('../public/hub/js/cotacao-regras.js');
+    const base = { id: 'q9', fields: { opNum: 'OP90', cliente: 'Cliente Teste', tipoOp: 'direta', ufDestino: 'CE', txFrete: '5.5', txDesp: '5.3', pctInv: '70', icmsEnt: '1.6', icmsDest: '4', pisS: '1.65', cofS: '7.6', ipiS: '0', mkp: '1', aliqST: '16', freteUSD: '3000', seguro: '800', capatazia: '1200', transporte: '2500', siscomex: '416.46', afrmm: '500', honorarios: '1630', margemPct: '25', margemBRL: '0', fabSinal: '30' },
+      items: [{ d: 'Item A', q: 100, u: 300, p: 20, ii: 14, ipi: 5, pis: 2.1, cofins: 9.65 }], exps: [{ l: 'Armazenagem', v: 900 }] };
+    const tri = JSON.parse(JSON.stringify(base)); tri.id = 'q10'; tri.fields.tipoOp = 'triangular'; tri.fields.opNum = 'OP91';
+    [['direta', base], ['triangular', tri]].forEach(([nome, q]) => {
+      const R = C.calcular(q), s = C.desemSugerir(q, R); Object.assign(q.fields, s); q.preco = R.preco; q.status = 'ok';
+      const cq2 = W.custoCotacao(q), custoMotor = R.tri ? R.tri.custoGrupo : R.custoReal + (R.st || 0);
+      ok(perto(cq2.total, custoMotor), nome + ': custo da cotação com imposto de venda é o mesmo do motor');
+      ok(perto((q.preco - cq2.total) / q.preco, (R.margem) / R.preco, 1e-9), nome + ': margem prevista no Custeio é a margem real da cotação');
+      const r = C.operacaoDaCotacao({ ops: [], fin: [] }, q, R, 'Samir', '2026-11-06');
+      const desp3 = r.lancamentos.filter(l => l.tipo === 'Despesa' && l.desc.startsWith('3º'));
+      ok(desp3.length >= 4 && desp3.every(l => W.CLASSE_ROTULO[l.custo]) && perto(desp3.reduce((a, l) => a + l.valor, 0), +C.desemOuts(q, R).o3.toFixed(2)), nome + ': 3ª despesa separada por classe, com o campo custo, e a soma é a dos custos de chegada');
+      const d = { ops: [Object.assign({ status: 'producao', quoteId: q.id }, r.op)], fin: r.lancamentos, quotes: { [q.id]: q } };
+      const cc = W.custeioOp(d, r.id);
+      ok(perto(cc.margemProjetada, R.margem / R.preco, 0.001), nome + ': com o cronograma lançado, a margem do Custeio continua a real (' + (cc.margemProjetada * 100).toFixed(1) + '%)');
+      ok(r.lancamentos.filter(l => l.tipo === 'Despesa' && l.desc.startsWith('1º')).every(l => l.custo === 'fob'), nome + ': fábrica gravada como FOB');
+    });
+    const velho = 'Custos de chegada — impostos, frete e despesas';
+    ok(W.classeDe({ desc: 'Impostos e frete' }) === 'impostos', 'imposto vem antes de frete na classificação pelo texto');
+    ok(W.classesAmbiguas({ desc: velho }).length === 3, 'descrição com três classes gera aviso');
+    ok(W.classesAmbiguas({ desc: 'Frete nacional até Fortaleza' }).length === 0 && W.classesAmbiguas({ desc: 'Imposto de venda' }).length === 0 && W.classesAmbiguas({ desc: 'Frete internacional' }).length === 0 && W.classesAmbiguas({ desc: 'Pagamento fábrica 100% FOB' }).length === 0, 'expressão de uma classe só não gera aviso');
+    ok(W.classesAmbiguas({ desc: velho, custo: 'frete' }).length === 0, 'depois de escolher a classe, o aviso some');
+    const fd = { fin: [{ _id: 'x', op: 'OP1', tipo: 'Despesa', desc: velho, valor: 1000, status: 'Previsto' }, { _id: 'y', op: 'OP1', tipo: 'Despesa', desc: velho, valor: 10, status: 'Realizado' }] };
+    ok(!W.dividirLancamento(fd, 'x', [{ custo: 'frete', valor: 400 }, { custo: 'impostos', valor: 500 }]).ok && !W.dividirLancamento(fd, 'y', [{ custo: 'frete', valor: 5 }, { custo: 'impostos', valor: 5 }]).ok, 'dividir recusa soma errada e lançamento realizado');
+    const dv = W.dividirLancamento(fd, 'x', [{ custo: 'frete', valor: 400 }, { custo: 'impostos', valor: 600 }]);
+    ok(dv.ok && fd.fin.length === 3 && W.classeDe(fd.fin[0]) === 'frete' && W.classeDe(fd.fin[2]) === 'impostos' && fd.fin[0].valor + fd.fin[2].valor === 1000, 'dividir mantém o total e grava a classe');
+    // Cronograma antigo, com a linha única: não duplica.
+    const rq = C.calcular(base), ant = C.operacaoDaCotacao({ ops: [], fin: [] }, base, rq, 'S', '2026-11-06');
+    const linhaVelha = ant.lancamentos.filter(l => !(l.tipo === 'Despesa' && l.desc.startsWith('3º'))).concat([Object.assign({}, ant.lancamentos[0], { _id: 'v', tipo: 'Despesa', desc: '3º pagamento — ' + velho, custo: undefined })]);
+    const rv = C.operacaoDaCotacao({ ops: [ant.op], fin: linhaVelha }, base, rq, 'S', '2026-11-20');
+    ok(rv.jaLancado && !rv.lancamentos.length, 'cronograma antigo com a linha única não é lançado de novo');
+    // Lançamento solto da cotação é devolvido para ser ligado.
+    const soltos = ant.lancamentos.map(l => Object.assign({}, l, { op: '' }));
+    const rs = C.operacaoDaCotacao({ ops: [], fin: soltos }, base, rq, 'S', '2026-11-20');
+    ok(rs.soltos.length === soltos.length && rs.jaLancado && !rs.outraOp && rs.op, 'lançamentos soltos da cotação são reconhecidos, sem duplicar nem contar como outra operação');
+  }
   W.aprovarPrevisto(db, 'OP50', { fob: 5000, frete: 1000, impostos: 1700, porto: 100, nacional: 500 }, { taxaPrevista: 5 }, 'Samir', '2026-10-01T10:00:00Z');
   const c2 = W.custeioOp(db, 'OP50', { ptax: 5.4 });
   ok(c2.previstoAprovado && perto(c2.previsto, 8300) && c2.aprovadoPor === 'Samir', 'previsto aprovado pelo Samir vira a régua (R$ 8.300)');

@@ -498,6 +498,10 @@
       return;
     }
     const agora = new Date().toISOString();
+    // Lançamento desta cotação que ficou sem operação passa a ser dela.
+    (r.soltos || []).forEach(l => { const atual = H.db.fin.find(x => x && x._id === l._id); if (atual) atual.op = r.id; });
+    // Operação que já existia passa a ter a cotação, senão o Custeio dela fica sem simulado.
+    const opExistente = !r.op && H.db.ops.find(o => o && o.id === r.id); if (opExistente && !opExistente.quoteId) opExistente.quoteId = ed.id;
     if (r.op) {
       Object.assign(r.op, { status: 'contrato', statusEm: agora, statusPor: eu() });
       H.db.ops.unshift(r.op);
