@@ -86,4 +86,11 @@ function novaMensagem(db, k, b) {
     lidos: { [k]: agora }, confirmacoes: {}, apagadoEm: null };
 }
 
-module.exports = { carregar, salvar, CANAIS_PADRAO, podeVerCanal, canaisVisiveis, mensagensVisiveis, novaMensagem, dmId, _reset: () => { cache = null; } };
+/** Operação renomeada: a conversa vai junto. Devolve quantas mensagens mudaram. */
+function renomearCanalOp(dados, de, para) {
+  let n = 0;
+  (dados.mensagens || []).forEach(m => { if (m && m.canal === 'op:' + de) { m.canal = 'op:' + para; if (m.opId === de) m.opId = para; n++; } });
+  return n;
+}
+
+module.exports = { renomearCanalOp, carregar, salvar, CANAIS_PADRAO, podeVerCanal, canaisVisiveis, mensagensVisiveis, novaMensagem, dmId, _reset: () => { cache = null; } };

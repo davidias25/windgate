@@ -99,7 +99,7 @@ module.exports = function registrar(app, ctx) {
     const b = req.body || {}, texto = String(b.texto || '').trim().slice(0, 2000);
     const acao = ['mensagem', 'producao-pronta', 'embarque-confirmado', 'duimp-registrada', 'canal', 'desembaracado'].includes(b.acao) ? b.acao : 'mensagem';
     if (!texto && acao === 'mensagem') return res.status(400).json({ success: false, message: 'Escreva a mensagem.' });
-    await pronto(); const o = (db().ops || []).find(x => x && x.id === a.op); if (!o) return res.status(404).json({ success: false });
+    await pronto(); const o = (db().ops || []).find(x => x && (x.id === a.op || (x.codigosAnteriores || []).includes(a.op))); if (!o) return res.status(404).json({ success: false });
     const ev = { id: Date.now().toString(36), de: a.tipo, acao, texto, data: String(b.data || '').slice(0, 10), em: new Date().toISOString() };
     const n = Object.assign({}, o, { portalEventos: (o.portalEventos || []).concat([ev]).slice(-200) });
     if (a.tipo === 'fornecedor' && acao === 'producao-pronta' && ev.data) n.prontidao = ev.data;

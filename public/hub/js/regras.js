@@ -173,6 +173,60 @@
     return out.sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   }
 
+  /* ---------- Código e exclusão da operação ---------- */
+  const codigoOp = v => String(v == null ? '' : v).trim().toUpperCase();
+  /** O que fica ligado à operação: é o que a tela mostra antes de renomear ou excluir. */
+  function ligadosDaOp(db, id) {
+    const de = l => l && String(l.op || '').trim() === String(id).trim();
+    const fin = (db.fin || []).filter(de);
+    return { fin: fin.length, realizados: fin.filter(realizado).length, valor: fin.reduce((a, l) => a + (+l.valor || 0), 0), docs: (db.docs || []).filter(de).length, notas: (db.hubNFe || []).filter(n => n && String(n.op || '').trim() === String(id).trim() && ['autorizada', 'autorizado'].includes(String(n.status || '').toLowerCase())).length };
+  }
+  /**
+   * Troca o código da operação em tudo o que aponta para ela: lançamentos, documentos, recorrências,
+   * histórico, câmbio, notas, tarefas, itens da DUIMP, checklist e cotação. Texto escrito à mão, como
+   * "Frete OP14" numa descrição, não muda. Devolve { ok, para, alterados } ou { ok: false, msg }.
+   */
+  function renomearOperacao(db, de, para, por, agora) {
+    const o = (db.ops || []).find(x => x && x.id === de), novo = codigoOp(para);
+    if (!o) return { ok: false, msg: 'Operação não encontrada.' };
+    if (!novo) return { ok: false, msg: 'Informe o novo código.' };
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._\/-]*$/u.test(novo)) return { ok: false, msg: 'Use só letras, números, espaço, ponto, traço e barra.' };
+    if (novo === de) return { ok: false, msg: 'O código é o mesmo.' };
+    if ((db.ops || []).some(x => x && x !== o && codigoOp(x.id) === novo)) return { ok: false, msg: `Já existe a operação ${novo}.` };
+    const antigo = String(de).trim(), t = agora || new Date().toISOString();
+    let alterados = 0;
+    const trocar = r => {
+      if (Array.isArray(r)) return r.forEach(trocar);
+      if (!r || typeof r !== 'object') return;
+      Object.keys(r).forEach(k => {
+        if ((k === 'op' || k === 'opId') && typeof r[k] === 'string' && r[k].trim() === antigo) { r[k] = novo; alterados++; }
+        else if (r[k] && typeof r[k] === 'object') trocar(r[k]);
+      });
+    };
+    COLECOES_SYNC.forEach(k => trocar(db[k]));
+    Object.values(db.quotes || {}).forEach(q => {
+      if (!q) return;
+      if (q.fields && codigoOp(q.fields.opNum) === codigoOp(de)) q.fields.opNum = novo;
+      if (Array.isArray(q.clientes)) q.clientes.forEach(c => { if (c && codigoOp(c.opNum) === codigoOp(de)) c.opNum = novo; });
+    });
+    (db.qindex || []).forEach(e => { if (e && typeof e.label === 'string' && e.label.startsWith(antigo + ' ·')) e.label = novo + e.label.slice(antigo.length); });
+    /* A chave antiga fica vazia, não apagada: o servidor une objetos por chave e a traria de volta. */
+    if (db.checklists && db.checklists[de]) { db.checklists[novo] = db.checklists[de]; db.checklists[de] = []; }
+    o.id = novo;
+    o.codigosAnteriores = (o.codigosAnteriores || []).concat([de]);
+    if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: novo, de: '', para: '', em: t, por: por || '', tipo: 'renomeacao', origem: 'hub2', motivo: `Código alterado de ${de} para ${novo}` });
+    return { ok: true, para: novo, alterados };
+  }
+  /** Como no sistema antigo: sai a operação; lançamentos e documentos ficam, com o código preservado. */
+  function excluirOperacao(db, id, por, agora) {
+    if (!(db.ops || []).some(x => x && x.id === id)) return { ok: false, msg: 'Operação não encontrada.' };
+    const g = ligadosDaOp(db, id);
+    db.ops = db.ops.filter(x => !(x && x.id === id));
+    if (Array.isArray(db.opStatusHist)) db.opStatusHist.push({ _id: novoId(), op: id, de: '', para: '', em: agora || new Date().toISOString(), por: por || '', tipo: 'exclusao', origem: 'hub2',
+      motivo: g.fin ? `${g.fin} lançamento(s) preservado(s) no Financeiro — ${fmtBRL(g.valor)}${g.realizados ? `, ${g.realizados} já realizado(s)` : ''}` : 'sem lançamentos vinculados' });
+    return { ok: true, ligados: g };
+  }
+
   /** Tira o documento da lista. Se ele era a versão nova de outro, a versão anterior volta a aparecer. */
   function excluirDocumento(db, id) {
     const d = (db.docs || []).find(x => x && x._id === id); if (!d) return null;
@@ -934,7 +988,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    linkPerdido, arquivosPerdidos, excluirDocumento, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    linkPerdido, arquivosPerdidos, excluirDocumento, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

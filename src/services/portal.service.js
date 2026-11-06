@@ -29,7 +29,7 @@ function ler(t, agora) {
 
 /** O que cada portal enxerga. Nada de custo interno, margem ou outras operações. */
 function dados(db, W, acesso, agora) {
-  const o = (db.ops || []).find(x => x && x.id === acesso.op);
+  const o = (db.ops || []).find(x => x && (x.id === acesso.op || (x.codigosAnteriores || []).includes(acesso.op)));
   if (!o) return null;
   const base = { op: o.id, nome: o.nome || '', etapa: W.stMeta(o.status).l, etapaK: o.status, fluxo: W.FLUXO.filter(k => !['concluida'].includes(k)).map(k => ({ k, l: W.stMeta(k).l })),
     origem: o.origemPorto || '', destino: o.destinoPorto || '', embarque: o.embarque || '', eta: o.eta || '', navio: o.navio || '',

@@ -64,7 +64,7 @@
     el.innerHTML = `
       <div class="head"><div><span class="lbl"><a href="#ops" data-voltar>Operações</a> · ${esc(o.id)}</span><h1>${esc(o.id)} · ${esc(o.cliente || '')}</h1>
         <p class="sub">${esc(o.nome || '')}${o.origemPorto || o.destinoPorto ? ' · ' + esc(o.origemPorto || '?') + ' → ' + esc(o.destinoPorto || '?') : ''}</p></div>
-        <div class="btns">${H.pillStatus(o.status)} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button></div></div>
+        <div class="btns">${H.pillStatus(o.status)} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button>${H.pode('fin.excluir') ? '<button class="btn" data-acao="renomear">Editar código</button><button class="btn" data-acao="excluir">Excluir</button>' : ''}</div></div>
       <div class="box box-b"><div class="steps" aria-label="Etapas">${W.FLUXO.map((k, i) => `<div class="st ${i < idx ? 'done' : i === idx ? 'cur' : ''}"><span class="dot">${i < idx ? '✓' : i + 1}</span>${esc(W.stMeta(k).l)}</div>`).join('')}</div>
         ${o.status === 'travada' ? '<p class="banner" style="margin-top:10px">Operação travada. Registre o motivo e a próxima ação no Resumo.</p>' : ''}</div>
       ${r ? `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
@@ -78,9 +78,39 @@
     el.querySelector('[data-voltar]').onclick = e => { e.preventDefault(); H.ir('ops'); };
     el.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { abaFicha = b.dataset.aba; H.render(); });
     el.querySelector('[data-acao="etapa"]').onclick = () => mudarEtapa(o);
+    const bRen = el.querySelector('[data-acao="renomear"]'); if (bRen) bRen.onclick = () => renomear(o.id);
+    const bExc = el.querySelector('[data-acao="excluir"]'); if (bExc) bExc.onclick = () => excluir(o.id);
     if (!abas.find(a => a[0] === abaFicha)) abaFicha = 'resumo';
     ({ resumo: abaResumo, etapas: abaEtapas, logistica: abaLogistica, docs: abaDocs, fin: abaFin, chat: abaChat, comex: H.fichaComex })[abaFicha](el.querySelector('#fichaAba'), o);
   };
+
+  function renomear(id) {
+    const g = W.ligadosDaOp(H.db, id);
+    const m = H.modal(`Editar código · ${esc(id)}`, `<div class="fields"><div class="f w4"><label class="lbl" for="rn">Novo código</label><input id="rn" value="${esc(id)}"></div></div>
+      <p class="note" style="margin-top:8px">Atualiza a operação, ${g.fin} lançamento(s), ${g.docs} documento(s), o checklist, o histórico, a conversa e a cotação ligada. Texto escrito à mão, como "Frete ${esc(id)}" numa descrição, não muda.</p>
+      <p class="note" style="margin-top:4px">Para mudar a mercadoria ou o cliente, use a aba Resumo.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="rnok">Salvar</button>');
+    m.querySelector('#rnok').onclick = async () => {
+      const r = W.renomearOperacao(H.db, id, m.querySelector('#rn').value, H.nomeUsuario(H.userKey));
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.fecharModal();
+      // A conversa da operação fica no arquivo do chat, fora do banco.
+      H.api('/api/ops/renomear-conversa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ de: id, para: r.para }) }).catch(() => {});
+      H.toast(`Operação agora é <b>${esc(r.para)}</b>.`); H.ir('ficha', r.para);
+    };
+  }
+  function excluir(id) {
+    const g = W.ligadosDaOp(H.db, id);
+    const m = H.modal(`Excluir a operação ${esc(id)}?`, `<p>A operação sai da lista.${g.fin ? ` Os <b>${g.fin} lançamento(s)</b> dela, ${W.fmtBRL(g.valor)} no total${g.realizados ? `, dos quais ${g.realizados} já realizado(s)` : ''}, <b>continuam no Financeiro</b> e seguem somando no caixa, como "operação não cadastrada".` : ''}${g.docs ? ` Os ${g.docs} documento(s) também ficam.` : ''}</p>
+      ${g.notas ? `<p class="banner" style="margin-top:8px">Esta operação tem <b>${g.notas} NF-e autorizada(s)</b>. Excluir a operação não cancela nota nenhuma.</p>` : ''}
+      <p class="note" style="margin-top:8px">Para religar os lançamentos, crie de novo uma operação com o mesmo código.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="oxok">Excluir só a operação</button>');
+    m.querySelector('#oxok').onclick = () => {
+      const r = W.excluirOperacao(H.db, id, H.nomeUsuario(H.userKey));
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.fecharModal(); H.toast(`Operação <b>${esc(id)}</b> excluída.`); H.ir('ops');
+    };
+  }
 
   function campo(o, k, rot, tipo, extra) {
     const v = o[k] == null ? '' : o[k];
@@ -116,7 +146,7 @@
   function abaEtapas(box, o) {
     const hist = H.db.opStatusHist.filter(h => h && h.op === o.id).sort((a, b) => String(b.em).localeCompare(String(a.em)));
     box.innerHTML = `<div class="box"><div class="box-h"><h2>Linha do tempo das etapas</h2><span class="note">${hist.length} mudança(s) registrada(s)</span></div><div class="box-b tl">
-      ${hist.length ? hist.map(h => `<div class="ev"><span class="when">${W.dataBR(h.em)}</span><span class="rail"><i></i></span><div class="what"><b>${esc(W.stMeta(h.de).l)} → ${esc(W.stMeta(h.para).l)}</b><small>${esc(h.por || '')}${h.motivo ? ' · ' + esc(h.motivo) : ''}${h.tipo && h.tipo !== 'mudanca' ? ' · ' + esc(h.tipo) : ''}</small></div></div>`).join('')
+      ${hist.length ? hist.map(h => `<div class="ev"><span class="when">${W.dataBR(h.em)}</span><span class="rail"><i></i></span><div class="what">${h.tipo === 'renomeacao' ? `<b>${esc(h.motivo || 'Código alterado')}</b><small>${esc(h.por || '')}</small>` : `<b>${esc(W.stMeta(h.de).l)} → ${esc(W.stMeta(h.para).l)}</b><small>${esc(h.por || '')}${h.motivo ? ' · ' + esc(h.motivo) : ''}${h.tipo && h.tipo !== 'mudanca' ? ' · ' + esc(h.tipo) : ''}</small>`}</div></div>`).join('')
       : '<p class="empty">Nenhuma mudança registrada ainda.</p>'}</div></div>`;
   }
 
@@ -255,7 +285,7 @@
       if (H.db.ops.some(o => o.id === id)) { H.toast('Já existe uma operação ' + esc(id)); return; }
       const agora = new Date().toISOString();
       /* mesmo checklist padrão do sistema atual, para a operação nascer completa */
-      H.db.checklists[id] = H.db.checklists[id] || CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
+      H.db.checklists[id] = (H.db.checklists[id] && H.db.checklists[id].length) ? H.db.checklists[id] : CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
       H.db.ops.push({ _id: W.novoId(), id, nome: m.querySelector('#nn').value.trim(), cliente: m.querySelector('#nc').value.trim(), status: 'cotacao', resp: m.querySelector('#nr').value.trim(), prox: '', obs: '', criadaEm: agora, statusEm: agora, statusPor: H.nomeUsuario(H.userKey) });
       H.salvar(); H.fecharModal(); H.ir('ficha', id);
     };

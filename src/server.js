@@ -652,6 +652,16 @@ app.post('/api/chat/mensagem', auth.exigirTokenSeAtiva, async (req, res) => {
     res.json({ success: true, mensagem: m });
   } catch (e) { res.status(400).json({ success: false, message: e.message }); }
 });
+app.post('/api/ops/renomear-conversa', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  const { de, para } = req.body || {};
+  if (!de || !para) return res.status(400).json({ success: false, message: 'Informe os códigos.' });
+  try {
+    const d = await chat.carregar(), n = chat.renomearCanalOp(d, String(de), String(para));
+    if (n) await chat.salvar(d);
+    res.json({ success: true, mensagens: n });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 app.post('/api/chat/lido', auth.exigirTokenSeAtiva, async (req, res) => {
   await bancoPronto; const k = quemChat(req); const d = await chat.carregar(); const { canal } = req.body || {}; const agora = new Date().toISOString(); let n = 0;
   d.mensagens.forEach(m => { if (m.canal === canal && !(m.lidos || {})[k] && chat.podeVerCanal(memoryDB, k, canal, d.canais)) { m.lidos = Object.assign({}, m.lidos, { [k]: agora }); m.atualizadoEm = agora; n++; } });
