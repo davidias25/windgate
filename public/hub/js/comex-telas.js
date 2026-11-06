@@ -358,11 +358,17 @@
   }
   /* Ao criar a operação: um contrato por operação ou filha. Sem o modelo oficial, não faz nada e não atrapalha. */
   H.gerarContratos = async function (ops) {
-    await Promise.resolve(H.salvar());
+    H.salvar();
+    const espera = ms => new Promise(ok => setTimeout(ok, ms));
     let feitos = 0;
     for (const op of ops) {
-      const j = await postJson('/api/contratos/gerar', { op }).catch(() => ({}));
-      if (j.success) feitos++;
+      // A gravação sai alguns instantes depois: enquanto o servidor não conhece a operação, tenta de novo.
+      for (let t = 0; t < 5; t++) {
+        await espera(1200);
+        const j = await postJson('/api/contratos/gerar', { op }).catch(() => ({}));
+        if (j.success) feitos++;
+        if (j.success || !/não encontrada/.test(j.message || '')) break;
+      }
     }
     if (feitos) H.toast(`${feitos} contrato(s) gerado(s) nos documentos da operação. Revise em Contratos.`);
   };
