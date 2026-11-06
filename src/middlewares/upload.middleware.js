@@ -31,7 +31,7 @@ const fileFilter = (req, file, cb) => {
     return cb(new Error('Tipo de arquivo não permitido por segurança.'), false);
   }
 
-  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.xlsx', '.xls', '.csv', '.doc', '.docx', '.zip', '.rar'];
+  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.xlsx', '.xls', '.csv', '.doc', '.docx', '.zip', '.rar', '.ofx', '.ofc', '.qfx'];
 
   if (allowedExts.includes(ext) || file.mimetype.startsWith('image/') || file.mimetype.includes('pdf') || file.mimetype.includes('sheet') || file.mimetype.includes('excel') || file.mimetype.includes('csv') || file.mimetype.includes('zip') || file.mimetype.includes('rar')) {
     cb(null, true);
