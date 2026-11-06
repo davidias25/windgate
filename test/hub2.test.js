@@ -187,7 +187,8 @@ function bancoReal() {
     ok(!W.torreDe(d, 'ivina').some(id => ['caixa', 'pagar', 'lancar', 'aprovacoes', 'equipe'].includes(id)), 'torre da Ívina não tem painel financeiro');
     d.hubPainel.ivina = { paineis: ['caixa', 'recados', 'coletar', 'equipe'] };
     ok(W.torreDe(d, 'ivina').join() === 'excecoes,recados,coletar', 'torre salva com painel proibido: o painel some (permissão vale mais que a escolha); a fila de exceções entra no topo');
-    ok(W.pode(d, 'matheus', 'fiscal.ver') && !W.pode(d, 'matheus', 'fiscal.editar') && !W.pode(d, 'matheus', 'nfe.ver') && !W.pode(d, 'matheus', 'nfe.emitir'), 'Matheus: vê Fiscal & Contabilidade, sem editar nem emitir NF-e');
+    ok(['fiscal.ver', 'fiscal.editar', 'fiscal.total', 'nfe.ver'].every(c => W.pode(d, 'matheus', c)), 'Matheus: Fiscal & Contabilidade completo, como a diretoria');
+    ok(!W.pode(d, 'matheus', 'nfe.emitir') && !W.pode(d, 'matheus', 'fin.autorizar') && !W.pode(d, 'matheus', 'fin.ver') && !W.pode(d, 'matheus', 'torre.outros'), 'Matheus continua sem emitir NF-e, autorizar pagamento, ver o Financeiro completo ou o PIN do contador');
     ok(!W.pode(d, 'ivina', 'fiscal.ver'), 'Ívina continua sem o Fiscal');
     ok(W.torreDe(d, 'matheus').includes('fretes') &&W.torreDe(d, 'matheus').includes('lancar') && !W.torreDe(d, 'matheus').includes('caixa'), 'torre do Matheus: frete e lançamentos, sem caixa');
     d.users.matheus.perfilHub = 'documentos';

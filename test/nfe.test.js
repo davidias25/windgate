@@ -343,9 +343,9 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
 
   console.log('\nLeitura e gravação por perfil:');
   ok((await lerDB('samir')).hubNFe.length >= 4, 'Samir lê as NF-e');
-  for (const k of ['ivina', 'oneide', 'matheus']) ok(!(await lerDB(k)).hubNFe, `${k} não lê hubNFe`);
-  r = await chamar('matheus', 'GET', `/api/nfe/${nA._id}/status`);
-  ok(r.status === 403, 'Matheus não consulta NF-e (403)');
+  for (const k of ['ivina', 'oneide']) ok(!(await lerDB(k)).hubNFe, `${k} não lê hubNFe`);
+  r = await chamar('ivina', 'GET', `/api/nfe/${nA._id}/status`);
+  ok(r.status === 403, 'Quem não tem nfe.ver não consulta NF-e (403)');
   r = await chamar('samir', 'GET', `/api/nfe/${nC._id}/status`);
   ok(r.status === 200 && r.j.nota.status === 'autorizada', 'Samir acompanha a situação');
   const lp = await lerDB('pedro');

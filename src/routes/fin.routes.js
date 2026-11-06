@@ -92,7 +92,7 @@ module.exports = function registrar(app, ctx) {
     if (!/^\d{4}-T[1-4]$/.test(String(tri || ''))) return res.status(400).json({ success: false, message: 'Trimestre inválido (ex.: 2026-T3).' });
     const emp = empresa === 'JeT' || empresa === 'WindGate' ? empresa : 'todas', d = b.d;
     const f = W.fechamento(d, tri, emp, W.hojeISO());
-    const diretoria = pode(d, b.k, 'fin.autorizar');
+    const diretoria = pode(d, b.k, 'fiscal.total');
     if (!f.contas.length) return res.status(409).json({ success: false, message: 'Cadastre as contas bancárias antes de fechar o trimestre.' });
     if (!f.pronto && !(liberar && diretoria)) return res.status(409).json({ success: false, pendencias: f.qtdPendencias, message: `${f.qtdPendencias} pendência(s) no fechamento: o pacote só sai com tudo zerado${diretoria ? ' (ou liberado por você, com o motivo)' : ' (ou liberado pela diretoria)'}.` });
     if (!f.pronto && !String(motivo || '').trim()) return res.status(400).json({ success: false, message: 'Para liberar com pendências, escreva o motivo.' });

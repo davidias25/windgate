@@ -136,10 +136,11 @@ const L = (d, id) => d.fin.find(l => l._id === id);
   const uploads = path.join(__dirname, '../uploads'), criados = [];
   const baixarPacote = link => { const p = path.join(uploads, path.basename(link)); criados.push(p); return fs.readFileSync(p); };
 
-  for (const k of ['ivina', 'oneide', 'pedro', 'matheus']) ok((await chamar(k, 'POST', '/api/fiscal/pacote', { tri: TRI })).status === 403, `${k} não gera o pacote (403)`);
+  for (const k of ['ivina', 'oneide', 'pedro']) ok((await chamar(k, 'POST', '/api/fiscal/pacote', { tri: TRI })).status === 403, `${k} não gera o pacote (403)`);
   let r = await chamar('davi', 'POST', '/api/fiscal/pacote', { tri: TRI });
   ok(r.status === 409 && r.j.pendencias === 1 && /só sai com tudo zerado/.test(r.j.message), 'com 1 pendência (tarifa sem comprovante): o pacote não sai para o Davi');
   ok((await chamar('davi', 'POST', '/api/fiscal/pacote', { tri: TRI, liberar: true, motivo: 'teste' })).status === 409, 'o Davi não libera com pendência: só a diretoria');
+  ok((await chamar('matheus', 'POST', '/api/fiscal/pacote', { tri: TRI, liberar: true })).status === 400, 'o Matheus também libera, escrevendo o motivo');
   ok((await chamar('samir', 'POST', '/api/fiscal/pacote', { tri: TRI, liberar: true })).status === 400, 'a diretoria libera só escrevendo o motivo');
   r = await chamar('samir', 'POST', '/api/fiscal/pacote', { tri: TRI, liberar: true, motivo: 'comprovante da tarifa vem com o extrato do banco' });
   ok(r.status === 200 && r.j.entrega.liberadoComPendencias.por === 'Samir' && r.j.entrega.liberadoComPendencias.pendencias.semComprovante === 1, 'liberado pela diretoria: fica registrado quem liberou e o que faltava');

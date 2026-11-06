@@ -540,17 +540,18 @@
      fin.excluir · fin.autorizar = autorizar pagamento · fin.resultado = margem por operação
      equipe.ver = desempenho da equipe · recado.outros = fixar recado na torre de outra pessoa
      torre.outros = montar a torre de outra pessoa · meta.editar = meta do mês
+     fiscal.total = fechamento completo: liberar o pacote com pendências e definir os motivos sem nota
      nfe.ver = ver as NF-e emitidas · nfe.emitir = montar, conferir, transmitir, cancelar e corrigir NF-e
      (só Operações e o contador emitem; a diretoria acompanha) */
   const PERFIS = {
     diretoria: { nome: 'Diretoria', foco: 'Visão do todo, caixa, aprovações e desempenho da equipe',
-      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver'],
+      caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.autorizar', 'fin.resultado', 'equipe.ver', 'recado.outros', 'torre.outros', 'meta.editar', 'docs.revisar', 'rh.ver', 'cultura.editar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'fiscal.total', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver'],
       torre: ['excecoes', 'resumo', 'aprovacoes', 'vendas', 'caixa', 'equipe', 'etapas', 'alertas', 'recados', 'operacoes'] },
     operacoes: { nome: 'Diretor de Operações · Financeiro', foco: 'Operações, revisão de documentos, custos, cotações e pagamentos',
       caps: ['fin.ver', 'fin.lancar', 'fin.excluir', 'fin.resultado', 'equipe.ver', 'recado.outros', 'docs.revisar', 'crm.ver', 'crm.valores', 'pedidos.ver', 'fiscal.ver', 'fiscal.editar', 'chat.aviso', 'dash.fin', 'sourcing.ver', 'reuniao.editar', 'nfe.ver', 'nfe.emitir'],
       torre: ['excecoes', 'resumo', 'revisar', 'vendas', 'pagar', 'caixa', 'etapas', 'alertas', 'equipe', 'tarefas', 'recados', 'operacoes'] },
     frete: { nome: 'Frete, Tracking & Lançamentos', foco: 'Fretes, embarques, tracking e lançamentos do financeiro',
-      caps: ['fin.lancar', 'sourcing.ver', 'fiscal.ver'],
+      caps: ['fin.lancar', 'sourcing.ver', 'fiscal.ver', 'fiscal.editar', 'fiscal.total', 'nfe.ver'],
       torre: ['excecoes', 'resumo', 'fretes', 'transito', 'lancar', 'tarefas', 'recados', 'alertas', 'etapas'] },
     rh: { nome: 'Pessoas & Cultura (RH)', foco: 'Desenvolvimento da equipe, cultura, comunicação interna e ponto',
       caps: ['equipe.ver', 'rh.ver', 'chat.aviso', 'recado.outros', 'cultura.editar', 'reuniao.editar'], torre: ['equipe', 'recados', 'tarefas', 'alertas'], restrito: true },
