@@ -10,7 +10,10 @@ function getSupabaseClient() {
   if (process.env.SUPABASE_DISABLED === '1') return null;
 
   const supabaseUrl = process.env.SUPABASE_URL || 'https://vzewuczgqinddcgqfzku.supabase.co';
-  const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6ZXd1Y3pncWluZGRjZ3Fmemt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTMzNjgsImV4cCI6MjEwMDgyOTM2OH0.diDULhMDNZ4shVSgM_RctdTiJqS1Yxw_c60ibFO2YJY';
+  /* Chave de serviço primeiro: ela não depende das políticas do storage.objects. Com ela no Render,
+     a política ampla de leitura (SELECT para todos) pode sair sem quebrar o banco central, o chat e o ponto,
+     que são lidos com download(). A chave fica só na variável de ambiente, nunca no código. */
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6ZXd1Y3pncWluZGRjZ3Fmemt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTMzNjgsImV4cCI6MjEwMDgyOTM2OH0.diDULhMDNZ4shVSgM_RctdTiJqS1Yxw_c60ibFO2YJY';
 
   if (!supabaseUrl || !supabaseKey) {
     return null;
@@ -166,14 +169,33 @@ async function listarObjetos(maxPastas = 50) {
   return caminhos;
 }
 
+/**
+ * Qual chave o servidor usa, sem mostrar a chave: 'servico', 'anon', 'outra' ou 'desligado'.
+ * Lê só o papel (role) de dentro do token, ou o prefixo das chaves novas (sb_secret_ / sb_publishable_).
+ */
+function tipoDaChave() {
+  if (process.env.SUPABASE_DISABLED === '1') return { tipo: 'desligado', origem: null };
+  const k = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || '';
+  const origem = process.env.SUPABASE_SERVICE_KEY ? 'SUPABASE_SERVICE_KEY' : (process.env.SUPABASE_KEY ? 'SUPABASE_KEY' : 'padrão no código');
+  if (!k) return { tipo: 'anon', origem };
+  if (/^sb_secret_/.test(k)) return { tipo: 'servico', origem };
+  if (/^sb_publishable_/.test(k)) return { tipo: 'anon', origem };
+  try {
+    const role = JSON.parse(Buffer.from(String(k).split('.')[1] || '', 'base64').toString('utf8')).role;
+    return { tipo: role === 'service_role' ? 'servico' : role === 'anon' ? 'anon' : 'outra', origem };
+  } catch (e) { return { tipo: 'outra', origem }; }
+}
+
 /** O arquivo existe no Storage? true, false, ou null quando não deu para saber (rede, permissão). */
 async function existeNoStorage(caminho, bucket) {
   if (process.env.SUPABASE_DISABLED === '1') return null;
   const base = (process.env.SUPABASE_URL || 'https://vzewuczgqinddcgqfzku.supabase.co').replace(/\/$/, '');
   const b = bucket || process.env.SUPABASE_BUCKET || 'windgate-docs';
-  const url = `${base}/storage/v1/object/public/${encodeURIComponent(b)}/${String(caminho).split('/').map(encodeURIComponent).join('/')}`;
+  const servico = process.env.SUPABASE_SERVICE_KEY;
+  /* Com a chave de serviço, pergunta pelo endereço autenticado: continua valendo se o bucket virar privado. */
+  const url = `${base}/storage/v1/object/${servico ? 'authenticated' : 'public'}/${encodeURIComponent(b)}/${String(caminho).split('/').map(encodeURIComponent).join('/')}`;
   try {
-    const r = await fetch(url, { method: 'HEAD' });
+    const r = await fetch(url, { method: 'HEAD', headers: servico ? { Authorization: 'Bearer ' + servico, apikey: servico } : {} });
     if (r.ok) return true;
     if (r.status === 400 || r.status === 404) return false;
     return null;
@@ -209,4 +231,4 @@ async function enviarArquivo(caminho, buffer, contentType = 'application/octet-s
   return true;
 }
 
-module.exports = { listarObjetos, existeNoStorage, discoPermitido, nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };
+module.exports = { tipoDaChave, listarObjetos, existeNoStorage, discoPermitido, nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };

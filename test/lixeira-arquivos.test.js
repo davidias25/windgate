@@ -28,6 +28,8 @@ console.log('\nRegra da lixeira:');
   ok(!ids.includes('d'), 'ainda usado num checklist: fica');
   ok(!ids.includes('e'), 'já apagado: não repete');
   ok(W.lixeiraParaApagar({}, '2026-11-10').length === 0, 'banco sem lixeira não quebra');
+  const sis = { hubLixeiraArquivos: [{ _id: 's', link: S(B, 'sistema/db.enc'), pedidoEm: '2026-01-01T00:00:00Z' }, { _id: 'p', link: S(B, 'documentos/../sistema/db.enc'), pedidoEm: '2026-01-01T00:00:00Z' }] };
+  ok(W.lixeiraParaApagar(sis, '2026-11-10').length === 0, 'o banco central (sistema/) nunca sai pela lixeira');
 }
 
 (async () => {
@@ -60,6 +62,8 @@ console.log('\nRegra da lixeira:');
   const r = await excluir(solto); await excluir(usado); await excluir(solto);
   ok(r.success && /lixeira/i.test(r.message) && r.supaDeleted === false, 'excluir responde que foi para a lixeira');
   ok(apagados.length === 0, 'nada sai do Storage na hora da exclusão');
+  const rs = await fetch(api + '/api/upload', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: S(base, 'sistema/db.enc') }) });
+  ok(rs.status === 400, 'pedir para excluir o banco central é recusado');
   const lx = banco().hubLixeiraArquivos || [];
   ok(lx.length === 2 && lx.every(x => x.pedidoEm), 'pedido guardado na lixeira, sem repetir o mesmo arquivo');
 

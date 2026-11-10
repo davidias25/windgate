@@ -7,7 +7,7 @@ const uploadMiddleware = require('./middlewares/upload.middleware');
 const cotacoesRoutes = require('./routes/cotacoes.routes');
 const { criarTarefaOperacao, listarOperacoes } = require('./integrations/clickup.service');
 const { uploadParaGoogleDrive } = require('./integrations/drive.service');
-const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo, discoPermitido, listarObjetos, existeNoStorage } = require('./integrations/supabase.service');
+const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo, discoPermitido, listarObjetos, existeNoStorage, tipoDaChave } = require('./integrations/supabase.service');
 
 const app = express();
 
@@ -623,6 +623,9 @@ app.delete('/api/upload', auth.exigirTokenSeAtiva, async (req, res) => {
        se nenhum registro usar (limparLixeira). Assim uma exclusão por engano tem volta. */
     await bancoPronto;
     const W = require('../public/hub/js/regras.js');
+    // Disco local (testes e computador de quem desenvolve): o arquivo fica onde está.
+    if (discoPermitido() && W.linkPerdido(String(targetUrl))) return res.json({ success: true, message: 'Arquivo local mantido.', supaDeleted: false, localDeleted: false });
+    if (!W.arquivoDeTela(String(targetUrl))) return res.status(400).json({ success: false, message: 'Só arquivo enviado pelas telas pode ser excluído.' });
     const _id = 'lx-' + W.idDeterministico({ link: String(targetUrl) });
     const ja = ((memoryDB || {}).hubLixeiraArquivos || []).find(x => x && x._id === _id);
     const quem = (req.usuario && req.usuario.k) || String(req.get('x-hub-usuario') || '');
@@ -927,6 +930,8 @@ app.get('/api/health', async (req, res) => {
     persistencia: dbStore.estado(),
     historico: dbStore.estadoHistorico(),
     integracoes: { ia: ia.ativa() },
+    // Qual chave do Storage está em uso (só o tipo, nunca a chave) e a última conferência dos links.
+    storage: Object.assign(tipoDaChave(), { conferencia: (() => { const c = ((memoryDB || {}).hubPainel || {})._arquivos; return c ? { em: c.em, links: c.links, quebrados: (c.quebrados || []).length } : null; })() }),
     // Contagem de TODAS as coleções, não só de três: é por ela que se percebe
     // sumiço sem precisar baixar o banco inteiro.
     registros: memoryDB ? historico.contarRegistros(memoryDB) : null

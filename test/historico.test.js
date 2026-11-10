@@ -26,6 +26,9 @@ require.cache[supaPath] = {
   exports: {
     uploadParaSupabase: async () => null,
     deletarDoSupabase: async () => false,
+    tipoDaChave: () => ({ tipo: 'anon', origem: 'teste' }),
+    discoPermitido: () => false, storageAtivo: () => true,
+    listarObjetos: async () => null, existeNoStorage: async () => null,
     listarArquivos: async (pasta) => ({ erro: null, arquivos: [...nuvem.keys()]
       .filter(k => k.startsWith(pasta + '/')).map(k => ({ path: k, nomeArquivo: k.split('/').pop(), tamanho: nuvem.get(k).length })) }),
     baixarArquivo: async (c) => { if (nuvemFora) throw new Error('rede fora'); return nuvem.get(c) || null; },

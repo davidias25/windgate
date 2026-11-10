@@ -222,11 +222,13 @@
    * nem versão antiga, nem registro removido. Devolve o que pode ser apagado agora.
    */
   const DIAS_LIXEIRA = 90;
+  const arquivoDeTela = l => { const c = caminhoNoStorage(l); return !!c && /^documentos\/[^/]+$/.test(c.path); };
   function lixeiraParaApagar(db, hoje, dias) {
     const h = hoje || hojeISO(), lim = dias == null ? DIAS_LIXEIRA : dias;
     const chave = l => { const c = caminhoNoStorage(l); return c ? c.bucket + '/' + c.path : String(l || ''); };
     const emUso = new Set(linksDeArquivo(db || {}, { todos: true }).map(l => chave(l.link)));
-    return ((db && db.hubLixeiraArquivos) || []).filter(x => x && x.link && !x.apagadoEm && ehISO(String(x.pedidoEm || '').slice(0, 10))
+    /* Só arquivo enviado pelas telas (documentos/): o banco central, o chat e o ponto moram em sistema/ no mesmo bucket. */
+    return ((db && db.hubLixeiraArquivos) || []).filter(x => x && x.link && !x.apagadoEm && arquivoDeTela(x.link) && ehISO(String(x.pedidoEm || '').slice(0, 10))
       && diasEntre(String(x.pedidoEm).slice(0, 10), h) >= lim && !emUso.has(chave(x.link)));
   }
   /**
@@ -1215,7 +1217,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, arquivoDeTela, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
