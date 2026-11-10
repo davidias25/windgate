@@ -223,7 +223,10 @@
     }
     // Dólar ainda sem contrato: vale a PTAX de hoje (quando há) ou a taxa prevista.
     const usdTotal = fobUSD + freteUSD, usdAberto = Math.max(0, usdTotal - cb.usdFechado);
-    const impactoAberto = ptax && taxaPrevista ? usdAberto * (ptax - taxaPrevista) : 0;
+    /* A fábrica pelas remessas já tem a PTAX do dia: o dólar aberto conta só o resto (frete), para não somar duas vezes. */
+    const remsAbertas = typeof W.remessasDaOp === 'function' ? W.remessasDaOp(db, opId, ptax) : (typeof require === 'function' ? require('./cambio-regras.js').remessasDaOp(db, opId, ptax) : []);
+    const usdRemessas = remsAbertas.length && remsAbertas.every(m => m.custo != null) ? remsAbertas.filter(m => !m.fechada).reduce((a, m) => a + m.usd, 0) : 0;
+    const impactoAberto = ptax && taxaPrevista ? Math.max(0, usdAberto - usdRemessas) * (ptax - taxaPrevista) : 0;
     const soma = o2 => Object.values(o2).reduce((a, b) => a + b, 0);
     const totPrev = soma(previsto), totReal = soma(realizado), totAPagar = soma(aPagar);
     // DIFAL que o cliente paga à parte fica fora das parcelas: volta para a receita e para o custo lançado, sem virar lucro.
@@ -235,7 +238,12 @@
     const encerrada = !W.ativa(o);
     // Cronograma por classe já lançado: o imposto de venda está nele (ou virou crédito na linha de impostos), e não volta a valer o previsto.
     const cronoPorClasse = lancOp(db, opId).some(l => l.custo && String(l.origem || '').startsWith('cotacao:'));
-    const proj = k => { const lanc = realizado[k] + aPagar[k], venda = k === 'impVenda'; return lanc > 0.005 || encerrada || (venda && cronoPorClasse) ? lanc + (venda ? difalFora : 0) : previsto[k]; };
+    const proj0 = k => { const lanc = realizado[k] + aPagar[k], venda = k === 'impVenda'; return lanc > 0.005 || encerrada || (venda && cronoPorClasse) ? lanc + (venda ? difalFora : 0) : previsto[k]; };
+    /* Com remessas cadastradas na cláusula, a fábrica vale o câmbio real ou US$ × PTAX do dia × (1 + spread). */
+    const cambio = typeof W.remessasDaOp === 'function' ? W : (typeof require === 'function' ? require('./cambio-regras.js') : null);
+    const rems = cambio ? cambio.remessasDaOp(db, opId, ptax) : [];
+    const fobRemessas = rems.length && rems.every(m => m.custo != null) ? r2(rems.reduce((a, m) => a + m.custo, 0)) : null;
+    const proj = k => (k === 'fob' && fobRemessas != null && !encerrada ? fobRemessas : proj0(k));
     const linhas = CLASSES.map(([k, l]) => ({ k, l, simulado: simulado[k], previsto: previsto[k], realizado: realizado[k], aPagar: aPagar[k], projetado: proj(k), semLancamento: !(realizado[k] + aPagar[k]) && previsto[k] > 0, desvio: previsto[k] ? (proj(k) - previsto[k]) / previsto[k] : null,
       origem: k === 'impostos' && impostosDuimp != null ? 'duimp' : '' }));
     const custoProjetado = linhas.reduce((a, x) => a + x.projetado, 0) + impactoAberto;
@@ -246,7 +254,7 @@
       receita: receitaTotal, receitaRecebida: receita.recebida, margemSimulada: cq && cq.preco ? (cq.preco - soma(simulado)) / cq.preco : null,
       margemPrevista: totPrev > 0 ? margem(totPrev) : null, margemProjetada: margem(custoProjetado), desvio: totPrev ? (custoProjetado - totPrev) / totPrev : null,
       fobUSD, freteUSD, usdTotal, usdFechado: cb.usdFechado, usdAberto, taxaPrevista, taxaMedia: cb.taxaMedia, variacaoCambial: cb.variacao, impactoAberto, ptax,
-      contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null,
+      remessas: remsAbertas, contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null,
       duimp: du ? { numero: du.numero, versao: du.versao, itens: du.itens.length, impostosFederais: impostosDuimp } : null
     };
   }

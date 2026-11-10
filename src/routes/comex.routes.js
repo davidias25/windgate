@@ -145,6 +145,8 @@ module.exports = function registrar(app, ctx) {
 
   /* Contrato padrão: gerar, revisar e liberar */
   const podeFinAutorizar = req => W.pode(db() || {}, quemChat(req), 'fin.autorizar');
+  /* Logo branca (a mesma da proposta), para os PDFs desenhados no navegador. */
+  app.get('/hub/logo-branca.png', (req, res) => { res.set('Cache-Control', 'public, max-age=86400'); res.type('png').send(contratoDoc.logoPng()); });
   app.get('/api/contratos/modelos', auth.exigirTokenSeAtiva, (req, res) => res.json({ success: true, instalados: contratoDoc.modelosInstalados(), ia: ia.ativa() }));
   app.post('/api/contratos/gerar', auth.exigirTokenSeAtiva, async (req, res) => {
     await pronto(); const b = req.body || {}, d = W.dadosDoContrato(db(), String(b.op || ''), b.editados);

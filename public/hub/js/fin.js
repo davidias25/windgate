@@ -235,7 +235,8 @@
       <div class="f"><label class="lbl" for="ee">Empresa</label><select id="ee"><option value="WindGate" ${sel(d.empresa, 'WindGate')}>WindGate / SF</option><option value="JeT" ${sel(d.empresa, 'JeT')}>JeT</option></select></div>
       <div class="f w2"><label class="lbl" for="eo">Operação</label><select id="eo"><option value="WindGate">Sem operação (despesa da empresa)</option>${ops.map(o => `<option ${sel(d.op, o)}>${esc(o)}</option>`).join('')}</select></div>
       <div class="f w2"><label class="lbl" for="ec">Categoria</label><select id="ec">${CATEGORIAS.map(c => `<option value="${esc(c)}" ${sel(d.categoria || '', c)}>${esc(c || 'Sem categoria')}</option>`).join('')}</select></div>
-      <div class="f w4"><label class="lbl" for="ex">Descrição</label><input id="ex" value="${esc(d.desc || '')}"></div>
+      <div class="f w4"><label class="lbl" for="ex">Descrição interna</label><input id="ex" value="${esc(d.desc || '')}"></div>
+      ${(d.tipo || 'Despesa') === 'Receita' || novo ? `<div class="f w4"><label class="lbl" for="exc">Descrição para o cliente (desembolso e portal)</label><input id="exc" value="${esc(d.descCliente || '')}" placeholder="Vazio: nº da parcela, pela ordem"></div>` : ''}
       <div class="f w2"><label class="lbl" for="es">Situação</label><select id="es"><option ${sel(d.status, 'Previsto')}>Previsto</option><option ${sel(d.status, 'Realizado')}>Realizado</option></select></div>
       <div class="f w2"><label class="lbl" for="ecp">Link do comprovante</label><input id="ecp" type="url" value="${esc(d.comp || '')}"></div>
       ${novo ? `<div class="f w4"><label class="lbl"><input type="checkbox" id="efx" style="width:auto"> Conta fixa mensal (gera 12 meses)</label></div>` : ''}
@@ -259,7 +260,7 @@
       if (l && l.recId && l.mesRef) venc = W.vencDoMes(l.mesRef, venc.slice(8, 10));
       const status = m.querySelector('#es').value;
       const campos = { tipo: m.querySelector('#et').value, valor, vencimento: venc, data: (l && l.data) || venc, empresa: m.querySelector('#ee').value,
-        op: m.querySelector('#eo').value || 'WindGate', categoria: m.querySelector('#ec').value, desc: m.querySelector('#ex').value.trim(), status,
+        op: m.querySelector('#eo').value || 'WindGate', categoria: m.querySelector('#ec').value, desc: m.querySelector('#ex').value.trim(), descCliente: m.querySelector('#exc') ? m.querySelector('#exc').value.trim() : (l && l.descCliente) || '', status,
         comp: m.querySelector('#ecp').value.trim(), liquidadoEm: status === 'Realizado' ? ((l && l.liquidadoEm) || venc) : null };
       const eu = H.nomeUsuario(H.userKey);
       if (novo && m.querySelector('#efx') && m.querySelector('#efx').checked) {

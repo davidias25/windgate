@@ -211,5 +211,39 @@
     return { ok: true };
   }
 
-  return { valorExtenso, PENDENTE, ESTRUTURAS, NIVEIS, CAMPOS_EDITAVEIS, cnpjValido, cpfValido, ieValida, estruturaDe, dadosDoContrato, preencherTexto, preencherModelo, digitalDaCotacao, contratoPadraoDaOp, contratoDesatualizado, contratosDesatualizados, revisarEmCodigo, temBloqueante, liberarContrato };
+  /* ---------- Desembolso do cliente ---------- */
+  const LIBERA = ['Assinatura · libera a produção na fábrica', 'Produto pronto · libera o embarque', 'Chegada ao porto · liberação e entrega'];
+  /** Quem recebe: o contrato padrão da operação, a estrutura escolhida nela, ou a da cotação. */
+  function estruturaDaOp(db, o) {
+    const c = contratoPadraoDaOp(db, o.id); if (c && c.estrutura) return c.estrutura;
+    if (o.estruturaFiscal) return o.estruturaFiscal;
+    if (o.empresa === 'JeT') return 'jt';
+    return estruturaDe(o, W.cotacaoDaOp(db, o));
+  }
+  /** O que o cliente vê. A descrição interna do lançamento nunca entra: vale a do cliente ou o rótulo da parcela. */
+  function dadosDesembolso(db, opId, hoje) {
+    const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
+    const h = hoje || W.hojeISO(), ps = W.parcelasDoCliente(db, opId), difal = (db.fin || []).filter(l => l && l.op === opId && W.ehReceita(l) && /reembolso do difal/i.test(l.desc || ''));
+    const todas = ps.concat(difal).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
+    const prox = todas.find(l => !W.realizado(l)) || null;
+    const rot = l => { if (l.descCliente) return l.descCliente; if (difal.includes(l)) return 'Reembolso do DIFAL'; const n = W.numeroNaOp(db, l); return n ? n + 'ª parcela' : 'Parcela'; };
+    const parcelas = todas.map(l => ({ id: l._id, n: W.numeroNaOp(db, l), rotulo: rot(l), vencimento: W.vencDe(l), valor: +l.valor || 0, situacao: W.realizado(l) ? 'pago' : l === prox ? 'proximo' : 'aPagar', composicao: W.composicaoParcela(l) }));
+    const total = parcelas.reduce((a, p) => a + p.valor, 0), pago = parcelas.filter(p => p.situacao === 'pago').reduce((a, p) => a + p.valor, 0);
+    const reajuste = parcelas.reduce((a, p) => a + (p.composicao.total - p.composicao.contrato), 0);
+    const comReaj = parcelas.filter(p => p.composicao.reajustes.length), escolhida = comReaj.find(p => p.situacao === 'proximo') || comReaj[comReaj.length - 1];
+    const cl = W.clausulaDaOp(db, o), est = estruturaDaOp(db, o), cfg = (db.hubPainel || {})._contrato || {}, ct = cfg[est] || {};
+    const n = prox ? W.numeroNaOp(db, prox) : null;
+    return {
+      op: o.id, cliente: o.cliente || '', obra: o.nome || '', atualizado: h, total, pago, aPagar: total - pago, reajuste, contrato: total - reajuste, parcelas,
+      proxima: prox ? { vencimento: W.vencDe(prox), valor: +prox.valor || 0, rotulo: rot(prox), libera: prox.liberaCliente || (n ? LIBERA[n - 1] : '') || '' } : null,
+      composicao: escolhida ? Object.assign({ rotulo: escolhida.rotulo }, escolhida.composicao) : null,
+      clausula: cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, texto: 'Reajuste cambial conforme o contrato, pela PTAX de venda do Banco Central, sem o spread bancário. PTAX oficial e contrato de câmbio disponíveis para conferência.' } : null,
+      estrutura: est,
+      pagamento: { asaas: !!(((db.hubPainel || {})._asaas) || {}).ativo, favorecido: ct.razao || '', cnpj: ct.cnpj || '', banco: ct.banco || '', agencia: ct.agencia || '', conta: ct.conta || '', pix: ct.pix || '' },
+      contato: { nome: (cfg.contato || {}).nome || ct.socioNome || '', fone: (cfg.contato || {}).fone || '', email: (cfg.contato || {}).email || '' },
+      pendencias: [!ct.razao && 'favorecido', !ct.cnpj && 'CNPJ', !(((db.hubPainel || {})._asaas) || {}).ativo && !ct.pix && !ct.conta && 'conta ou PIX'].filter(Boolean)
+    };
+  }
+
+  return { estruturaDaOp, dadosDesembolso, valorExtenso, PENDENTE, ESTRUTURAS, NIVEIS, CAMPOS_EDITAVEIS, cnpjValido, cpfValido, ieValida, estruturaDe, dadosDoContrato, preencherTexto, preencherModelo, digitalDaCotacao, contratoPadraoDaOp, contratoDesatualizado, contratosDesatualizados, revisarEmCodigo, temBloqueante, liberarContrato };
 });

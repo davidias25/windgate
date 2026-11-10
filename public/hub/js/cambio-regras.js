@@ -31,11 +31,122 @@
   }
   /** Ajuste de uma parcela. Devolve { dentro, variacao, fracoes, ajuste }. Não grava nada. */
   function ajusteDaParcela(referencia, valorPor010, ptax) {
-    const ref = referenciaFixa(referencia), p = r4(ptax);
-    if (!ref || !(p > 0)) return null;
-    if (p >= ref.piso && p <= ref.teto) return { dentro: true, variacao: r4(p - ref.referencia), fracoes: 0, ajuste: 0 };
-    const variacao = r4(p - ref.referencia), fracoes = r4(Math.abs(variacao) / PASSO), bruto = fracoes * (+valorPor010 || 0);
-    return { dentro: false, variacao, fracoes, ajuste: r2(variacao > 0 ? bruto : -bruto * REPASSE_QUEDA) };
+    const ref = referenciaFixa(referencia); if (!ref || !(+ptax > 0)) return null;
+    const r = reajusteDaClausula({ referencia: ref.referencia, faixaMin: ref.piso, faixaMax: ref.teto, partida: 'referencia', repasseAlta: 1, repasseQueda: REPASSE_QUEDA }, (+valorPor010 || 0) / PASSO, ptax);
+    return { dentro: r.dentro, variacao: r.variacao, fracoes: r.dentro ? 0 : r4(Math.abs(r.variacao) / PASSO), ajuste: r.valor };
+  }
+
+  /* ---------- Cláusula cambial do contrato ----------
+     Os dois modelos cabem nos mesmos campos:
+     - antigo (ex.: OP26): referência 5,15, faixa 5,10 a 5,20, desde a referência, 100% nos dois sentidos, e o
+       reajuste sai do câmbio de cada remessa à fábrica, na parcela indicada;
+     - híbrido (contratos novos): referência = PTAX da proposta + R$ 0,05, faixa de 1%, alta 100% e queda 70%,
+       1ª parcela fixa, e o reajuste sai da PTAX do dia útil anterior ao vencimento (2ª) e ao registro da DI (3ª).
+     O spread do banco é só custo nosso: o cliente é sempre reajustado pela PTAX limpa. */
+  const SPREAD_PADRAO = 0.016;
+  const QUANDO = [['cambio', 'No fechamento do câmbio da remessa'], ['vencimento', 'Dia útil anterior ao vencimento'], ['registroDI', 'Dia útil anterior ao registro da DI']];
+  function normalizarClausula(c) {
+    const x = Object.assign({ partida: 'referencia', repasseAlta: 1, repasseQueda: 1, primeiraFixa: true, spread: SPREAD_PADRAO, remessas: [] }, c || {});
+    ['referencia', 'faixaMin', 'faixaMax'].forEach(k => { x[k] = r4(x[k]); });
+    ['repasseAlta', 'repasseQueda', 'spread'].forEach(k => { x[k] = +x[k] || 0; });
+    x.remessas = (x.remessas || []).filter(Boolean).map((m, i) => Object.assign({ id: 'r' + (i + 1), rotulo: '', quando: 'cambio' }, m, { usd: r2(m.usd), parcela: +m.parcela || 2 }));
+    return x;
+  }
+  /** O que falta para a cláusula valer. */
+  function conferirClausula(c) {
+    const x = normalizarClausula(c), e = [];
+    if (!(x.referencia > 0)) e.push('Informe a PTAX de referência.');
+    if (!(x.faixaMin > 0 && x.faixaMax > 0) || x.faixaMin > x.referencia || x.faixaMax < x.referencia) e.push('A faixa sem reajuste precisa conter a referência.');
+    if (x.repasseAlta < 0 || x.repasseAlta > 1 || x.repasseQueda < 0 || x.repasseQueda > 1) e.push('O repasse vai de 0% a 100%.');
+    if (!['referencia', 'borda'].includes(x.partida)) e.push('Ponto de partida inválido.');
+    x.remessas.forEach((m, i) => { if (!(m.usd > 0)) e.push(`Remessa ${i + 1}: informe o valor em US$.`); if (x.primeiraFixa && m.parcela === 1) e.push(`Remessa ${i + 1}: a 1ª parcela é fixa.`); });
+    return e;
+  }
+  /**
+   * Reajuste de um valor em dólar. Dentro da faixa: zero. Fora: a variação desde a referência (ou desde a borda),
+   * vezes o repasse daquele sentido. Sempre pela PTAX limpa.
+   */
+  function reajusteDaClausula(c, usd, ptax) {
+    const x = normalizarClausula(c), p = r4(ptax);
+    if (!(p > 0) || !(x.referencia > 0)) return null;
+    if (p >= x.faixaMin && p <= x.faixaMax) return { dentro: true, ptax: p, base: x.referencia, variacao: r4(p - x.referencia), repasse: 0, valor: 0 };
+    const base = x.partida === 'borda' ? (p > x.faixaMax ? x.faixaMax : x.faixaMin) : x.referencia, variacao = r4(p - base), repasse = variacao > 0 ? x.repasseAlta : x.repasseQueda;
+    return { dentro: false, ptax: p, base, variacao, repasse, valor: r2((+usd || 0) * variacao * repasse) };
+  }
+  /** Cláusula da operação: a cadastrada, ou a híbrida da cotação aprovada. */
+  function clausulaDaOp(db, o) {
+    if (!o) return null;
+    if (o.clausulaCambial) return normalizarClausula(o.clausulaCambial);
+    const q = W.cotacaoDaOp(db, o), c = q && q.cambioProposta; if (!c || !(c.referencia > 0)) return null;
+    const por = c.por010 || valoresPor010(q).cliente;
+    return normalizarClausula({ origem: 'proposta', referencia: c.referencia, faixaMin: c.piso, faixaMax: c.teto, partida: 'referencia', repasseAlta: 1, repasseQueda: REPASSE_QUEDA, primeiraFixa: true,
+      remessas: [{ id: 'p2', rotulo: '2ª parcela', usd: r2(por[1] / PASSO), parcela: 2, quando: 'vencimento' }, { id: 'p3', rotulo: '3ª parcela', usd: r2(por[2] / PASSO), parcela: 3, quando: 'registroDI' }] });
+  }
+  const spreadDe = (db, c) => (c && c.spread != null ? +c.spread : ((((db || {}).hubPainel || {})._cambio || {}).spread != null ? +db.hubPainel._cambio.spread : SPREAD_PADRAO));
+  const cambioDaRemessa = (db, opId, remId) => (db.hubCambio || []).find(x => x && x.op === opId && x.remessaId === remId && (x.status === 'fechado' || x.status === 'liquidado'));
+  /** Remessas da operação com o custo: o real pago, depois do câmbio; antes, US$ × PTAX do dia × (1 + spread). */
+  function remessasDaOp(db, opId, ptaxHoje) {
+    const o = (db.ops || []).find(x => x && x.id === opId), c = o && o.clausulaCambial ? normalizarClausula(o.clausulaCambial) : null;
+    if (!c) return [];
+    const sp = spreadDe(db, c);
+    return c.remessas.filter(m => m.quando === 'cambio').map(m => {
+      const cb = cambioDaRemessa(db, opId, m.id);
+      if (cb) return Object.assign({}, m, { fechada: true, cambio: cb, custo: r2(+cb.valorBRL > 0 ? +cb.valorBRL : (+cb.valorME || m.usd) * (+cb.taxa || 0)), ptax: +cb.ptaxOficial || null });
+      return Object.assign({}, m, { fechada: false, custo: ptaxHoje ? r2(m.usd * ptaxHoje * (1 + sp)) : null, ptax: ptaxHoje || null, spread: sp });
+    });
+  }
+  /* ---------- Parcelas ---------- */
+  /** Número da parcela: pela descrição ("2º recebimento", "2ª parcela", "parcela 2") ou pela ordem de vencimento. */
+  function numeroNaOp(db, l) {
+    const m = /([123])\s*[ºªo°]\s*(recebimento|parcela)|parcela\s*([123])\b/i.exec(String((l && (l.descCliente || l.desc)) || ''));
+    if (m) return +(m[1] || m[3]);
+    const ps = parcelasDoCliente(db, l.op);
+    return ps.indexOf(l) + 1 || null;
+  }
+  const parcelasDoCliente = (db, opId) => (db.fin || []).filter(l => l && l.op === opId && W.ehReceita(l) && !/reembolso do difal/i.test(l.desc || '')).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
+  /** Valor do contrato da parcela, sem nenhum reajuste. */
+  const valorContrato = l => (l.valorContrato != null ? +l.valorContrato : l.ajusteCambial ? +l.ajusteCambial.valorOriginal : +l.valor || 0);
+  /** Onde o reajuste entra: a parcela indicada; já recebida, a próxima em aberto. */
+  function parcelaAlvo(db, opId, n) {
+    const ps = parcelasDoCliente(db, opId);
+    return ps.find(l => !W.realizado(l) && numeroNaOp(db, l) >= n) || null;
+  }
+  /** Recalcula a parcela com os reajustes guardados. */
+  function recomporParcela(l) {
+    const base = valorContrato(l), soma = (l.reajustes || []).reduce((a, x) => a + (+x.valor || 0), 0);
+    l.valorContrato = r2(base); l.valor = r2(Math.max(0, base + soma));
+    return l;
+  }
+  /**
+   * Câmbio registrado: reajuste da remessa na parcela certa, pela PTAX oficial daquela data. Guarda o cálculo de
+   * cada câmbio separado; registrar de novo o mesmo câmbio substitui o cálculo dele, nunca soma duas vezes.
+   */
+  function aplicarReajusteCambio(db, cambio, ptaxOficial, por, agora) {
+    const o = (db.ops || []).find(x => x && x.id === cambio.op); if (!o || !o.clausulaCambial) return { ok: false, motivo: 'sem cláusula' };
+    const c = normalizarClausula(o.clausulaCambial), m = c.remessas.find(x => x.id === cambio.remessaId);
+    if (!m) return { ok: false, motivo: 'sem remessa' };
+    if (m.quando !== 'cambio') return { ok: false, motivo: 'esta remessa é reajustada pela data da parcela' };
+    const r = reajusteDaClausula(c, m.usd, ptaxOficial); if (!r) return { ok: false, motivo: 'sem PTAX' };
+    (db.fin || []).forEach(l => { if (l && l.op === o.id && (l.reajustes || []).some(x => x.cambioId === cambio._id)) { l.reajustes = l.reajustes.filter(x => x.cambioId !== cambio._id); if (!W.realizado(l)) recomporParcela(l); } });
+    const alvo = parcelaAlvo(db, o.id, m.parcela); if (!alvo) return { ok: false, motivo: 'nenhuma parcela em aberto' };
+    alvo.reajustes = (alvo.reajustes || []).concat([{ cambioId: cambio._id, remessaId: m.id, rotulo: m.rotulo || '', data: W.soData(cambio.dataFechamento || W.hojeISO()), ptax: r.ptax, usd: m.usd, referencia: c.referencia, base: r.base, variacao: r.variacao, repasse: r.repasse, valor: r.valor, dentro: r.dentro, por: por || '', em: agora || new Date().toISOString() }]);
+    recomporParcela(alvo);
+    alvo.alteracoes = (alvo.alteracoes || []).concat([{ em: agora || new Date().toISOString(), por: por || '', acao: `reajuste cambial ${m.rotulo || m.id}: PTAX ${r.ptax} × referência ${c.referencia} = ${r.valor}` }]);
+    return { ok: true, parcela: alvo, reajuste: r };
+  }
+  /** "Se fechar hoje, a parcela fica R$ X": não grava nada. */
+  function previaReajuste(db, opId, remessaId, ptax) {
+    const o = (db.ops || []).find(x => x && x.id === opId); if (!o || !o.clausulaCambial) return null;
+    const c = normalizarClausula(o.clausulaCambial), m = c.remessas.find(x => x.id === remessaId); if (!m) return null;
+    const alvo = parcelaAlvo(db, opId, m.parcela), r = reajusteDaClausula(c, m.usd, ptax); if (!alvo || !r) return null;
+    const outros = (alvo.reajustes || []).filter(x => x.remessaId !== m.id).reduce((a, x) => a + x.valor, 0);
+    return { parcela: numeroNaOp(db, alvo), atual: r2(alvo.valor), novo: r2(valorContrato(alvo) + outros + r.valor), reajuste: r, custo: r2(m.usd * ptax * (1 + spreadDe(db, c))) };
+  }
+  /** O que o cliente vê na parcela: contrato + cada reajuste = total. Nunca o US$ remetido nem o spread. */
+  function composicaoParcela(l) {
+    const rs = (l.reajustes || []).map(x => ({ data: x.data, ptax: x.ptax, variacao: x.variacao, valor: x.valor, dentro: !!x.dentro }));
+    if (!rs.length && l.ajusteCambial) rs.push({ data: l.ajusteCambial.data, ptax: l.ajusteCambial.ptax, variacao: r4(l.ajusteCambial.ptax - l.ajusteCambial.referencia), valor: l.ajusteCambial.ajuste, dentro: !l.ajusteCambial.ajuste });
+    return { contrato: r2(valorContrato(l)), reajustes: rs, total: r2(+l.valor || 0) };
   }
   const referenciaFixa = r => (typeof r === 'object' && r ? r : (+r > 0 ? { referencia: r4(r), piso: r4(+r * (1 - TOLERANCIA)), teto: r4(+r * (1 + TOLERANCIA)) } : null));
 
@@ -150,6 +261,7 @@
       if (!l || !W.ehReceita(l) || W.realizado(l) || l.ajusteCambial) return;
       const n = numeroDaParcela(l); if (!n || n === 1) return;
       const o = (db.ops || []).find(x => x && x.id === l.op); if (!o) return;
+      if (o.clausulaCambial && !normalizarClausula(o.clausulaCambial).remessas.some(m => m.parcela === n && m.quando !== 'cambio')) return;
       const q = W.cotacaoDaOp(db, o); if (!q || !q.cambioProposta) return;
       const d = datasDaParcela(n, { vencimento: W.vencDe(l), registroDI: registroDaDI(db, o), hoje: h });
       out.push({ l, n, o, q, pendente: d.pendente || '', datas: d.datas || [], atraso: !!d.atraso, chegou: !!(d.datas || []).length && d.datas.every(x => x <= h) });
@@ -172,10 +284,12 @@
     if (!calculo || calculo.erro) return { ok: false, msg: (calculo && calculo.erro) || 'Sem cálculo.' };
     const t = agora || new Date().toISOString();
     l.ajusteCambial = { ptax: calculo.ptax, data: calculo.data, referencia: calculo.referencia, por010: calculo.por010, ajuste: calculo.ajuste, valorOriginal: calculo.valorOriginal, por: por || '', em: t };
+    l.valorContrato = calculo.valorOriginal;
+    l.reajustes = (l.reajustes || []).concat([{ tipo: 'parcela', data: calculo.data, ptax: calculo.ptax, referencia: calculo.referencia, variacao: calculo.variacao, valor: calculo.ajuste, dentro: calculo.dentro, por: por || '', em: t }]);
     l.valor = calculo.corrigido;
     l.alteracoes = (l.alteracoes || []).concat([{ em: t, por: por || '', acao: `ajuste cambial: PTAX ${calculo.ptax} × referência ${calculo.referencia}, de ${calculo.valorOriginal} para ${calculo.corrigido}` }]);
     return { ok: true };
   }
 
-  return { CENARIOS_CAMBIO, referenciaDaProposta, ajusteDaParcela, ehDiaUtil, diaUtilAnterior, datasDaParcela, ptaxQueVale, valoresPor010, simulacaoCambio, congelarCambio, tabelaCambio, textoCambio, numeroDaParcela, parcelasComCambio, calcularAjusteLancamento, confirmarAjusteCambial };
+  return { SPREAD_PADRAO, QUANDO, normalizarClausula, conferirClausula, reajusteDaClausula, clausulaDaOp, spreadDe, remessasDaOp, numeroNaOp, parcelasDoCliente, valorContrato, parcelaAlvo, recomporParcela, aplicarReajusteCambio, previaReajuste, composicaoParcela, CENARIOS_CAMBIO, referenciaDaProposta, ajusteDaParcela, ehDiaUtil, diaUtilAnterior, datasDaParcela, ptaxQueVale, valoresPor010, simulacaoCambio, congelarCambio, tabelaCambio, textoCambio, numeroDaParcela, parcelasComCambio, calcularAjusteLancamento, confirmarAjusteCambial };
 });

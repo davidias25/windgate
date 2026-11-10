@@ -130,4 +130,4 @@ function gerarPdf(preenchido) {
   return Buffer.from(doc.output('arraybuffer'));
 }
 
-module.exports = { modelo, modelosInstalados, gerarDocx, gerarPdf, PASTA };
+module.exports = { modelo, modelosInstalados, gerarDocx, gerarPdf, logoPng, PASTA };

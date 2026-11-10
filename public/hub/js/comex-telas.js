@@ -172,6 +172,7 @@
         ${kpi('A pagar com câmbio previsto', usd(ex.usd), ex.taxaMediaPrevista ? 'taxa média prevista ' + n4(ex.taxaMediaPrevista) : '')}${kpi('Efeito da PTAX de hoje', ex.impacto == null ? '—' : (ex.impacto >= 0 ? '+' : '') + W.fmtBRLk(ex.impacto), 'sobre o previsto', ex.impacto > 0 ? 'neg' : '')}
         ${kpi('Dólar sem previsão de câmbio', usd(ex.usdSemContrato), ex.impactoSemContrato == null ? '' : 'efeito ' + (ex.impactoSemContrato >= 0 ? '+' : '') + W.fmtBRLk(ex.impactoSemContrato), ex.usdSemContrato ? 'neg' : '')}</div>
       ${alerta ? `<div class="banner">A PTAX está ${(((p - ex.taxaMediaPrevista) / ex.taxaMediaPrevista) * 100).toFixed(1).replace('.', ',')}% acima da taxa média prevista (alerta a partir de ${banda}%). Avalie fechar o câmbio das próximas semanas.</div>` : ''}
+      ${(rs => rs.length ? `<div class="box"><div class="box-h"><h2>Remessas à fábrica</h2><span class="note">aberta: US$ × PTAX de hoje × (1 + spread) · fechada: o valor real pago</span></div><div class="tw"><table><thead><tr><th>Operação</th><th>Remessa</th><th class="num">US$</th><th>Câmbio</th><th class="num">Custo</th></tr></thead><tbody>${rs.map(r => `<tr><td class="mono"><b>${esc(r.op)}</b></td><td>${esc(r.rotulo || r.id)}</td><td class="num">${usd(r.usd)}</td><td>${r.fechada ? pill('fechado' + (r.ptax ? ' · PTAX ' + n4(r.ptax) : ''), COR.ok) : pill('aberto', COR.atencao)}</td><td class="num">${r.custo == null ? '—' : W.fmtBRL(r.custo)}${r.fechada ? '' : `<br><small class="note">spread ${(r.spread * 100).toLocaleString('pt-BR')}%</small>`}</td></tr>`).join('')}</tbody></table></div></div>` : '')((H.db.ops || []).filter(o => o && o.clausulaCambial && W.emAndamento(o)).flatMap(o => W.remessasDaOp(H.db, o.id, p).map(r => Object.assign({ op: o.id }, r))))}
       <div class="g2"><div class="box"><div class="box-h"><h2>Dólar a pagar por semana</h2></div>${ex.semanas.length ? `<div class="box-b">${H.grafico ? H.grafico.barras(ex.semanas.map(s => W.dataBR(s.semana).slice(0, 5)), [{ nome: 'US$', valores: ex.semanas.map(s => s.usd), cor: 'var(--blue)' }], { h: 180, fmt: v => 'US$ ' + Math.round(v / 1000) + ' mil' }) : ''}</div>` : '<p class="empty">Nenhum câmbio previsto.</p>'}</div>
         <div class="box"><div class="box-h"><h2>Operações com dólar sem previsão de câmbio</h2></div><div class="tw"><table><thead><tr><th>Operação</th><th class="num">US$</th><th class="num">Taxa prevista</th><th></th></tr></thead><tbody>${ex.semContrato.map(x => `<tr><td><b class="mono">${esc(x.op)}</b> <span class="note">${esc(x.cliente || '')}</span></td><td class="num">${usd(x.usd)}</td><td class="num">${n4(x.taxaPrevista)}</td><td class="num"><button class="btn sm" data-prever="${esc(x.op)}" data-usd="${x.usd}">Prever câmbio</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">Todo o dólar das operações ativas tem câmbio previsto ou fechado.</td></tr>'}</tbody></table></div></div></div>
       <div class="box"><div class="box-h"><h2>Contratos de câmbio</h2><label class="note">alerta da PTAX acima da prevista: <input id="banda" class="inp" style="width:60px" value="${banda}">%</label></div><div class="tw"><table><thead><tr><th>Operação</th><th>Empresa</th><th>Banco</th><th>Situação</th><th class="num">US$</th><th class="num">Taxa prevista</th><th class="num">Taxa fechada</th><th class="num">Variação</th><th>Pagamento</th><th></th></tr></thead><tbody>
@@ -190,14 +191,32 @@
         <div class="f"><label class="lbl" for="cli">Pagamento ao fornecedor</label><input id="cli" type="date" value="${esc(x.liquidacao || '')}"></div>
         <div class="f"><label class="lbl" for="cba">Banco / corretora</label><input id="cba" value="${esc(x.banco || '')}"></div>
         <div class="f"><label class="lbl" for="cnu">Nº do contrato</label><input id="cnu" value="${esc(x.contrato || '')}"></div>
-        <div class="f w2"><label class="lbl" for="cfo">Fornecedor</label><input id="cfo" value="${esc(x.fornecedor || '')}"></div></div>`,
+        <div class="f w2"><label class="lbl" for="cfo">Fornecedor</label><input id="cfo" value="${esc(x.fornecedor || '')}"></div>
+        <div class="f w2"><label class="lbl" for="crm">Remessa da cláusula cambial</label><select id="crm"></select></div>
+        <div class="f"><label class="lbl" for="cvb">Valor pago (R$)</label><input id="cvb" inputmode="decimal" value="${x.valorBRL || ''}" placeholder="com o spread do banco"></div></div>
+        <div id="cprev" class="note" style="margin-top:8px"></div>`,
         `${x._id ? '<button class="btn ghost" id="del">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="ok">Salvar</button>`);
-      m.querySelector('#ok').onclick = () => {
-        const r = { op: val(m, '#cop'), empresa: val(m, '#cem'), status: val(m, '#cst'), moeda: 'USD', valorME: numIn(m, '#cva'), taxaPrevista: numIn(m, '#ctp'), taxa: numIn(m, '#ctx'), dataFechamento: val(m, '#cdf'), liquidacao: val(m, '#cli'), banco: val(m, '#cba'), contrato: val(m, '#cnu'), fornecedor: val(m, '#cfo') };
+      /* A remessa vem da cláusula da operação; com ela, o reajuste do cliente sai do câmbio, pela PTAX oficial. */
+      const remessas = () => { const o = opById(val(m, '#cop')); return o && o.clausulaCambial ? W.normalizarClausula(o.clausulaCambial).remessas.filter(r => r.quando === 'cambio') : []; };
+      const montarRem = () => { const rs = remessas(); m.querySelector('#crm').innerHTML = '<option value="">— nenhuma —</option>' + rs.map(r => `<option value="${esc(r.id)}" ${x.remessaId === r.id ? 'selected' : ''}>${esc(r.rotulo || r.id)} · US$ ${usd(r.usd).replace('US$ ', '')}</option>`).join(''); previa(); };
+      const previa = () => {
+        const alvo = m.querySelector('#cprev'), rid = val(m, '#crm'), p = ptaxV(); if (!rid) { alvo.innerHTML = ''; return; }
+        const pv = p ? W.previaReajuste(H.db, val(m, '#cop'), rid, p) : null;
+        alvo.innerHTML = pv ? `<b>Se fechar hoje</b> (PTAX venda ${n4(p)}): a ${pv.parcela}ª parcela do cliente fica <b>${W.fmtBRL(pv.novo)}</b> (${pv.reajuste.dentro ? 'dentro da faixa, sem reajuste' : (pv.reajuste.valor >= 0 ? '+' : '−') + W.fmtBRL(Math.abs(pv.reajuste.valor))}). Custo desta remessa com spread: ${W.fmtBRL(pv.custo)}.` : 'Sem PTAX de hoje ou sem parcela em aberto para a prévia.';
+      };
+      m.querySelector('#cop').addEventListener('change', montarRem); m.querySelector('#crm').addEventListener('change', previa); montarRem();
+      m.querySelector('#ok').onclick = async () => {
+        const r = { op: val(m, '#cop'), empresa: val(m, '#cem'), status: val(m, '#cst'), moeda: 'USD', valorME: numIn(m, '#cva'), taxaPrevista: numIn(m, '#ctp'), taxa: numIn(m, '#ctx'), dataFechamento: val(m, '#cdf'), liquidacao: val(m, '#cli'), banco: val(m, '#cba'), contrato: val(m, '#cnu'), fornecedor: val(m, '#cfo'), remessaId: val(m, '#crm'), valorBRL: numIn(m, '#cvb') };
+        if (r.remessaId && r.status !== 'previsto') {
+          if (!r.dataFechamento) return H.toast('Informe a data do fechamento: é a data da PTAX oficial do reajuste.');
+          try { const j = await (await H.api('/api/cambio/ptax/' + r.dataFechamento)).json(); if (j.success && j.ptax) r.ptaxOficial = +j.ptax.venda; } catch (e) { /* segue sem: avisa abaixo */ }
+          if (!r.ptaxOficial) return H.toast('Não achei a PTAX de venda do Banco Central nessa data (dia sem PTAX ou Banco Central fora do ar). Confira a data.');
+        }
         if (!r.valorME) return H.toast('Informe o valor em dólar.');
         if (r.status !== 'previsto' && !r.taxa) return H.toast('Contrato fechado precisa da taxa.');
         const lista = garantir('hubCambio'), a = x._id && lista.find(y => y._id === x._id);
-        if (a) Object.assign(a, r, { atualizadoPor: eu(), atualizadoEm: new Date().toISOString() }); else lista.push(Object.assign({ _id: W.novoId(), por: eu(), em: new Date().toISOString() }, r));
+        let cb = a; if (a) Object.assign(a, r, { atualizadoPor: eu(), atualizadoEm: new Date().toISOString() }); else { cb = Object.assign({ _id: W.novoId(), por: eu(), em: new Date().toISOString() }, r); lista.push(cb); }
+        if (cb.remessaId && cb.ptaxOficial) { const ap = W.aplicarReajusteCambio(H.db, cb, cb.ptaxOficial, eu()); if (ap.ok) H.toast(`Reajuste na ${W.numeroNaOp(H.db, ap.parcela)}ª parcela: ${ap.reajuste.dentro ? 'na faixa, sem reajuste' : (ap.reajuste.valor >= 0 ? '+' : '−') + W.fmtBRL(Math.abs(ap.reajuste.valor))} (PTAX ${n4(cb.ptaxOficial)}). Parcela: ${W.fmtBRL(ap.parcela.valor)}.`); else H.toast('Câmbio salvo. Reajuste não aplicado: ' + esc(ap.motivo) + '.'); }
         H.salvar(); H.fecharModal(); H.render();
       };
       const d = m.querySelector('#del'); if (d) d.onclick = () => { H.db.hubCambio = H.db.hubCambio.filter(y => y._id !== x._id); H.salvar(); H.fecharModal(); H.render(); };
@@ -396,7 +415,12 @@
   function dadosContratadas() {
     const p = painel('_contrato'), campos = [['razao', 'Razão social'], ['cnpj', 'CNPJ'], ['endereco', 'Endereço completo, com CEP'], ['socioNome', 'Sócio administrador'], ['socioCpf', 'CPF do sócio'], ['banco', 'Banco'], ['agencia', 'Agência'], ['conta', 'Conta corrente'], ['pix', 'PIX (chave CNPJ)']];
     const m = H.modal('Dados das contratadas', ['jt', 'sf'].map(e => `<h3 class="h3">${esc(W.ESTRUTURAS[e].nome)}</h3><div class="fields" style="margin-bottom:12px">${campos.map(([k, l]) => `<div class="f"><label class="lbl" for="ct_${e}_${k}">${esc(l)}</label><input id="ct_${e}_${k}" data-e="${e}" data-k="${k}" value="${esc((p[e] || {})[k] || '')}"></div>`).join('')}</div>`).join(''), '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="ctok">Salvar</button>');
-    m.querySelector('#ctok').onclick = () => { m.querySelectorAll('[data-e]').forEach(i => { p[i.dataset.e] = p[i.dataset.e] || {}; p[i.dataset.e][i.dataset.k] = i.value.trim(); }); H.salvar(); H.fecharModal(); H.toast('Dados salvos.'); };
+    m.querySelector('.modal').insertAdjacentHTML('beforeend', '');
+    m.querySelector('#ctok').insertAdjacentHTML('beforebegin', '');
+    const extra = document.createElement('div'); extra.innerHTML = `<h3 class="h3">Contato no desembolso</h3><div class="fields" style="margin-bottom:12px">${[['nome', 'Responsável'], ['fone', 'Telefone'], ['email', 'E-mail']].map(([k, l]) => `<div class="f"><label class="lbl" for="ctc_${k}">${l}</label><input id="ctc_${k}" data-ctc="${k}" value="${esc((p.contato || {})[k] || '')}"></div>`).join('')}</div>
+      <label class="row" style="justify-content:flex-start;gap:8px"><input type="checkbox" id="ctasaas" ${(painel('_asaas').ativo) ? 'checked' : ''}> Conta do Asaas ativa: o desembolso mostra boleto e PIX gerados, em vez dos dados manuais</label>`;
+    const corpoCt = m.querySelector('[data-e]').closest('.fields').parentElement; corpoCt.appendChild(extra);
+    m.querySelector('#ctok').onclick = () => { m.querySelectorAll('[data-e]').forEach(i => { p[i.dataset.e] = p[i.dataset.e] || {}; p[i.dataset.e][i.dataset.k] = i.value.trim(); }); p.contato = Object.assign({}, p.contato); m.querySelectorAll('[data-ctc]').forEach(i => { p.contato[i.dataset.ctc] = i.value.trim(); }); painel('_asaas').ativo = m.querySelector('#ctasaas').checked; H.salvar(); H.fecharModal(); H.toast('Dados salvos.'); };
   }
   /* Editáveis antes de gerar: o que falta sai como [PENDENTE] em amarelo. */
   function gerarContratoModal(opId) {
@@ -536,4 +560,44 @@
       } catch (e) { alvo.innerHTML = '<p class="banner">Não consegui conferir agora.</p>'; }
     };
   };
+  /* ---------- Cláusula cambial do contrato, na ficha (aba Comex) ---------- */
+  const fichaComexBase = H.fichaComex;
+  H.fichaComex = function (box, o) {
+    fichaComexBase(box, o);
+    if (!H.pode('fin.ver')) return;
+    const div = document.createElement('div'); box.appendChild(div);
+    blocoClausula(div, o);
+  };
+  function blocoClausula(div, o0) {
+    const o = opById(o0.id) || o0, salva = !!o.clausulaCambial, c = W.clausulaDaOp(H.db, o) || W.normalizarClausula({}), p = ptaxV(), rems = W.remessasDaOp(H.db, o.id, p), edita = H.pode('fin.lancar');
+    const pct = v => (+v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+    div.innerHTML = `<div class="box"><div class="box-h"><h2>Cláusula cambial do contrato</h2><span class="note">${salva ? 'cadastrada' : c.origem === 'proposta' ? 'sugerida pela proposta aprovada: confira e salve' : 'não cadastrada'}</span></div><div class="box-b">
+      <div class="fields">
+        <div class="f"><label class="lbl" for="kcr">PTAX de referência</label><input id="kcr" inputmode="decimal" value="${c.referencia || ''}"></div>
+        <div class="f"><label class="lbl" for="kcmin">Faixa sem reajuste: mínimo</label><input id="kcmin" inputmode="decimal" value="${c.faixaMin || ''}"></div>
+        <div class="f"><label class="lbl" for="kcmax">Faixa sem reajuste: máximo</label><input id="kcmax" inputmode="decimal" value="${c.faixaMax || ''}"></div>
+        <div class="f"><label class="lbl" for="kcp">Ajuste desde</label><select id="kcp"><option value="referencia" ${c.partida === 'referencia' ? 'selected' : ''}>a referência</option><option value="borda" ${c.partida === 'borda' ? 'selected' : ''}>a borda da faixa</option></select></div>
+        <div class="f"><label class="lbl" for="kca">Repasse da alta (%)</label><input id="kca" inputmode="decimal" value="${pct(c.repasseAlta)}"></div>
+        <div class="f"><label class="lbl" for="kcq">Repasse da queda (%)</label><input id="kcq" inputmode="decimal" value="${pct(c.repasseQueda)}"></div>
+        <div class="f"><label class="lbl" for="kcs">Spread do banco (%)</label><input id="kcs" inputmode="decimal" value="${pct(W.spreadDe(H.db, salva ? c : null))}"></div>
+        <div class="f"><label class="lbl" for="kcf">Favorecido</label><select id="kcf">${Object.entries(W.ESTRUTURAS).map(([k, e]) => `<option value="${k}" ${W.estruturaDaOp(H.db, o) === k ? 'selected' : ''}>${esc(e.nome)}</option>`).join('')}</select></div>
+        <div class="w4"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="kc1" ${c.primeiraFixa ? 'checked' : ''}> 1ª parcela fixa</label></div></div>
+      <h3 class="h3" style="margin-top:12px">Remessas à fábrica e onde cada reajuste entra</h3>
+      <div class="tw"><table><thead><tr><th>Remessa</th><th class="num">US$</th><th>Parcela do cliente</th><th>Quando</th><th>Câmbio</th><th class="num">Custo</th><th></th></tr></thead><tbody id="kcrem">
+      ${c.remessas.map((m, i) => { const r = rems.find(x => x.id === m.id); return `<tr data-i="${i}"><td><input class="inp" data-rk="rotulo" value="${esc(m.rotulo || '')}" style="width:130px"></td><td class="num"><input class="inp" data-rk="usd" inputmode="decimal" value="${m.usd || ''}" style="width:100px;text-align:right"></td>
+        <td><select class="inp" data-rk="parcela">${[1, 2, 3].map(n => `<option value="${n}" ${m.parcela === n ? 'selected' : ''}>${n}ª</option>`).join('')}</select></td><td><select class="inp" data-rk="quando">${W.QUANDO.map(([k, l]) => `<option value="${k}" ${m.quando === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
+        <td>${r ? (r.fechada ? pill('fechado · PTAX ' + (r.ptax ? n4(r.ptax) : '—'), COR.ok) : pill('aberto', COR.atencao)) : '<span class="note">—</span>'}</td><td class="num">${r && r.custo != null ? W.fmtBRL(r.custo) + (r.fechada ? '<br><small class="note">real</small>' : `<br><small class="note">PTAX ${n4(r.ptax)} + spread</small>`) : '—'}</td><td>${edita ? `<button class="btn ghost sm" data-rmrem="${i}">✕</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma remessa.</td></tr>'}</tbody></table></div>
+      ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="kcadd">+ Remessa</button><button class="btn blue sm" id="kcsal">Salvar cláusula</button></div>' : ''}
+      <p class="note" style="margin-top:8px">O cliente é reajustado pela PTAX limpa, como diz o contrato. O spread entra só no nosso custo, até o câmbio ser registrado com o valor real pago.</p></div></div>`;
+    if (!edita) return;
+    const ler = () => ({ referencia: numIn(div, '#kcr'), faixaMin: numIn(div, '#kcmin'), faixaMax: numIn(div, '#kcmax'), partida: val(div, '#kcp'), repasseAlta: numIn(div, '#kca') / 100, repasseQueda: numIn(div, '#kcq') / 100, spread: numIn(div, '#kcs') / 100, primeiraFixa: div.querySelector('#kc1').checked,
+      remessas: [...div.querySelectorAll('#kcrem tr[data-i]')].map(tr => { const g = k => tr.querySelector(`[data-rk="${k}"]`).value; const id = (c.remessas[+tr.dataset.i] || {}).id || 'r' + W.novoId().slice(-6); return { id, rotulo: g('rotulo').trim(), usd: +String(g('usd')).replace(/\./g, '').replace(',', '.') || 0, parcela: +g('parcela'), quando: g('quando') }; }) });
+    div.querySelector('#kcadd').onclick = () => { const atual = ler(); atual.remessas.push({ id: 'r' + W.novoId().slice(-6), rotulo: '', usd: 0, parcela: 2, quando: 'cambio' }); const oa = opById(o.id); oa.clausulaCambial = atual; blocoClausula(div, oa); };
+    div.querySelectorAll('[data-rmrem]').forEach(b => b.onclick = () => { const atual = ler(); atual.remessas.splice(+b.dataset.rmrem, 1); const oa = opById(o.id); oa.clausulaCambial = atual; blocoClausula(div, oa); });
+    div.querySelector('#kcsal').onclick = () => {
+      const nova = ler(), e = W.conferirClausula(nova); if (e.length) return H.toast(esc(e[0]));
+      const oa = opById(o.id); oa.clausulaCambial = W.normalizarClausula(nova); oa.estruturaFiscal = val(div, '#kcf');
+      H.salvar(); H.toast('Cláusula cambial salva.'); blocoClausula(div, oa);
+    };
+  }
 })();
