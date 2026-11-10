@@ -580,6 +580,7 @@
         <div class="f"><label class="lbl" for="kca">Repasse da alta (%)</label><input id="kca" inputmode="decimal" value="${pct(c.repasseAlta)}"></div>
         <div class="f"><label class="lbl" for="kcq">Repasse da queda (%)</label><input id="kcq" inputmode="decimal" value="${pct(c.repasseQueda)}"></div>
         <div class="f"><label class="lbl" for="kcs">Spread do banco (%)</label><input id="kcs" inputmode="decimal" value="${pct(W.spreadDe(H.db, salva ? c : null))}"></div>
+        <div class="f"><label class="lbl" for="kcref">Cláusula no contrato</label><input id="kcref" value="${esc(c.clausulaRef || '')}" placeholder="ex.: 3.4.2"></div>
         <div class="f"><label class="lbl" for="kcf">Favorecido</label><select id="kcf">${Object.entries(W.ESTRUTURAS).map(([k, e]) => `<option value="${k}" ${W.estruturaDaOp(H.db, o) === k ? 'selected' : ''}>${esc(e.nome)}</option>`).join('')}</select></div>
         <div class="w4"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="kc1" ${c.primeiraFixa ? 'checked' : ''}> 1ª parcela fixa</label></div></div>
       <h3 class="h3" style="margin-top:12px">Remessas à fábrica e onde cada reajuste entra</h3>
@@ -590,7 +591,7 @@
       ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="kcadd">+ Remessa</button><button class="btn blue sm" id="kcsal">Salvar cláusula</button></div>' : ''}
       <p class="note" style="margin-top:8px">O cliente é reajustado pela PTAX limpa, como diz o contrato. O spread entra só no nosso custo, até o câmbio ser registrado com o valor real pago.</p></div></div>`;
     if (!edita) return;
-    const ler = () => ({ referencia: numIn(div, '#kcr'), faixaMin: numIn(div, '#kcmin'), faixaMax: numIn(div, '#kcmax'), partida: val(div, '#kcp'), repasseAlta: numIn(div, '#kca') / 100, repasseQueda: numIn(div, '#kcq') / 100, spread: numIn(div, '#kcs') / 100, primeiraFixa: div.querySelector('#kc1').checked,
+    const ler = () => ({ referencia: numIn(div, '#kcr'), faixaMin: numIn(div, '#kcmin'), faixaMax: numIn(div, '#kcmax'), partida: val(div, '#kcp'), repasseAlta: numIn(div, '#kca') / 100, repasseQueda: numIn(div, '#kcq') / 100, spread: numIn(div, '#kcs') / 100, primeiraFixa: div.querySelector('#kc1').checked, clausulaRef: val(div, '#kcref'),
       remessas: [...div.querySelectorAll('#kcrem tr[data-i]')].map(tr => { const g = k => tr.querySelector(`[data-rk="${k}"]`).value; const id = (c.remessas[+tr.dataset.i] || {}).id || 'r' + W.novoId().slice(-6); return { id, rotulo: g('rotulo').trim(), usd: +String(g('usd')).replace(/\./g, '').replace(',', '.') || 0, parcela: +g('parcela'), quando: g('quando') }; }) });
     div.querySelector('#kcadd').onclick = () => { const atual = ler(); atual.remessas.push({ id: 'r' + W.novoId().slice(-6), rotulo: '', usd: 0, parcela: 2, quando: 'cambio' }); const oa = opById(o.id); oa.clausulaCambial = atual; blocoClausula(div, oa); };
     div.querySelectorAll('[data-rmrem]').forEach(b => b.onclick = () => { const atual = ler(); atual.remessas.splice(+b.dataset.rmrem, 1); const oa = opById(o.id); oa.clausulaCambial = atual; blocoClausula(div, oa); });

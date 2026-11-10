@@ -144,7 +144,7 @@
   }
   /** O que o cliente vê na parcela: contrato + cada reajuste = total. Nunca o US$ remetido nem o spread. */
   function composicaoParcela(l) {
-    const rs = (l.reajustes || []).map(x => ({ data: x.data, ptax: x.ptax, variacao: x.variacao, valor: x.valor, dentro: !!x.dentro }));
+    const rs = (l.reajustes || []).map(x => ({ data: x.data, ptax: x.ptax, variacao: x.variacao, valor: x.valor, dentro: !!x.dentro, rotulo: x.rotulo || '', cambioId: x.cambioId || '' }));
     if (!rs.length && l.ajusteCambial) rs.push({ data: l.ajusteCambial.data, ptax: l.ajusteCambial.ptax, variacao: r4(l.ajusteCambial.ptax - l.ajusteCambial.referencia), valor: l.ajusteCambial.ajuste, dentro: !l.ajusteCambial.ajuste });
     return { contrato: r2(valorContrato(l)), reajustes: rs, total: r2(+l.valor || 0) };
   }

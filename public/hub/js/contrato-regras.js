@@ -213,6 +213,15 @@
 
   /* ---------- Desembolso do cliente ---------- */
   const LIBERA = ['Assinatura · libera a produção na fábrica', 'Produto pronto · libera o embarque', 'Chegada ao porto · liberação e entrega'];
+  const taxaTxt2 = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  /** O texto curto da cláusula que vai no rodapé da composição. */
+  function textoClausula(cl) {
+    const quem = cl.clausulaRef ? `Conforme a cl. ${cl.clausulaRef}, f` : 'F', faixa = `R$ ${taxaTxt2(cl.faixaMin)}–${taxaTxt2(cl.faixaMax)}`;
+    const porCambio = (cl.remessas || []).some(m => m.quando === 'cambio');
+    return porCambio
+      ? `${quem}ora da faixa de ${faixa} o preço é ajustado pela diferença entre a PTAX de referência e a PTAX-venda oficial do Banco Central na data de cada fechamento de câmbio, para mais ou para menos, com reflexo na parcela ainda não faturada. PTAX oficial e contrato de câmbio disponíveis para conferência.`
+      : `${quem}ora da faixa de ${faixa} a parcela é ajustada pela PTAX-venda oficial do Banco Central do dia útil anterior ao vencimento (2ª) e ao registro da DI (3ª): a alta é repassada ${Math.round(cl.repasseAlta * 100)}% e a queda ${Math.round(cl.repasseQueda * 100)}%. PTAX oficial disponível para conferência.`;
+  }
   /** Quem recebe: o contrato padrão da operação, a estrutura escolhida nela, ou a da cotação. */
   function estruturaDaOp(db, o) {
     const c = contratoPadraoDaOp(db, o.id); if (c && c.estrutura) return c.estrutura;
@@ -227,7 +236,16 @@
     const todas = ps.concat(difal).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
     const prox = todas.find(l => !W.realizado(l)) || null;
     const rot = l => { if (l.descCliente) return l.descCliente; if (difal.includes(l)) return 'Reembolso do DIFAL'; const n = W.numeroNaOp(db, l); return n ? n + 'ª parcela' : 'Parcela'; };
-    const parcelas = todas.map(l => ({ id: l._id, n: W.numeroNaOp(db, l), rotulo: rot(l), vencimento: W.vencDe(l), valor: +l.valor || 0, situacao: W.realizado(l) ? 'pago' : l === prox ? 'proximo' : 'aPagar', composicao: W.composicaoParcela(l) }));
+    /* Cada câmbio ganha o seu número pela data (1º, 2º...), igual em todas as parcelas. */
+    const datasCambio = [...new Set(todas.flatMap(l => (l.reajustes || []).filter(x => x.cambioId).map(x => x.data + '|' + x.cambioId)))].sort();
+    const parcelas = todas.map(l => {
+      const comp = W.composicaoParcela(l);
+      comp.reajustes.forEach(r => { r.ordem = datasCambio.indexOf(r.data + '|' + r.cambioId) + 1 || null; });
+      comp.reajustes.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+      const reaj = comp.total - comp.contrato;
+      return { id: l._id, n: W.numeroNaOp(db, l), rotulo: rot(l), vencimento: W.vencDe(l), valor: +l.valor || 0, situacao: W.realizado(l) ? 'pago' : l === prox ? 'proximo' : 'aPagar', composicao: comp,
+        sub: Math.abs(reaj) > 0.004 ? `${W.fmtBRL(comp.contrato)} ${reaj >= 0 ? '+' : '–'} reajuste cambial líquido ${W.fmtBRL(Math.abs(reaj))}` : (l.subCliente || '') };
+    });
     const total = parcelas.reduce((a, p) => a + p.valor, 0), pago = parcelas.filter(p => p.situacao === 'pago').reduce((a, p) => a + p.valor, 0);
     const reajuste = parcelas.reduce((a, p) => a + (p.composicao.total - p.composicao.contrato), 0);
     const comReaj = parcelas.filter(p => p.composicao.reajustes.length), escolhida = comReaj.find(p => p.situacao === 'proximo') || comReaj[comReaj.length - 1];
@@ -236,8 +254,8 @@
     return {
       op: o.id, cliente: o.cliente || '', obra: o.nome || '', atualizado: h, total, pago, aPagar: total - pago, reajuste, contrato: total - reajuste, parcelas,
       proxima: prox ? { vencimento: W.vencDe(prox), valor: +prox.valor || 0, rotulo: rot(prox), libera: prox.liberaCliente || (n ? LIBERA[n - 1] : '') || '' } : null,
-      composicao: escolhida ? Object.assign({ rotulo: escolhida.rotulo }, escolhida.composicao) : null,
-      clausula: cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, texto: 'Reajuste cambial conforme o contrato, pela PTAX de venda do Banco Central, sem o spread bancário. PTAX oficial e contrato de câmbio disponíveis para conferência.' } : null,
+      composicao: escolhida ? Object.assign({ rotulo: String(escolhida.rotulo).split(' — ')[0], rotuloContrato: 'Parcela contratual' + (String(escolhida.rotulo).includes(' — ') ? ' (' + String(escolhida.rotulo).split(' — ').slice(1).join(' — ') + ')' : '') }, escolhida.composicao) : null,
+      clausula: cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, ref: cl.clausulaRef || '', texto: textoClausula(cl) } : null,
       estrutura: est,
       pagamento: { asaas: !!(((db.hubPainel || {})._asaas) || {}).ativo, favorecido: ct.razao || '', cnpj: ct.cnpj || '', banco: ct.banco || '', agencia: ct.agencia || '', conta: ct.conta || '', pix: ct.pix || '' },
       contato: { nome: (cfg.contato || {}).nome || ct.socioNome || '', fone: (cfg.contato || {}).fone || '', email: (cfg.contato || {}).email || '' },
