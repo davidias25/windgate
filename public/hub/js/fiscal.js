@@ -329,19 +329,26 @@
     const mesPad = (() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 7); })();
     const m = H.modal('Novo extrato', `<div class="fields"><div class="f w2"><label class="lbl" for="xc">Conta</label><select id="xc">${contas.map(c => `<option value="${esc(c.id)}">${esc((c.empresa === 'JeT' ? 'JeT' : 'SF') + ' · ' + c.banco + ' ' + (c.nome || ''))}</option>`).join('')}</select></div>
       <div class="f"><label class="lbl" for="xm">Mês</label><input id="xm" type="month" value="${mesPad}"></div><div class="f w4"><label class="lbl" for="xa">Arquivo (OFX de preferência; PDF também vale)</label><input id="xa" type="file" accept=".ofx,.pdf,.csv"></div>
-      <div class="f w2"><label class="lbl" for="xsi">Saldo inicial do mês (PDF)</label><input id="xsi" type="number" step="0.01"></div><div class="f w2"><label class="lbl" for="xsf">Saldo final do mês (PDF)</label><input id="xsf" type="number" step="0.01"></div></div>
+      <div class="f w2"><label class="lbl" for="xsi">Saldo inicial do mês</label><input id="xsi" type="number" step="0.01"></div><div class="f w2"><label class="lbl" for="xsf">Saldo final do mês</label><input id="xsf" type="number" step="0.01"></div></div>
       <p class="note" style="margin-top:8px">Com OFX, o sistema confere cada movimento com o Financeiro e mostra o que não tem lançamento.</p><p class="note" id="xlido"></p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="xok">Guardar extrato</button>');
     let ofx = null;
     m.querySelector('#xa').onchange = e => { const f = e.target.files[0]; if (!f || !/\.(ofx|qfx|ofc)$/i.test(f.name)) return; const fr = new FileReader(); fr.onload = () => {
-      ofx = W.lerOFX(fr.result); if (ofx) { m.querySelector('#xlido').textContent = `OFX lido: ${ofx.transacoes.length} movimentos de ${W.dataBR(ofx.inicio)} a ${W.dataBR(ofx.fim)}.`; if (ofx.inicio) m.querySelector('#xm').value = ofx.inicio.slice(0, 7); } }; fr.readAsText(f, 'latin1'); };
+      /* Bytes, não texto: o sistema descobre se é UTF-8 ou Latin-1. O mês e os saldos vêm preenchidos e podem ser trocados. */
+      ofx = W.lerOFX(W.decodificarOFX(new Uint8Array(fr.result)));
+      if (ofx) {
+        m.querySelector('#xlido').textContent = `OFX lido: ${ofx.transacoes.length} movimentos de ${W.dataBR(ofx.inicio)} a ${W.dataBR(ofx.fim)}${ofx.linhasDeSaldo ? ` · ${ofx.linhasDeSaldo} linha(s) de saldo ignorada(s)` : ''}${ofx.saldoInicial != null ? ` · saldo anterior ${W.fmtBRL ? W.fmtBRL(ofx.saldoInicial) : ofx.saldoInicial}` : ''}. Confira o mês.`;
+        if (ofx.mes) m.querySelector('#xm').value = ofx.mes;
+        if (ofx.saldoInicial != null) m.querySelector('#xsi').value = ofx.saldoInicial;
+        if (isFinite(ofx.saldo)) m.querySelector('#xsf').value = ofx.saldo;
+      } }; fr.readAsArrayBuffer(f); };
     m.querySelector('#xok').onclick = async () => {
       const f = m.querySelector('#xa').files[0]; if (!f) { H.toast('Escolha o arquivo do extrato'); return; }
       const conta = contas.find(c => c.id === m.querySelector('#xc').value), mes = m.querySelector('#xm').value;
       let link = ''; try { link = await subir(f); } catch (e) { H.toast('Arquivo não enviado (' + esc(e.message) + ').'); return; }
       const trans = ofx ? W.conciliar(H.db, ofx.transacoes, conta.empresa, conta.id) : null;
       H.db.hubExtratos.unshift({ _id: W.novoId(), contaId: conta.id, empresa: conta.empresa, banco: conta.banco, contaNome: conta.nome || '', mes, link, formato: ofx ? 'OFX' : (f.name.split('.').pop() || '').toUpperCase(),
-        saldo: ofx ? ofx.saldo : (m.querySelector('#xsf').value !== '' ? +m.querySelector('#xsf').value : null), saldoInicial: !ofx && m.querySelector('#xsi').value !== '' ? +m.querySelector('#xsi').value : undefined, transacoes: trans, por: eu(), em: new Date().toISOString() });
+        saldo: m.querySelector('#xsf').value !== '' ? +m.querySelector('#xsf').value : (ofx ? ofx.saldo : null), saldoInicial: m.querySelector('#xsi').value !== '' ? +m.querySelector('#xsi').value : (ofx && ofx.saldoInicial != null ? ofx.saldoInicial : undefined), transacoes: trans, por: eu(), em: new Date().toISOString() });
       H.salvar(); H.fecharModal(); H.toast(trans ? `Extrato guardado: ${trans.filter(t => t.lancId).length} de ${trans.length} movimentos batem com o Financeiro.` : 'Extrato guardado'); H.render();
     };
   }

@@ -1055,15 +1055,46 @@
     const entrega = (cfg.entregas || {})[tri] || null;
     return { tri, meses, notas, porTipo, pend, semArquivo, extratos, contas, faltaExtrato, entrega, pronto: !pend.length && !faltaExtrato.length };
   }
-  /** Lê um extrato OFX: período, saldo e lançamentos. */
+  /**
+   * Bytes do OFX em texto. UTF-8 quando é UTF-8 válido; senão Windows-1252 (o Latin-1 dos bancos).
+   * Ler UTF-8 como Latin-1 era o que fazia "DISPONÍVEL" virar "DISPONÃVEL".
+   */
+  function decodificarOFX(bytes) {
+    const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(b).replace(/^﻿/, ''); }
+    catch (e) { try { return new TextDecoder('windows-1252').decode(b); } catch (e2) { return new TextDecoder('latin1').decode(b); } }
+  }
+  /* Texto que já chegou estragado (UTF-8 lido como Latin-1): "DISPONÃ\u008dVEL" volta a "DISPONÍVEL". */
+  function consertarAcentos(s) {
+    const t = String(s == null ? '' : s);
+    if (!/[ÂÃ][\u0080-¿]/.test(t) || /[^\u0000-ÿ]/.test(t)) return t;
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(t, c => c.charCodeAt(0))); } catch (e) { return t; }
+  }
+  /* Linha de saldo que o Itaú manda como movimento ("SALDO ANTERIOR", "SALDO TOTAL DISPONÍVEL DIA"): não é movimento. */
+  const linhaDeSaldo = memo => /^\s*SALDO\b/i.test(String(memo || ''));
+  /** Mês do extrato: o do período (DTSTART/DTEND) quando é um mês só; senão o da maioria dos movimentos. */
+  function mesDoExtrato(ofx) {
+    if (!ofx) return '';
+    const i = String(ofx.inicio || '').slice(0, 7), f = String(ofx.fim || '').slice(0, 7);
+    if (i && i === f) return i;
+    const cont = {}; (ofx.transacoes || []).forEach(t => { const m = String(t.data || '').slice(0, 7); if (m) cont[m] = (cont[m] || 0) + 1; });
+    const ms = Object.keys(cont).sort((a, b) => cont[b] - cont[a] || b.localeCompare(a));
+    return ms[0] || f || i;
+  }
+  /** Lê um extrato OFX: período, saldo inicial e final, lançamentos (sem as linhas de saldo) e o mês. */
   function lerOFX(txt) {
-    const s = String(txt || ''); if (!/<OFX>/i.test(s)) return null;
+    const s = consertarAcentos(String(txt || '')); if (!/<OFX>/i.test(s)) return null;
     const v = (b, t) => { const m = new RegExp('<' + t + '>([^<\\r\\n]*)', 'i').exec(b); return m ? m[1].trim() : ''; };
     const dt = x => x ? x.slice(0, 4) + '-' + x.slice(4, 6) + '-' + x.slice(6, 8) : '';
     /* Há banco (o Itaú, por exemplo) que manda o OFX em SGML, sem fechar o <STMTTRN>: aí cada um vai até o próximo. */
     const blocos = /<\/STMTTRN>/i.test(s) ? (s.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || []) : s.split(/<STMTTRN>/i).slice(1).map(b => b.split(/<\/BANKTRANLIST>|<LEDGERBAL>/i)[0]);
-    const trs = blocos.map(b => ({ data: dt(v(b, 'DTPOSTED')), valor: +String(v(b, 'TRNAMT')).replace(',', '.'), memo: v(b, 'MEMO') || v(b, 'NAME'), id: v(b, 'FITID') }));
-    return { banco: v(s, 'ORG') || v(s, 'BANKID'), conta: v(s, 'ACCTID'), inicio: dt(v(s, 'DTSTART')), fim: dt(v(s, 'DTEND')), saldo: +String(v(s, 'BALAMT') || 0).replace(',', '.'), transacoes: trs };
+    const todas = blocos.map(b => ({ data: dt(v(b, 'DTPOSTED')), valor: +String(v(b, 'TRNAMT')).replace(',', '.'), memo: v(b, 'MEMO') || v(b, 'NAME'), id: v(b, 'FITID') }));
+    const saldos = todas.filter(t => linhaDeSaldo(t.memo));
+    const ant = saldos.filter(t => /ANTERIOR/i.test(t.memo)).sort((a, b) => String(a.data).localeCompare(String(b.data)))[0];
+    const out = { banco: v(s, 'ORG') || v(s, 'BANKID'), conta: v(s, 'ACCTID'), inicio: dt(v(s, 'DTSTART')), fim: dt(v(s, 'DTEND')), saldo: +String(v(s, 'BALAMT') || 0).replace(',', '.'),
+      saldoInicial: ant && isFinite(ant.valor) ? ant.valor : null, linhasDeSaldo: saldos.length, transacoes: todas.filter(t => !linhaDeSaldo(t.memo)) };
+    out.mes = mesDoExtrato(out);
+    return out;
   }
   /** Concilia o extrato com o Financeiro: mesmo valor, data até 3 dias de diferença. Com a conta, só os lançamentos dela (ou ainda sem conta). */
   function conciliar(db, transacoes, empresa, contaId) {
@@ -1215,7 +1246,7 @@
     COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
-    lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
+    lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, decodificarOFX, consertarAcentos, mesDoExtrato, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
     ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, arquivoDeTela, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
