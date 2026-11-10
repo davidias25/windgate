@@ -27,7 +27,7 @@ const ok = (c, m) => { if (c) { passou++; console.log('  ✅ ' + m); } else { fa
   ok(!(await enviar('script.js', 'text/javascript')).j.success, '.js continua recusado');
   ok(!(await enviar('sem-tipo.xyz', 'application/octet-stream')).j.success, 'extensão desconhecida continua recusada');
   guardados.forEach(n => { try { fs.unlinkSync(path.join(__dirname, '../uploads', n)); } catch (e) {} });
-  srv.close(); try { fs.unlinkSync(process.env.WINDGATE_DB_FILE); fs.unlinkSync(process.env.WINDGATE_DB_FILE + '.bak'); } catch (e) {}
+  await new Promise(ok => srv.close(ok)); try { fs.unlinkSync(process.env.WINDGATE_DB_FILE); fs.unlinkSync(process.env.WINDGATE_DB_FILE + '.bak'); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
-  process.exit(falhou ? 1 : 0);
+  process.exitCode = falhou ? 1 : 0;
 })().catch(e => { console.error(e); process.exit(1); });

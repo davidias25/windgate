@@ -821,6 +821,8 @@ async function salvarArquivoNFe(nome, conteudo, tipo) {
   try {
     const r = await uploadParaSupabase(tmp, nome, tipo);
     if (r && r.publicUrl) return r.publicUrl;
+    // O disco do servidor é apagado a cada publicação: com o Storage ligado, guardar lá é perder o arquivo depois.
+    if (storageAtivo()) throw new Error('O arquivo não foi guardado no Storage: ' + nome);
     fs.copyFileSync(tmp, path.join(__dirname, '../uploads', arq));
     return '/uploads/' + arq;
   } finally { fs.unlink(tmp, () => {}); }
