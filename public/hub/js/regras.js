@@ -496,7 +496,7 @@
     return serie;
   }
 
-  /** Dar baixa: mesma semântica do sistema atual (valor = o que foi pago). */
+  /** Dar baixa: mesma semântica do sistema atual (valor = o que foi pago). A diferença para o previsto fica guardada como juros/multa ou desconto. */
   function realizar(l, valorPago, data, hoje) {
     const prev = l.valorPrevisto != null ? +l.valorPrevisto : valorDe(l);
     l.status = 'Realizado';
@@ -504,7 +504,15 @@
     l.valorPago = valorPago > 0 ? +(+valorPago).toFixed(2) : prev;
     l.valorPrevisto = l.valorPago !== prev ? prev : null;
     l.valor = l.valorPago;
+    const dif = +(l.valorPago - prev).toFixed(2);
+    if (Math.abs(dif) >= 0.005) l.diferencaBaixa = { tipo: dif > 0 ? 'juros' : 'desconto', valor: Math.abs(dif) }; else delete l.diferencaBaixa;
     return l;
+  }
+  /** Conta fixa: o vencimento fica no mês dela. Devolve a data que vale e se mudou o que foi digitado, para a tela avisar. */
+  function vencimentoDaFixa(mesRef, digitado) {
+    const d = soData(digitado); if (!mesRef || !ehISO(d)) return { venc: d, ajustado: false };
+    const v = vencDoMes(mesRef, d.slice(8, 10));
+    return { venc: v, ajustado: v !== d };
   }
 
   /* ---------- Alertas da Torre de Controle ---------- */
@@ -981,14 +989,16 @@
     const s = String(txt || ''); if (!/<OFX>/i.test(s)) return null;
     const v = (b, t) => { const m = new RegExp('<' + t + '>([^<\\r\\n]*)', 'i').exec(b); return m ? m[1].trim() : ''; };
     const dt = x => x ? x.slice(0, 4) + '-' + x.slice(4, 6) + '-' + x.slice(6, 8) : '';
-    const trs = (s.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || []).map(b => ({ data: dt(v(b, 'DTPOSTED')), valor: +String(v(b, 'TRNAMT')).replace(',', '.'), memo: v(b, 'MEMO') || v(b, 'NAME'), id: v(b, 'FITID') }));
+    /* Há banco (o Itaú, por exemplo) que manda o OFX em SGML, sem fechar o <STMTTRN>: aí cada um vai até o próximo. */
+    const blocos = /<\/STMTTRN>/i.test(s) ? (s.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || []) : s.split(/<STMTTRN>/i).slice(1).map(b => b.split(/<\/BANKTRANLIST>|<LEDGERBAL>/i)[0]);
+    const trs = blocos.map(b => ({ data: dt(v(b, 'DTPOSTED')), valor: +String(v(b, 'TRNAMT')).replace(',', '.'), memo: v(b, 'MEMO') || v(b, 'NAME'), id: v(b, 'FITID') }));
     return { banco: v(s, 'ORG') || v(s, 'BANKID'), conta: v(s, 'ACCTID'), inicio: dt(v(s, 'DTSTART')), fim: dt(v(s, 'DTEND')), saldo: +String(v(s, 'BALAMT') || 0).replace(',', '.'), transacoes: trs };
   }
-  /** Concilia o extrato com o Financeiro: mesmo valor, data até 3 dias de diferença. */
-  function conciliar(db, transacoes, empresa) {
+  /** Concilia o extrato com o Financeiro: mesmo valor, data até 3 dias de diferença. Com a conta, só os lançamentos dela (ou ainda sem conta). */
+  function conciliar(db, transacoes, empresa, contaId) {
     const usados = new Set();
     return (transacoes || []).map(t => {
-      const alvo = (db.fin || []).find(l => l && !usados.has(l._id) && realizado(l) && (!empresa || (l.empresa || 'WindGate') === empresa)
+      const alvo = (db.fin || []).find(l => l && !usados.has(l._id) && realizado(l) && (!empresa || (l.empresa || 'WindGate') === empresa) && (!contaId || !l.contaId || l.contaId === contaId)
         && Math.abs(valorDe(l) - Math.abs(t.valor)) < 0.01 && (t.valor < 0) === !ehReceita(l)
         && Math.abs(diasEntre(soData(l.liquidadoEm || vencDe(l)), t.data) || 0) <= 3);
       if (alvo) usados.add(alvo._id);
@@ -1139,7 +1149,7 @@
     ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
-    PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
+    vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
     STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,
     novaSerie, realizar, mesSoma, vencDoMes, alertas, fmtBRL, fmtBRLk, dataBR

@@ -210,7 +210,8 @@
     }
     const m = H.modal(`${rec ? 'Receber' : 'Pagar'} · ${l.desc || l.op || ''}`, `<div class="fields">
       <div class="f w2"><label class="lbl" for="bv">Valor ${rec ? 'recebido' : 'pago'} (R$)</label><input id="bv" type="number" step="0.01" value="${(+l.valor || 0).toFixed(2)}"></div>
-      <div class="f w2"><label class="lbl" for="bd">Data</label><input id="bd" type="date" value="${W.hojeISO()}"></div>
+      <div class="f w2"><label class="lbl" for="bd">Data do pagamento</label><input id="bd" type="date" value="${W.hojeISO()}"></div>
+      <p class="note f w4">Previsto: ${W.fmtBRL(+l.valor || 0)}. Pago a mais vira juros/multa; a menos, desconto. A conciliação usa a data e o valor pagos.</p>
       <div class="f w4"><label class="lbl" for="bc">Link do comprovante (opcional)</label><input id="bc" type="url" value="${esc(l.comp || '')}" placeholder="https://…"></div></div>
       ${!rec && !l.autorizadoEm ? '<p class="banner" style="margin-top:12px">Este pagamento ainda não foi autorizado pelo Samir.</p>' : ''}`,
       `<button class="btn" data-x>Cancelar</button><button class="btn blue" id="bok">Confirmar ${rec ? 'recebimento' : 'pagamento'}</button>`);
@@ -218,6 +219,7 @@
       l = H.db.fin.find(x => x && x._id === l._id);
       if (!l) { H.fecharModal(); H.toast('Este lançamento foi removido por outra pessoa. Nada foi gravado.'); H.render(); return; }
       W.realizar(l, +m.querySelector('#bv').value, m.querySelector('#bd').value);
+      if (l.diferencaBaixa) H.toast(`Diferença de ${W.fmtBRL(l.diferencaBaixa.valor)} guardada como ${l.diferencaBaixa.tipo === 'juros' ? 'juros/multa' : 'desconto'}.`);
       const c = m.querySelector('#bc').value.trim(); if (c) l.comp = c;
       l.baixaPor = H.nomeUsuario(H.userKey);
       H.salvar(); H.fecharModal(); H.toast(`${rec ? 'Recebimento' : 'Pagamento'} de <b>${W.fmtBRL(l.valor)}</b> registrado`); H.render();
@@ -230,7 +232,7 @@
     const sel = (a, b) => a === b ? 'selected' : '';
     const m = H.modal(novo ? 'Novo lançamento' : 'Editar lançamento', `<div class="fields">
       <div class="f"><label class="lbl" for="et">Tipo</label><select id="et"><option ${sel(d.tipo, 'Despesa')}>Despesa</option><option ${sel(d.tipo, 'Receita')}>Receita</option></select></div>
-      <div class="f"><label class="lbl" for="ev">Valor (R$)</label><input id="ev" type="number" step="0.01" value="${d.valor || ''}"></div>
+      <div class="f"><label class="lbl" for="ev">Valor previsto (R$)</label><input id="ev" type="number" step="0.01" value="${d.valorPrevisto != null ? d.valorPrevisto : d.valor || ''}"></div>
       <div class="f"><label class="lbl" for="ed">Vencimento</label><input id="ed" type="date" value="${W.soData(d.vencimento || d.data)}"></div>
       <div class="f"><label class="lbl" for="ee">Empresa</label><select id="ee"><option value="WindGate" ${sel(d.empresa, 'WindGate')}>WindGate / SF</option><option value="JeT" ${sel(d.empresa, 'JeT')}>JeT</option></select></div>
       <div class="f w2"><label class="lbl" for="eo">Operação</label><select id="eo"><option value="WindGate">Sem operação (despesa da empresa)</option>${ops.map(o => `<option ${sel(d.op, o)}>${esc(o)}</option>`).join('')}</select></div>
@@ -240,11 +242,20 @@
         <div class="f w4"><label class="lbl" for="exs">Linha de apoio para o cliente (opcional)</label><input id="exs" value="${esc(d.subCliente || '')}" placeholder="ex.: Embarque previsto 25/11/2026 · transit time 45 dias"></div>
         <div class="f w4"><label class="lbl" for="exl">O que este pagamento libera (aviso do próximo pagamento)</label><input id="exl" value="${esc(d.liberaCliente || '')}" placeholder="Vazio: texto padrão da parcela"></div>` : ''}
       <div class="f w2"><label class="lbl" for="es">Situação</label><select id="es"><option ${sel(d.status, 'Previsto')}>Previsto</option><option ${sel(d.status, 'Realizado')}>Realizado</option></select></div>
+      <div class="f w2"><label class="lbl" for="eac">Conta</label><select id="eac"><option value="">— não definida —</option>${(((H.db.hubPainel || {})._fiscal || {}).contas || []).filter(c => c && c.ativa !== false).map(c => `<option value="${esc(c.id)}" ${d.contaId === c.id ? 'selected' : ''}>${esc((c.empresa === 'JeT' ? 'JeT' : 'SF') + ' · ' + (c.banco || '') + ' ' + (c.nome || ''))}</option>`).join('')}</select>${d.contaAutomatica ? '<small class="note">preenchida automaticamente: confira</small>' : ''}</div>
+      <div class="f w2" data-real><label class="lbl" for="ebd">Data do pagamento</label><input id="ebd" type="date" value="${W.soData(d.liquidadoEm || '')}"></div>
+      <div class="f w2" data-real><label class="lbl" for="ebv">Valor pago (R$)</label><input id="ebv" type="number" step="0.01" value="${d.valorPago != null ? d.valorPago : (W.realizado(d) ? d.valor || '' : '')}"><small class="note" id="ebdif"></small></div>
       <div class="f w2"><label class="lbl" for="ecp">Link do comprovante</label><input id="ecp" type="url" value="${esc(d.comp || '')}"></div>
       ${novo ? `<div class="f w4"><label class="lbl"><input type="checkbox" id="efx" style="width:auto"> Conta fixa mensal (gera 12 meses)</label></div>` : ''}
       ${blocoFiscal(d)}
       ${l && l.recId ? '<p class="note f w4">Lançamento de conta fixa: esta edição muda só este mês (o vencimento continua dentro do mês dele).</p>' : ''}</div>`,
       `${!novo && H.pode('fin.excluir') ? '<button class="btn" id="edel" style="margin-right:auto;color:var(--crit)">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn blue" id="eok">Salvar</button>`);
+    /* Data e valor do pagamento só aparecem quando está realizado; a diferença para o previsto aparece na hora. */
+    const real = () => m.querySelector('#es').value === 'Realizado';
+    const mostrarReal = () => { m.querySelectorAll('[data-real]').forEach(x => { x.style.display = real() ? '' : 'none'; }); const p = +m.querySelector('#ev').value || 0, v = +m.querySelector('#ebv').value || 0, dif = Math.round((v - p) * 100) / 100;
+      m.querySelector('#ebdif').textContent = real() && v && p && Math.abs(dif) >= 0.005 ? (dif > 0 ? 'juros/multa de ' : 'desconto de ') + W.fmtBRL(Math.abs(dif)) + ' sobre o previsto' : ''; };
+    ['#es', '#ev', '#ebv'].forEach(s => m.querySelector(s).addEventListener('input', mostrarReal)); m.querySelector('#es').addEventListener('change', () => { if (real() && !m.querySelector('#ebd').value) m.querySelector('#ebd').value = W.hojeISO(); if (real() && !m.querySelector('#ebv').value) m.querySelector('#ebv').value = m.querySelector('#ev').value; mostrarReal(); });
+    mostrarReal();
     // Quem só lança não altera o que outra pessoa já baixou: só anexa o comprovante.
     const restrito = !novo && !H.pode('fin.excluir') && W.realizado(l) && l.por !== H.nomeUsuario(H.userKey);
     const fisc = ligarFiscal(m, d);
@@ -258,12 +269,22 @@
       const valor = +m.querySelector('#ev').value;
       if (!(valor > 0)) { H.toast('Informe um valor maior que zero'); return; }
       let venc = m.querySelector('#ed').value || W.hojeISO();
-      // Conta fixa: a ocorrência fica no próprio mês (só o dia muda), igual ao sistema atual.
-      if (l && l.recId && l.mesRef) venc = W.vencDoMes(l.mesRef, venc.slice(8, 10));
+      // Conta fixa: o vencimento fica no próprio mês. A data do pagamento não tem essa trava.
+      if (l && l.recId && l.mesRef) {
+        const vf = W.vencimentoDaFixa(l.mesRef, venc);
+        if (vf.ajustado) return H.toast(`Esta conta fixa é de ${l.mesRef.split('-').reverse().join('/')}: o vencimento tem de ser nesse mês (ficaria ${W.dataBR(vf.venc)}). Se o pagamento foi em outro mês, deixe o vencimento no mês dela e use <b>Data do pagamento</b>.`);
+        venc = vf.venc;
+      }
       const status = m.querySelector('#es').value;
+      const pago = +m.querySelector('#ebv').value || 0, dataPg = m.querySelector('#ebd').value;
+      if (status === 'Realizado' && dataPg && !W.ehISO(dataPg)) return H.toast('Data do pagamento inválida.');
       const campos = { tipo: m.querySelector('#et').value, valor, vencimento: venc, data: (l && l.data) || venc, empresa: m.querySelector('#ee').value,
         op: m.querySelector('#eo').value || 'WindGate', categoria: m.querySelector('#ec').value, desc: m.querySelector('#ex').value.trim(), descCliente: m.querySelector('#exc') ? m.querySelector('#exc').value.trim() : (l && l.descCliente) || '', subCliente: m.querySelector('#exs') ? m.querySelector('#exs').value.trim() : (l && l.subCliente) || '', liberaCliente: m.querySelector('#exl') ? m.querySelector('#exl').value.trim() : (l && l.liberaCliente) || '', status,
-        comp: m.querySelector('#ecp').value.trim(), liquidadoEm: status === 'Realizado' ? ((l && l.liquidadoEm) || venc) : null };
+        comp: m.querySelector('#ecp').value.trim(), contaId: m.querySelector('#eac').value || '', liquidadoEm: status === 'Realizado' ? (dataPg || (l && l.liquidadoEm) || venc) : null };
+      if (campos.contaId !== ((l && l.contaId) || '')) campos.contaAutomatica = false;
+      /* Realizado: o valor do lançamento é o pago; o previsto e a diferença ficam guardados. */
+      if (status === 'Realizado') { const pg = pago > 0 ? pago : valor, dif = Math.round((pg - valor) * 100) / 100; Object.assign(campos, { valor: pg, valorPago: pg, valorPrevisto: Math.abs(dif) >= 0.005 ? valor : null, diferencaBaixa: Math.abs(dif) >= 0.005 ? { tipo: dif > 0 ? 'juros' : 'desconto', valor: Math.abs(dif) } : null }); }
+      else Object.assign(campos, { valorPago: null, valorPrevisto: null, diferencaBaixa: null });
       const eu = H.nomeUsuario(H.userKey);
       if (novo && m.querySelector('#efx') && m.querySelector('#efx').checked) {
         const s = W.novaSerie(H.db, Object.assign({ por: eu }, campos), 12, status === 'Realizado');

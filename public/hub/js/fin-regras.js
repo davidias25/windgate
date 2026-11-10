@@ -77,11 +77,86 @@
 
   /* ---------- Contas bancárias ---------- */
   const contasAtivas = (db, emp) => (cfgFiscal(db).contas || []).filter(c => c && c.ativa !== false && empOk(emp, c.empresa));
+  /* Conta bancária tem extrato e saldo para conferir; câmbio e cartão são só onde o pagamento saiu. */
+  const TIPOS_CONTA = [['banco', 'Conta bancária'], ['cambio', 'Câmbio'], ['cartao', 'Cartão de crédito'], ['outra', 'Outra']];
+  const ehBanco = c => !c.tipo || c.tipo === 'banco';
+  const contasBancarias = (db, emp) => contasAtivas(db, emp).filter(ehBanco);
+  /**
+   * Lançamento sem conta recebe uma: JeT vai para a conta do Itaú da JeT, o resto para a do Santander da SF
+   * (ou a única conta bancária da empresa). Só preenche o que está vazio, marca o que foi automático e pode rodar de novo.
+   */
+  function migrarContas(db, por, agora) {
+    const pref = (emp, re) => { const cs = contasBancarias(db).filter(c => (c.empresa || 'WindGate') === emp); return cs.find(c => re.test(c.banco || '')) || (cs.length === 1 ? cs[0] : null); };
+    const jet = pref('JeT', /ita[uú]/i), sf = pref('WindGate', /santander/i); let n = 0;
+    (db.fin || []).forEach(l => {
+      if (!l || l.contaId || W.transferencia(l)) return;
+      const c = (l.empresa || 'WindGate') === 'JeT' ? jet : sf; if (!c) return;
+      l.contaId = c.id; l.contaAutomatica = true; n++;
+      l.alteracoes = (l.alteracoes || []).concat([{ em: agora || new Date().toISOString(), por: por || '', acao: 'conta preenchida: ' + (c.banco || '') + ' ' + (c.nome || '') + ' (automático, revisar)' }]);
+    });
+    return { preenchidos: n, jet: jet && jet.id, sf: sf && sf.id };
+  }
+  /** Movimento do extrato pela chave "extratoId:índice". */
+  function movimentoDaChave(db, chave) {
+    const [eid, i] = String(chave || '').split(':'), e = (db.hubExtratos || []).find(x => x && x._id === eid), t = e && (e.transacoes || [])[+i];
+    return t ? { e, t, i: +i } : null;
+  }
+  /**
+   * Vincula vários lançamentos a vários movimentos (1:N, N:1): fica conciliado quando a soma bate, ao centavo,
+   * e todos andam no mesmo sentido. Desfaz o vínculo anterior de cada um.
+   */
+  function vincularGrupo(db, movChaves, lancIds, por, agora) {
+    const ms = (movChaves || []).map(c => movimentoDaChave(db, c)), ls = (lancIds || []).map(id => (db.fin || []).find(l => l && l._id === id));
+    if (!ms.length || !ls.length || ms.some(x => !x) || ls.some(x => !x)) return { ok: false, msg: 'Escolha ao menos um movimento e um lançamento.' };
+    if (ls.some(l => !W.realizado(l))) return { ok: false, msg: 'Só lançamento já realizado é conciliado.' };
+    const entrada = ms[0].t.valor > 0;
+    if (ms.some(x => (x.t.valor > 0) !== entrada) || ls.some(l => W.ehReceita(l) !== entrada)) return { ok: false, msg: 'Movimentos e lançamentos precisam ir no mesmo sentido (todos entradas ou todos saídas).' };
+    const sm = r2(ms.reduce((a, x) => a + Math.abs(num(x.t.valor)), 0)), sl = r2(ls.reduce((a, l) => a + valorDe(l), 0));
+    if (Math.abs(sm - sl) >= 0.005) return { ok: false, msg: `As somas não batem: banco ${W.fmtBRL(sm)} × sistema ${W.fmtBRL(sl)}.`, banco: sm, sistema: sl };
+    const gid = 'g' + W.novoId(), antigos = new Set(ms.map(x => x.t.grupo).concat(ls.map(l => l.grupoConciliacao)).filter(Boolean));
+    antigos.forEach(g => desvincularGrupo(db, g));
+    ms.forEach(x => { x.t.grupo = gid; x.t.lancId = null; delete x.t.decisao; });
+    ls.forEach(l => { l.grupoConciliacao = gid; if (ms.length === 1 && !l.contaId) l.contaId = ms[0].e.contaId; l.alteracoes = (l.alteracoes || []).concat([{ em: agora || new Date().toISOString(), por: por || '', acao: `conciliado com ${ms.length} movimento(s) do banco, ${W.fmtBRL(sm)}` }]); });
+    return { ok: true, grupo: gid, banco: sm, sistema: sl };
+  }
+  function desvincularGrupo(db, gid) {
+    (db.hubExtratos || []).forEach(e => (e && e.transacoes || []).forEach(t => { if (t.grupo === gid) delete t.grupo; }));
+    (db.fin || []).forEach(l => { if (l && l.grupoConciliacao === gid) delete l.grupoConciliacao; });
+  }
+  /** Um movimento com um lançamento, confirmado à mão (inclusive a sugestão de até 10 dias). */
+  function vincularUm(db, chave, lancId, por, agora) { return vincularGrupo(db, [chave], [lancId], por, agora); }
+  /** Quando não há par exato em 3 dias: o mesmo valor, no mesmo sentido, em até 10 dias. */
+  function sugestoesConciliacao(db, fe, item) {
+    const livres = fe.movimentos.filter(m => !m.lanc && !m.ignorado), usados = new Set(fe.movimentos.flatMap(m => (m.lancs || (m.lanc ? [m.lanc] : [])).map(l => l._id)));
+    if (item.lancId) {
+      const l = (db.fin || []).find(x => x && x._id === item.lancId); if (!l) return [];
+      return livres.filter(m => Math.abs(Math.abs(m.valor) - valorDe(l)) < 0.01 && (m.valor > 0) === W.ehReceita(l) && Math.abs(W.diasEntre(dataBaixa(l), m.data) || 0) <= 10)
+        .map(m => ({ chave: m.chave, data: m.data, memo: m.memo, valor: m.valor, contaId: m.contaId, dias: Math.abs(W.diasEntre(dataBaixa(l), m.data) || 0) })).sort((a, b) => a.dias - b.dias);
+    }
+    const v = Math.abs(num(item.valor)), entrada = num(item.valor) > 0;
+    return (db.fin || []).filter(l => l && W.realizado(l) && !usados.has(l._id) && !W.transferencia(l) && Math.abs(valorDe(l) - v) < 0.01 && W.ehReceita(l) === entrada && Math.abs(W.diasEntre(dataBaixa(l), item.data) || 0) <= 10)
+      .map(l => ({ lancId: l._id, data: dataBaixa(l), desc: l.desc || '', op: l.op || '', valor: valorDe(l), dias: Math.abs(W.diasEntre(dataBaixa(l), item.data) || 0) })).sort((a, b) => a.dias - b.dias);
+  }
+  /** Corrige a data do pagamento (a que a conciliação usa). O vencimento não muda. */
+  function corrigirDataPagamento(l, data, por, agora) {
+    if (!l || !W.realizado(l)) return { ok: false, msg: 'Só lançamento realizado tem data de pagamento.' };
+    if (!W.ehISO(data)) return { ok: false, msg: 'Data inválida.' };
+    const antes = l.liquidadoEm; l.liquidadoEm = data;
+    l.alteracoes = (l.alteracoes || []).concat([{ em: agora || new Date().toISOString(), por: por || '', acao: `data do pagamento de ${W.dataBR(antes)} para ${W.dataBR(data)}` }]);
+    return { ok: true };
+  }
+  /** Pago por outra conta: o lançamento passa a ser conciliado com o extrato dela. */
+  function mudarConta(db, l, contaId, por, agora) {
+    const c = contasAtivas(db).find(x => x.id === contaId); if (!l || !c) return { ok: false, msg: 'Conta não encontrada.' };
+    l.contaId = c.id; delete l.contaAutomatica; if (l.grupoConciliacao) desvincularGrupo(db, l.grupoConciliacao);
+    l.alteracoes = (l.alteracoes || []).concat([{ em: agora || new Date().toISOString(), por: por || '', acao: 'pago pela conta ' + (c.banco || '') + ' ' + (c.nome || '') }]);
+    return { ok: true };
+  }
   /** Lançamento → conta: o campo `contaId` vence; senão o extrato que o casou; senão a única conta da empresa. */
   function contaDoLanc(db, l, porLanc) {
     if (l.contaId) return l.contaId;
     if (porLanc && porLanc.has(l._id)) return porLanc.get(l._id);
-    const cs = contasAtivas(db).filter(c => (c.empresa || 'WindGate') === (l.empresa || 'WindGate'));
+    const cs = contasAtivas(db).filter(c => ehBanco(c) && (c.empresa || 'WindGate') === (l.empresa || 'WindGate'));
     return cs.length === 1 ? cs[0].id : '';
   }
   /** Saldo inicial e final de um extrato (OFX traz o final; o inicial sai da soma dos movimentos). */
@@ -286,13 +361,30 @@
     const fin = (db.fin || []).filter(Boolean), porId = new Map(fin.map(l => [l._id, l]));
     const extratosTodos = (db.hubExtratos || []).filter(e => e && meses.includes(e.mes) && empOk(empresa, e.empresa));
     const P = { semLancamento: [], semBanco: [], semClassificacao: [], semContraparte: [], semNota: [], semComprovante: [], notasOrfas: [], faltaExtrato: [], extratoSemMovimentos: [],
-      contaSemCadastro: [], lancSemConta: [], transfSemPar: [], saldoDiferente: [], extratoQuebrado: [] };
+      contaSemCadastro: [], lancSemConta: [], transfSemPar: [], saldoDiferente: [], extratoQuebrado: [], grupoDiferente: [] };
 
     /* Lançamento ↔ movimento: o casado no extrato vale; o que sobrou casa pela regra da conciliação. */
     const usados = new Set(), porLanc = new Map(), movs = [];
-    extratosTodos.forEach(e => (e.transacoes || []).forEach((t, i) => { if (t.lancId && porId.has(t.lancId)) { usados.add(t.lancId); porLanc.set(t.lancId, e.contaId); } }));
+    /* Grupos (vários com um): valem quando a soma bate; senão viram pendência e cada lado fica solto. */
+    const grupos = new Map();
+    extratosTodos.forEach(e => (e.transacoes || []).forEach(t => { if (t.grupo) { const g = grupos.get(t.grupo) || { movs: [], lancs: [] }; g.movs.push({ e, t }); grupos.set(t.grupo, g); } }));
+    fin.forEach(l => { if (l.grupoConciliacao && grupos.has(l.grupoConciliacao)) grupos.get(l.grupoConciliacao).lancs.push(l); });
+    grupos.forEach((g, gid) => {
+      const sm = r2(g.movs.reduce((a, x) => a + Math.abs(num(x.t.valor)), 0)), sl = r2(g.lancs.reduce((a, l) => a + valorDe(l), 0));
+      g.ok = g.lancs.length > 0 && Math.abs(sm - sl) < 0.005 && g.lancs.every(W.realizado);
+      if (!g.ok) P.grupoDiferente.push({ grupo: gid, banco: sm, sistema: sl, data: g.movs[0].t.data, memo: g.movs.map(x => x.t.memo).join(' + '), valor: r2(sm - sl), lancIds: g.lancs.map(l => l._id) });
+      else g.lancs.forEach(l => { usados.add(l._id); porLanc.set(l._id, g.movs[0].e.contaId); });
+    });
+    extratosTodos.forEach(e => (e.transacoes || []).forEach((t, i) => { if (t.lancId && porId.has(t.lancId) && !t.grupo) { usados.add(t.lancId); porLanc.set(t.lancId, e.contaId); } }));
+    const primeiroDoGrupo = new Set();
     extratosTodos.forEach(e => (e.transacoes || []).forEach((t, i) => {
-      let l = t.lancId && porId.get(t.lancId) || null, auto = false;
+      const g = t.grupo && grupos.get(t.grupo);
+      if (g && g.ok) {
+        const primeiro = !primeiroDoGrupo.has(t.grupo); primeiroDoGrupo.add(t.grupo);
+        movs.push({ chave: e._id + ':' + i, extratoId: e._id, contaId: e.contaId, empresa: e.empresa || 'WindGate', mes: e.mes, data: t.data, memo: t.memo || '', valor: r2(t.valor), fitid: t.id || '', lanc: g.lancs[0], lancs: g.lancs, grupo: t.grupo, primeiroDoGrupo: primeiro, auto: false, ignorado: false });
+        return;
+      }
+      let l = t.lancId && !t.grupo && porId.get(t.lancId) || null, auto = false;
       if (!l) {
         l = fin.find(x => !usados.has(x._id) && W.realizado(x) && (x.empresa || 'WindGate') === (e.empresa || 'WindGate') && (!x.contaId || x.contaId === e.contaId)
           && Math.abs(valorDe(x) - Math.abs(num(t.valor))) < 0.01 && (num(t.valor) < 0) === !W.ehReceita(x) && Math.abs(W.diasEntre(dataBaixa(x), t.data) || 0) <= 3) || null;
@@ -303,13 +395,21 @@
 
     /* Extratos: cadastro da conta, meses faltando, sem movimentos. */
     extratosTodos.forEach(e => { if (!idsContas.has(e.contaId)) P.contaSemCadastro.push({ extratoId: e._id, banco: e.banco, conta: e.contaNome, mes: e.mes }); if (!Array.isArray(e.transacoes)) P.extratoSemMovimentos.push({ extratoId: e._id, banco: e.banco, conta: e.contaNome, mes: e.mes }); });
-    contas.forEach(c => meses.forEach(m => { if (m < h.slice(0, 7) && !extratosTodos.some(e => e.contaId === c.id && e.mes === m)) P.faltaExtrato.push({ contaId: c.id, banco: c.banco, conta: c.nome, empresa: c.empresa, mes: m }); }));
+    contas.filter(ehBanco).forEach(c => meses.forEach(m => { if (m < h.slice(0, 7) && !extratosTodos.some(e => e.contaId === c.id && e.mes === m)) P.faltaExtrato.push({ contaId: c.id, banco: c.banco, conta: c.nome, empresa: c.empresa, mes: m }); }));
 
     /* Cada movimento: lançamento e o que o lançamento precisa ter. */
     let completos = 0;
     movs.forEach(m => {
       const base = { chave: m.chave, extratoId: m.extratoId, contaId: m.contaId, data: m.data, memo: m.memo, valor: m.valor };
       if (!m.lanc) { P.semLancamento.push(Object.assign(base, { ignorado: m.ignorado })); return; }
+      if (m.lancs) {
+        /* Grupo: cada lançamento é conferido uma vez só, no primeiro movimento dele. */
+        const ss = m.lancs.map(situacao);
+        if (m.primeiroDoGrupo) m.lancs.forEach((l, k) => { const s = ss[k], item = Object.assign({}, base, { lancId: l._id, desc: l.desc || '', op: l.op || '', valor: W.ehReceita(l) ? valorDe(l) : -valorDe(l), grupo: m.grupo });
+          if (!s.classificado) P.semClassificacao.push(item); if (!s.contraparte) P.semContraparte.push(item); if (!s.nota) P.semNota.push(Object.assign({ notaLink: s.notaLink }, item)); if (!s.comprovante) P.semComprovante.push(item); });
+        if (ss.every(s => s.completo)) completos++;
+        return;
+      }
       const s = situacao(m.lanc), item = Object.assign(base, { lancId: m.lanc._id, desc: m.lanc.desc || '', op: m.lanc.op || '', auto: m.auto });
       if (!s.classificado) P.semClassificacao.push(item);
       if (!s.contraparte) P.semContraparte.push(item);
@@ -335,7 +435,7 @@
       .forEach(n => P.notasOrfas.push({ notaId: n._id, numero: n.numero || '', tipo: n.tipo || '', emitente: n.emitente || '', destinatario: n.destinatario || '', valor: num(n.valor), data: n.data, op: n.op || '' }));
 
     /* Saldo por conta e mês: extrato × sistema (abertura do extrato + lançamentos da conta). */
-    const porConta = contas.map(c => {
+    const porConta = contas.filter(ehBanco).map(c => {
       let abertura = null, anterior = null;
       const linhas = meses.map(m => {
         const e = extratosTodos.find(x => x.contaId === c.id && x.mes === m) || null, s = e ? saldosExtrato(e) : { ini: null, fim: null, entradas: 0, saidas: 0 };
@@ -361,7 +461,7 @@
     ['semLancamento', 'Movimento do banco sem lançamento'], ['semBanco', 'Lançamento realizado que não está no banco'], ['semClassificacao', 'Lançamento sem classificação'],
     ['semContraparte', 'Lançamento sem contraparte (nome e CNPJ/CPF)'], ['semNota', 'Sem nota e sem motivo'], ['semComprovante', 'Sem comprovante'],
     ['notasOrfas', 'Nota do trimestre sem lançamento'], ['faltaExtrato', 'Extrato do mês faltando'], ['extratoSemMovimentos', 'Extrato sem movimentos (envie o OFX)'],
-    ['contaSemCadastro', 'Conta do extrato sem cadastro'], ['lancSemConta', 'Lançamento sem conta bancária'], ['transfSemPar', 'Transferência sem a outra ponta'],
+    ['contaSemCadastro', 'Conta do extrato sem cadastro'], ['lancSemConta', 'Lançamento sem conta bancária'], ['transfSemPar', 'Transferência sem a outra ponta'], ['grupoDiferente', 'Vínculo de vários com um que não fecha mais'],
     ['saldoDiferente', 'Saldo do sistema diferente do extrato'], ['extratoQuebrado', 'Extrato não continua o saldo do mês anterior']
   ];
 
@@ -392,7 +492,7 @@
     return { porConta, resumo, notas };
   }
 
-  return { MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
+  return { TIPOS_CONTA, ehBanco, contasBancarias, migrarContas, movimentoDaChave, vincularGrupo, desvincularGrupo, vincularUm, sugestoesConciliacao, corrigirDataPagamento, mudarConta, MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
     situacaoLanc: situacao, contraparteOk, notaOk, comprovanteOk, classificado, somaNotas, contasAtivas, contaDoLanc, saldosExtrato, parecido,
     normalizarLeitura, empresaDoDoc, sugerirComprovante, legendaDoComprovante, aplicarComprovante, sugerirNotas, casarTransferencias, fechamento, PENDENCIAS,
     notaTexto, COLUNAS_PACOTE, linhasPacote };
