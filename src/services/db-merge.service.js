@@ -21,6 +21,7 @@ const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qin
 const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel', 'settings'];
 
 const DIAS_TOMBSTONE = 90;
+const MAIS_RECENTE = ['_arquivos'];
 
 /**
  * Identidade do registro. Registros gravados antes do `_id` recebem um id
@@ -95,6 +96,8 @@ function mesclarDB(atual, recebido) {
     if (a && typeof a === 'object' && !Array.isArray(a) &&
         b && typeof b === 'object' && !Array.isArray(b)) {
       out[k] = Object.assign({}, a, b);
+      /* Conferência gravada pelo servidor: vale a mais recente, não a cópia antiga de um navegador. */
+      if (k === 'hubPainel') MAIS_RECENTE.forEach(c => { const x = a[c], y = b[c]; if (x && y && String(x.em || '') > String(y.em || '')) out[k][c] = x; });
     }
   });
 

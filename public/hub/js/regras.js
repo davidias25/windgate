@@ -168,13 +168,69 @@
   /* Arquivo em /uploads ficou só no disco do servidor, que é apagado a cada publicação: o link não abre mais. */
   const linkPerdido = v => /(^|\/)uploads\//.test(String(v || '')) && !/supabase\.co/.test(String(v || ''));
   /** Tudo o que aponta para um arquivo perdido e ainda precisa ser enviado de novo. */
-  function arquivosPerdidos(db) {
-    const quando = v => { const m = /-(\d{13})-/.exec(String(v || '')); return m ? new Date(+m[1]).toISOString().slice(0, 10) : ''; };
+  /* Caminho do objeto num link do Storage ("…/storage/v1/object/public/<bucket>/<caminho>"). Outro link: null. */
+  const RE_STORAGE = /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/?#]+)\/([^?#]+)/;
+  function caminhoNoStorage(url) {
+    const m = RE_STORAGE.exec(String(url || '')); if (!m) return null;
+    let p = m[2]; try { p = decodeURIComponent(p); } catch (e) { /* fica como veio */ }
+    return { bucket: m[1], path: p };
+  }
+  const ehLinkDeArquivo = v => typeof v === 'string' && v.length < 2000 && (RE_STORAGE.test(v) || linkPerdido(v));
+  /* Onde o Hub guarda link de arquivo. Lista ou objeto por chave (checklists é por operação). */
+  const COLECOES_ARQUIVO = [['docs', 'Documentos'], ['fin', 'Financeiro'], ['crmDocs', 'CRM'], ['checklists', 'Checklist'], ['hubNotas', 'Notas fiscais'], ['hubExtratos', 'Extratos'], ['hubComprovantes', 'Comprovantes']];
+  /**
+   * Todo link de arquivo do banco, com onde está. Varre o registro inteiro: o nome do campo muda de tela
+   * para tela (link, comp, pdf, xml, anexos…), e um link esquecido numa lista interna também se perde.
+   * Documento substituído por nova versão ou removido não entra: o link dele não é mais usado.
+   */
+  function linksDeArquivo(db) {
     const out = [];
-    (db.docs || []).forEach(d => { if (d && linkPerdido(d.link) && !d.substituidoPor && !d.removidoEm) out.push({ onde: 'Documentos', _id: d._id, op: d.op || '', nome: d.nome || d.cat || '', por: d.por || '', quando: quando(d.link) }); });
-    (db.fin || []).forEach(l => { if (l && linkPerdido(l.comp)) out.push({ onde: 'Financeiro', _id: l._id, op: l.op || '', nome: l.desc || 'Comprovante', por: l.baixaPor || l.por || '', quando: quando(l.comp) }); });
-    (db.crmDocs || []).forEach(d => { if (d && linkPerdido(d.link) && !d.removidoEm) out.push({ onde: 'CRM', _id: d._id, op: '', nome: d.nome || '', por: d.enviadoPor || '', quando: quando(d.link) }); });
-    return out.sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+    const rotulo = o => o && (o.nome || o.desc || o.titulo || o.item || o.label || o.cat || o.arquivo || o.memo) || '';
+    COLECOES_ARQUIVO.forEach(([col, onde]) => {
+      const v = db && db[col];
+      const regs = Array.isArray(v) ? v.map(r => [r && r._id, r]) : (v && typeof v === 'object' ? Object.entries(v) : []);
+      regs.forEach(([id, r]) => {
+        if (!r || typeof r !== 'object' || r.substituidoPor || r.removidoEm) return;
+        const visto = new Set();
+        const varrer = (x, campo, dono, n) => {
+          if (n > 6 || !x || typeof x !== 'object' || visto.has(x)) return; visto.add(x);
+          Object.keys(x).forEach(k => {
+            const val = x[k], c = campo ? campo + '.' + k : k;
+            if (ehLinkDeArquivo(val) && !visto.has(val)) { visto.add(val); out.push({ col, onde, _id: r._id || id, campo: c, link: val, op: r.op || (col === 'checklists' ? id : ''), nome: String(rotulo(dono) || rotulo(r) || ''), por: r.por || r.enviadoPor || r.baixaPor || '' }); }
+            else if (val && typeof val === 'object') varrer(val, c, Array.isArray(val) ? dono : val, n + 1);
+          });
+        };
+        varrer(r, '', r, 0);
+      });
+    });
+    return out;
+  }
+  /**
+   * Links que não abrem. Link para o disco do servidor (/uploads) sempre; link do Storage quando
+   * `existe(caminho)` diz false. `existe` devolve true, false ou undefined (não deu para saber: fica de fora).
+   */
+  function conferirLinks(links, existe) {
+    return (links || []).filter(l => {
+      if (linkPerdido(l.link)) return true;
+      const c = caminhoNoStorage(l.link);
+      return !!c && typeof existe === 'function' && existe(c.path, c.bucket) === false;
+    }).map(l => Object.assign({}, l, { motivo: linkPerdido(l.link) ? 'Ficou só no disco do servidor' : 'Não está no Storage' }));
+  }
+  /**
+   * Tudo o que aponta para um arquivo perdido e ainda precisa ser enviado de novo: o que aponta para o disco
+   * do servidor, e o que a conferência diária (hubPainel._arquivos) não achou no Storage. Reenviado, o link
+   * muda e o item sai sozinho.
+   */
+  function arquivosPerdidos(db) {
+    const quando = v => { const m = /-(\d{13})-/.exec(String(v || '')) || /\/(\d{13})_/.exec(String(v || '')); return m ? new Date(+m[1]).toISOString().slice(0, 10) : ''; };
+    const conf = ((db && db.hubPainel) || {})._arquivos || {};
+    const faltam = new Set((conf.quebrados || []).filter(q => q && !linkPerdido(q.link)).map(q => q.link));
+    const vistos = new Set();
+    return conferirLinks(linksDeArquivo(db || {}), (p, b) => undefined)
+      .concat(linksDeArquivo(db || {}).filter(l => faltam.has(l.link)).map(l => Object.assign({}, l, { motivo: 'Não está no Storage' })))
+      .filter(l => { const k = l.col + '|' + l._id + '|' + l.link; if (vistos.has(k)) return false; vistos.add(k); return true; })
+      .map(l => ({ onde: l.onde, col: l.col, _id: l._id, campo: l.campo, link: l.link, op: l.op || '', nome: l.nome || (l.col === 'fin' ? 'Comprovante' : ''), por: l.por || '', quando: quando(l.link), motivo: l.motivo }))
+      .sort((a, b) => String(a.op).localeCompare(String(b.op), 'pt-BR', { numeric: true }) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   }
 
   /* ---------- Operação-mãe e filhas (2 ou mais clientes no mesmo contêiner) ----------
@@ -1146,7 +1202,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

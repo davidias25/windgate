@@ -7,7 +7,7 @@ const uploadMiddleware = require('./middlewares/upload.middleware');
 const cotacoesRoutes = require('./routes/cotacoes.routes');
 const { criarTarefaOperacao, listarOperacoes } = require('./integrations/clickup.service');
 const { uploadParaGoogleDrive } = require('./integrations/drive.service');
-const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo, discoPermitido } = require('./integrations/supabase.service');
+const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo, discoPermitido, listarObjetos, existeNoStorage } = require('./integrations/supabase.service');
 
 const app = express();
 
@@ -541,6 +541,42 @@ app.post('/api/upload', auth.exigirTokenSeAtiva, uploadMiddleware.single('arquiv
 
 // Rota para reencontrar no Storage os arquivos que já foram enviados,
 // para recompor a aba Documentos sem precisar subir tudo de novo.
+/* ---------- Conferência dos links de arquivo ----------
+   Uma vez por dia, todo link de arquivo do banco é comparado com o que existe no Storage. O que não abre
+   vai para hubPainel._arquivos e aparece na Torre como "Arquivo perdido: reenviar". Nada é apagado nem
+   renomeado no banco. A listagem do bucket é o atalho; o que não aparece nela é conferido link por link,
+   para que uma listagem vazia (sem permissão) não marque tudo como perdido. */
+async function conferirArquivos() {
+  await bancoPronto;
+  if (!memoryDB) throw new Error('Banco central indisponível.');
+  const W = require('../public/hub/js/regras.js');
+  const links = W.linksDeArquivo(memoryDB);
+  const noStorage = [...new Map(links.map(l => W.caminhoNoStorage(l.link)).filter(Boolean).map(c => [c.bucket + '/' + c.path, c])).values()];
+  const lista = await listarObjetos();
+  const bucket = process.env.SUPABASE_BUCKET || 'windgate-docs';
+  const situacao = new Map();
+  const conferir = noStorage.filter(c => !(lista && c.bucket === bucket && lista.has(c.path)));
+  for (let i = 0; i < conferir.length; i += 8) {
+    await Promise.all(conferir.slice(i, i + 8).map(async c => situacao.set(c.bucket + '/' + c.path, await existeNoStorage(c.path, c.bucket))));
+  }
+  const existe = (p, b) => (lista && b === bucket && lista.has(p)) ? true : (situacao.has(b + '/' + p) ? (situacao.get(b + '/' + p) === false ? false : undefined) : undefined);
+  const quebrados = W.conferirLinks(links, existe).map(l => ({ col: l.col, onde: l.onde, _id: l._id, campo: l.campo, op: l.op, nome: l.nome, link: l.link, motivo: l.motivo }));
+  const resumo = { em: new Date().toISOString(), links: links.length, noStorage: noStorage.length, listagem: lista ? lista.size : null,
+    semResposta: [...situacao.values()].filter(v => v == null).length, quebrados };
+  await gravarParcial({ hubPainel: { _arquivos: resumo } });
+  console.log(`🔎 Conferência de arquivos: ${links.length} link(s), ${quebrados.length} quebrado(s)${resumo.semResposta ? `, ${resumo.semResposta} sem resposta` : ''}.`);
+  return resumo;
+}
+app.post('/api/storage/conferir', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  try { res.json(Object.assign({ success: true }, await conferirArquivos())); }
+  catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+app.get('/api/storage/conferencia', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto;
+  res.json({ success: true, conferencia: ((memoryDB || {}).hubPainel || {})._arquivos || null });
+});
+
 app.get('/api/storage/arquivos', auth.exigirTokenSeAtiva, async (req, res) => {
   try {
     const { arquivos, erro } = await listarArquivos();
@@ -895,6 +931,10 @@ if (require.main === module) {
   aliquotas.agendar();
   // NF-e enviada sem aviso da Focus: consulta de reserva a cada 2 minutos.
   setInterval(() => nfeRotas.rodada().catch(e => console.warn('⚠️ NF-e: consulta de reserva:', e.message)), 2 * 60 * 1000);
+  // Links de arquivo × Storage: 5 minutos depois de subir e depois uma vez por dia.
+  const conferirComAviso = () => conferirArquivos().catch(e => console.warn('⚠️ Conferência de arquivos:', e.message));
+  setTimeout(conferirComAviso, 5 * 60 * 1000);
+  setInterval(conferirComAviso, 24 * 60 * 60 * 1000);
   app.listen(PORT, () => {
     console.log(`===================================================`);
     console.log(`🚀 Servidor WindGate API rodando na porta ${PORT}`);

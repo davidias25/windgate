@@ -143,6 +143,43 @@ async function listarArquivos(pasta = 'documentos') {
   }
 }
 
+/**
+ * Todos os caminhos do bucket, pasta por pasta (a listagem do Storage não desce sozinha nas pastas).
+ * Devolve null quando não deu para listar: aí quem chama confere link por link.
+ */
+async function listarObjetos(maxPastas = 50) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const bucketName = process.env.SUPABASE_BUCKET || 'windgate-docs';
+  const caminhos = new Set(), fila = [''];
+  try {
+    for (let n = 0; fila.length && n < maxPastas; n++) {
+      const pasta = fila.shift();
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error } = await supabase.storage.from(bucketName).list(pasta, { limit: 1000, offset, sortBy: { column: 'name', order: 'asc' } });
+        if (error) return null;
+        (data || []).forEach(f => { if (!f || !f.name) return; const p = pasta ? `${pasta}/${f.name}` : f.name; if (f.id) caminhos.add(p); else fila.push(p); });
+        if (!data || data.length < 1000) break;
+      }
+    }
+  } catch (e) { return null; }
+  return caminhos;
+}
+
+/** O arquivo existe no Storage? true, false, ou null quando não deu para saber (rede, permissão). */
+async function existeNoStorage(caminho, bucket) {
+  if (process.env.SUPABASE_DISABLED === '1') return null;
+  const base = (process.env.SUPABASE_URL || 'https://vzewuczgqinddcgqfzku.supabase.co').replace(/\/$/, '');
+  const b = bucket || process.env.SUPABASE_BUCKET || 'windgate-docs';
+  const url = `${base}/storage/v1/object/public/${encodeURIComponent(b)}/${String(caminho).split('/').map(encodeURIComponent).join('/')}`;
+  try {
+    const r = await fetch(url, { method: 'HEAD' });
+    if (r.ok) return true;
+    if (r.status === 400 || r.status === 404) return false;
+    return null;
+  } catch (e) { return null; }
+}
+
 /** Leitura crua de um objeto do Storage (usado para o banco central). */
 async function baixarArquivo(caminho) {
   const supabase = getSupabaseClient();
@@ -172,4 +209,4 @@ async function enviarArquivo(caminho, buffer, contentType = 'application/octet-s
   return true;
 }
 
-module.exports = { discoPermitido, nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };
+module.exports = { listarObjetos, existeNoStorage, discoPermitido, nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };

@@ -31,7 +31,7 @@
     el.innerHTML = `
       <div class="head"><div><h1>Documentos</h1><p class="sub">Uma pasta por processo, com versão, quem enviou e quem conferiu. ${docs.length} arquivo(s) · ${pendConf} aguardando conferência.</p></div>
         <div class="btns"><button class="btn pri" data-enviar>+ Enviar arquivo</button></div></div>
-      ${perdidos.length ? `<div class="banner crit" style="margin-bottom:12px"><b>${perdidos.length} arquivo(s) perdido(s):</b> ficaram só no disco do servidor e precisam ser enviados de novo. <button class="btn sm" id="dperd">Ver a lista</button></div>` : ''}
+      ${perdidos.length ? `<div class="banner crit" style="margin-bottom:12px"><b>Arquivo perdido: reenviar.</b> ${perdidos.length} link(s) não abrem mais e o arquivo precisa ser enviado de novo. <button class="btn sm" id="dperd">Ver a lista</button></div>` : ''}
       <div class="ged">
         <aside class="box ged-l"><input type="search" class="inp" id="dq" placeholder="Buscar em todos os processos" value="${esc(qDoc)}">
           ${pastas.map(p => { const op = ops.find(x => x.id === p), c = op ? W.completudeDocs(db, op) : null;
@@ -55,8 +55,8 @@
 
     el.querySelector('[data-enviar]').onclick = () => enviar({ op: o && o.id });
     const bp = el.querySelector('#dperd');
-    if (bp) bp.onclick = () => { const m = H.modal('Arquivos perdidos', `<p class="note" style="margin-bottom:8px">Em Documentos, abra <b>Conferir</b> no próprio arquivo e use <b>Nova versão</b>. No Financeiro, edite o lançamento e anexe o comprovante. Propostas do CRM podem ser geradas de novo pela cotação.</p>
-      <div class="tw"><table><thead><tr><th>Onde</th><th>Operação</th><th>Arquivo</th><th>Enviado por</th><th>Em</th></tr></thead><tbody>${perdidos.map(x => `<tr><td>${esc(x.onde)}</td><td class="mono">${esc(x.op || '—')}</td><td>${esc(x.nome)}</td><td>${esc(x.por || '—')}</td><td class="mono">${x.quando ? W.dataBR(x.quando) : '—'}</td></tr>`).join('')}</tbody></table></div>`, '<button class="btn" data-x>Fechar</button>'); const ml = m.querySelector('.modal'); if (ml) ml.classList.add('larga'); };
+    if (bp) bp.onclick = () => { const m = H.modal('Arquivos perdidos', `<p class="note" style="margin-bottom:8px">Em Documentos, abra <b>Conferir</b> no próprio arquivo e use <b>Nova versão</b>. No Financeiro, edite o lançamento e anexe o comprovante. Propostas do CRM podem ser geradas de novo pela cotação. Notas, extratos e checklists: envie o arquivo de novo na própria tela.${(((db.hubPainel || {})._arquivos || {}).em) ? ` Última conferência com o Storage: ${esc(W.dataBR(String(db.hubPainel._arquivos.em).slice(0, 10)))}.` : ''}</p>
+      <div class="tw"><table><thead><tr><th>Onde</th><th>Operação</th><th>Arquivo</th><th>Enviado por</th><th>Em</th><th>Por quê</th></tr></thead><tbody>${perdidos.map(x => `<tr><td>${esc(x.onde)}</td><td class="mono">${esc(x.op || '—')}</td><td>${esc(x.nome)}</td><td>${esc(x.por || '—')}</td><td class="mono">${x.quando ? W.dataBR(x.quando) : '—'}</td><td class="note">${esc(x.motivo || '')}</td></tr>`).join('')}</tbody></table></div>`, '<button class="btn" data-x>Fechar</button>'); const ml = m.querySelector('.modal'); if (ml) ml.classList.add('larga'); };
     el.querySelectorAll('[data-excl]').forEach(b => b.onclick = () => H.excluirDoc(b.dataset.excl));
     el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { pasta = b.dataset.p; qDoc = ''; filtroTipo = ''; H.render(); });
     el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { filtroTipo = filtroTipo === b.dataset.t ? '' : b.dataset.t; H.render(); });
