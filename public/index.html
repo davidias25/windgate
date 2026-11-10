@@ -3681,6 +3681,7 @@ async function deleteDoc(id){
   if(opDoc) openOpDocsModal(opDoc);
   renderOps();
 
+  /* O arquivo vai para a lixeira do servidor: só sai do Storage depois de 90 dias, se nada mais usar. */
   if(targetLink && (targetLink.includes('supabase.co') || targetLink.includes('/uploads/'))){
     try {
       await fetch('/api/upload', {

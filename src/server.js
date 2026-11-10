@@ -567,6 +567,31 @@ async function conferirArquivos() {
   console.log(`🔎 Conferência de arquivos: ${links.length} link(s), ${quebrados.length} quebrado(s)${resumo.semResposta ? `, ${resumo.semResposta} sem resposta` : ''}.`);
   return resumo;
 }
+/* Lixeira: apaga do Storage o que foi excluído há mais de 90 dias e que nenhum registro usa.
+   Roda uma vez por mês. O pedido continua no banco, marcado com apagadoEm. */
+async function limparLixeira(hoje) {
+  await bancoPronto;
+  if (!memoryDB) throw new Error('Banco central indisponível.');
+  const W = require('../public/hub/js/regras.js');
+  const itens = W.lixeiraParaApagar(memoryDB, hoje || W.hojeISO());
+  const feitos = [];
+  for (const x of itens) {
+    let apagou = false;
+    try { apagou = W.caminhoNoStorage(x.link) ? await deletarDoSupabase(x.link) : false; } catch (e) { apagou = false; }
+    if (apagou) feitos.push(Object.assign({}, x, { apagadoEm: new Date().toISOString() }));
+  }
+  const resumo = { em: new Date().toISOString(), candidatos: itens.length, apagados: feitos.length };
+  await gravarParcial({ hubLixeiraArquivos: feitos, hubPainel: { _lixeira: resumo } });
+  if (itens.length) console.log(`🗑️ Lixeira de arquivos: ${feitos.length} de ${itens.length} apagado(s) do Storage.`);
+  return resumo;
+}
+const lixeiraVencida = () => { const u = (((memoryDB || {}).hubPainel || {})._lixeira || {}).em; return !u || (Date.now() - new Date(u).getTime()) >= 30 * 24 * 60 * 60 * 1000; };
+app.post('/api/storage/lixeira/limpar', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
+  try { res.json(Object.assign({ success: true }, await limparLixeira(String((req.body || {}).hoje || '') || undefined))); }
+  catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 app.post('/api/storage/conferir', auth.exigirTokenSeAtiva, async (req, res) => {
   if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
   try { res.json(Object.assign({ success: true }, await conferirArquivos())); }
@@ -594,27 +619,20 @@ app.delete('/api/upload', auth.exigirTokenSeAtiva, async (req, res) => {
       return res.status(400).json({ success: false, message: 'URL do arquivo não informada.' });
     }
 
-    let supaDeleted = false;
-    let localDeleted = false;
-
-    try {
-      supaDeleted = await deletarDoSupabase(targetUrl);
-    } catch (e) {}
-
-    try {
-      const cleanName = path.basename(targetUrl);
-      const localFilePath = path.join(__dirname, '../uploads', cleanName);
-      if (fs.existsSync(localFilePath)) {
-        fs.unlinkSync(localFilePath);
-        localDeleted = true;
-      }
-    } catch (e) {}
-
+    /* Excluir não apaga o arquivo: vai para a lixeira e só sai do Storage depois de 90 dias,
+       se nenhum registro usar (limparLixeira). Assim uma exclusão por engano tem volta. */
+    await bancoPronto;
+    const W = require('../public/hub/js/regras.js');
+    const _id = 'lx-' + W.idDeterministico({ link: String(targetUrl) });
+    const ja = ((memoryDB || {}).hubLixeiraArquivos || []).find(x => x && x._id === _id);
+    const quem = (req.usuario && req.usuario.k) || String(req.get('x-hub-usuario') || '');
+    if (!ja) await gravarParcial({ hubLixeiraArquivos: [{ _id, link: String(targetUrl), pedidoEm: new Date().toISOString(), por: quem }] });
     res.json({
       success: true,
-      message: 'Arquivo deletado com sucesso do servidor e Supabase storage!',
-      supaDeleted,
-      localDeleted
+      message: `Arquivo na lixeira: sai do Storage depois de ${W.DIAS_LIXEIRA} dias, se nada mais usar.`,
+      lixeira: _id,
+      supaDeleted: false,
+      localDeleted: false
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -932,7 +950,8 @@ if (require.main === module) {
   // NF-e enviada sem aviso da Focus: consulta de reserva a cada 2 minutos.
   setInterval(() => nfeRotas.rodada().catch(e => console.warn('⚠️ NF-e: consulta de reserva:', e.message)), 2 * 60 * 1000);
   // Links de arquivo × Storage: 5 minutos depois de subir e depois uma vez por dia.
-  const conferirComAviso = () => conferirArquivos().catch(e => console.warn('⚠️ Conferência de arquivos:', e.message));
+  const conferirComAviso = () => conferirArquivos().catch(e => console.warn('⚠️ Conferência de arquivos:', e.message))
+    .then(() => lixeiraVencida() ? limparLixeira() : null).catch(e => console.warn('⚠️ Lixeira de arquivos:', e.message));
   setTimeout(conferirComAviso, 5 * 60 * 1000);
   setInterval(conferirComAviso, 24 * 60 * 60 * 1000);
   app.listen(PORT, () => {

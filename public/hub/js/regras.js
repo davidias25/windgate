@@ -183,14 +183,14 @@
    * para tela (link, comp, pdf, xml, anexos…), e um link esquecido numa lista interna também se perde.
    * Documento substituído por nova versão ou removido não entra: o link dele não é mais usado.
    */
-  function linksDeArquivo(db) {
-    const out = [];
+  function linksDeArquivo(db, opcoes) {
+    const out = [], todos = !!(opcoes && opcoes.todos);
     const rotulo = o => o && (o.nome || o.desc || o.titulo || o.item || o.label || o.cat || o.arquivo || o.memo) || '';
     COLECOES_ARQUIVO.forEach(([col, onde]) => {
       const v = db && db[col];
       const regs = Array.isArray(v) ? v.map(r => [r && r._id, r]) : (v && typeof v === 'object' ? Object.entries(v) : []);
       regs.forEach(([id, r]) => {
-        if (!r || typeof r !== 'object' || r.substituidoPor || r.removidoEm) return;
+        if (!r || typeof r !== 'object' || (!todos && (r.substituidoPor || r.removidoEm))) return;
         const visto = new Set();
         const varrer = (x, campo, dono, n) => {
           if (n > 6 || !x || typeof x !== 'object' || visto.has(x)) return; visto.add(x);
@@ -215,6 +215,19 @@
       const c = caminhoNoStorage(l.link);
       return !!c && typeof existe === 'function' && existe(c.path, c.bucket) === false;
     }).map(l => Object.assign({}, l, { motivo: linkPerdido(l.link) ? 'Ficou só no disco do servidor' : 'Não está no Storage' }));
+  }
+  /**
+   * Lixeira de arquivos. Excluir documento ou lançamento não apaga o arquivo do Storage: o pedido fica em
+   * hubLixeiraArquivos. Só sai do Storage o que foi pedido há mais de `dias` (90) e que nenhum registro usa,
+   * nem versão antiga, nem registro removido. Devolve o que pode ser apagado agora.
+   */
+  const DIAS_LIXEIRA = 90;
+  function lixeiraParaApagar(db, hoje, dias) {
+    const h = hoje || hojeISO(), lim = dias == null ? DIAS_LIXEIRA : dias;
+    const chave = l => { const c = caminhoNoStorage(l); return c ? c.bucket + '/' + c.path : String(l || ''); };
+    const emUso = new Set(linksDeArquivo(db || {}, { todos: true }).map(l => chave(l.link)));
+    return ((db && db.hubLixeiraArquivos) || []).filter(x => x && x.link && !x.apagadoEm && ehISO(String(x.pedidoEm || '').slice(0, 10))
+      && diasEntre(String(x.pedidoEm).slice(0, 10), h) >= lim && !emUso.has(chave(x.link)));
   }
   /**
    * Tudo o que aponta para um arquivo perdido e ainda precisa ser enviado de novo: o que aponta para o disco
@@ -1202,7 +1215,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
