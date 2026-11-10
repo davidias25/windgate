@@ -153,7 +153,7 @@
           const fd = new FormData(); fd.append('arquivo', f);
           const r = await H.api('/api/upload', { method: 'POST', body: fd }); const j = await r.json().catch(() => ({}));
           if (!j.success) throw new Error(j.message || 'Falha no envio');
-          link = j.finalUrl || j.supabaseUrl || j.localUrl;
+          link = H.linkDoUpload(j);
         } catch (e) { b.disabled = false; b.textContent = 'Enviar'; H.toast('Não consegui enviar o arquivo: ' + esc(e.message) + '. Cole um link no lugar.'); return; }
       }
       const op = m.querySelector('#eop').value, tipo = m.querySelector('#etp').value, nome = nm.value.trim() || (f && f.name) || 'documento', agora = new Date().toISOString();

@@ -745,7 +745,7 @@
       if (!Array.isArray(H.db.crmDocs)) H.db.crmDocs = [];
       const iguais = H.db.crmDocs.filter(d => d && d.clienteId === cli._id && d.tipo === 'Proposta' && (d.oportunidadeId || '') === (oport ? oport._id : ''));
       const agora = new Date().toISOString();
-      const d = { _id: W.novoId(), clienteId: cli._id, oportunidadeId: oport ? oport._id : '', tipo: 'Proposta', nome: nomeArquivo, link: j.finalUrl || j.supabaseUrl || j.localUrl, obs: 'Gerada pelo sistema',
+      const d = { _id: W.novoId(), clienteId: cli._id, oportunidadeId: oport ? oport._id : '', tipo: 'Proposta', nome: nomeArquivo, link: H.linkDoUpload(j), obs: 'Gerada pelo sistema',
         versao: iguais.reduce((a, x) => Math.max(a, +x.versao || 1), 0) + 1, enviadoPor: eu(), dataUpload: agora, origem: 'proposta-automatica', removidoEm: null, removidoPor: '', acessos: [{ quem: eu(), acao: 'upload', em: agora }] };
       H.db.crmDocs.unshift(d); H.salvar();
       return { ok: true, doc: d, cliente: cli, oport };

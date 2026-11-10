@@ -28,6 +28,8 @@ function nomeParaStorage(nome) {
   return n || 'arquivo';
 }
 const storageAtivo = () => !!getSupabaseClient();
+/* Disco do servidor só nos testes e no computador de quem desenvolve: em produção ele é apagado a cada publicação. */
+const discoPermitido = () => process.env.SUPABASE_DISABLED === '1';
 
 async function uploadParaSupabase(filePath, fileName, mimeType = 'application/pdf') {
   const supabase = getSupabaseClient();
@@ -42,17 +44,15 @@ async function uploadParaSupabase(filePath, fileName, mimeType = 'application/pd
     const fileBuffer = fs.readFileSync(filePath);
     const destinationPath = `documentos/${Date.now()}_${nomeParaStorage(fileName)}`;
 
-    const { data, error } = await supabase.storage
-      .from(bucketName)
-      .upload(destinationPath, fileBuffer, {
-        contentType: mimeType,
-        upsert: true
-      });
-
-    if (error) {
-      console.error('❌ Erro no upload para o Supabase Storage:', error.message);
-      return null;
+    /* Três tentativas: uma queda de rede no meio do envio não pode virar arquivo perdido. */
+    let data = null, error = null;
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      ({ data, error } = await supabase.storage.from(bucketName).upload(destinationPath, fileBuffer, { contentType: mimeType, upsert: true }));
+      if (!error && data && data.path) break;
+      console.error(`❌ Upload para o Storage falhou (tentativa ${tentativa} de 3):`, error ? error.message : 'sem caminho');
+      if (tentativa < 3) await new Promise(ok => setTimeout(ok, 400 * tentativa));
     }
+    if (error || !data || !data.path) return null;
 
     const { data: publicUrlData } = supabase.storage
       .from(bucketName)
@@ -172,4 +172,4 @@ async function enviarArquivo(caminho, buffer, contentType = 'application/octet-s
   return true;
 }
 
-module.exports = { nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };
+module.exports = { discoPermitido, nomeParaStorage, storageAtivo, uploadParaSupabase, deletarDoSupabase, listarArquivos, baixarArquivo, enviarArquivo };

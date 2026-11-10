@@ -7,7 +7,7 @@ const uploadMiddleware = require('./middlewares/upload.middleware');
 const cotacoesRoutes = require('./routes/cotacoes.routes');
 const { criarTarefaOperacao, listarOperacoes } = require('./integrations/clickup.service');
 const { uploadParaGoogleDrive } = require('./integrations/drive.service');
-const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo } = require('./integrations/supabase.service');
+const { uploadParaSupabase, deletarDoSupabase, listarArquivos, storageAtivo, discoPermitido } = require('./integrations/supabase.service');
 
 const app = express();
 
@@ -516,10 +516,10 @@ app.post('/api/upload', auth.exigirTokenSeAtiva, uploadMiddleware.single('arquiv
 
     /* O disco do servidor é apagado a cada publicação. Com o Storage ligado, arquivo que não chegou
        lá é falha: dizer "armazenado" aqui foi como documentos sumiram semanas depois. */
-    if (storageAtivo() && !(supabaseResult && supabaseResult.publicUrl)) {
+    if (!(supabaseResult && supabaseResult.publicUrl) && !discoPermitido()) {
       fs.unlink(req.file.path, () => {});
       console.error('❌ Upload recusado: o arquivo não foi para o Storage:', req.file.originalname);
-      return res.status(502).json({ success: false, message: 'O arquivo não foi guardado no Storage. Tente de novo; se continuar, renomeie o arquivo.' });
+      return res.status(502).json({ success: false, message: 'Arquivo não enviado, tente de novo. Se continuar, avise o Davi.' });
     }
 
     const finalUrl = (supabaseResult && supabaseResult.publicUrl) || localUrl;
@@ -807,7 +807,7 @@ async function guardarArquivoGerado(buffer, nome, mime) {
   fs.writeFileSync(arq, buffer);
   let sup = null;
   try { sup = await uploadParaSupabase(arq, nome, mime); } catch (e) { console.warn('⚠️ Supabase Storage desativado ou sem credenciais.'); }
-  if (storageAtivo() && !(sup && sup.publicUrl)) { fs.unlink(arq, () => {}); throw new Error('O arquivo não foi guardado no Storage.'); }
+  if (!(sup && sup.publicUrl) && !discoPermitido()) { fs.unlink(arq, () => {}); throw new Error('O arquivo não foi guardado no Storage.'); }
   return (sup && sup.publicUrl) || '/uploads/' + path.basename(arq);
 }
 require('./routes/comex.routes')(app, { auth, acesso, gravarParcial, podeOperar, quemChat, ia, guardarArquivoGerado, pronto: () => bancoPronto, db: () => memoryDB });
@@ -821,8 +821,8 @@ async function salvarArquivoNFe(nome, conteudo, tipo) {
   try {
     const r = await uploadParaSupabase(tmp, nome, tipo);
     if (r && r.publicUrl) return r.publicUrl;
-    // O disco do servidor é apagado a cada publicação: com o Storage ligado, guardar lá é perder o arquivo depois.
-    if (storageAtivo()) throw new Error('O arquivo não foi guardado no Storage: ' + nome);
+    // O disco do servidor é apagado a cada publicação: guardar lá é perder o arquivo depois.
+    if (!discoPermitido()) throw new Error('O arquivo não foi guardado no Storage: ' + nome);
     fs.copyFileSync(tmp, path.join(__dirname, '../uploads', arq));
     return '/uploads/' + arq;
   } finally { fs.unlink(tmp, () => {}); }

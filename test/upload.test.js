@@ -65,7 +65,7 @@ console.log('\nExcluir documento:');
   delete process.env.SUPABASE_DISABLED; process.env.SUPABASE_URL = 'http://127.0.0.1:9'; process.env.SUPABASE_KEY = 'chave-falsa-de-teste';
   const falha = await enviar('Sebastião.pdf');
   ok(storageAtivo() && falha.status === 502 && falha.j.success === false && !falha.j.finalUrl, 'com Storage e falha no envio: responde erro, sem link /uploads');
-  ok(/não foi guardado/.test(falha.j.message), 'e explica o que aconteceu');
+  ok(/não enviado, tente de novo/i.test(falha.j.message), 'e explica o que aconteceu');
   await new Promise(r => setTimeout(r, 100));
   ok(antes() === n, 'o arquivo não fica para trás no disco');
   process.env.SUPABASE_DISABLED = '1';

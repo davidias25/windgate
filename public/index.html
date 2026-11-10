@@ -1830,10 +1830,12 @@ async function uploadFileUniversal(file) {
     const res = await apiFetch('/api/upload', { method: 'POST', body: fd });
     if (res.ok) {
       const json = await res.json();
-      if (json.success && (json.finalUrl || json.supabaseUrl || json.localUrl)) {
+      /* Link para o disco do servidor não é sucesso: ele é apagado a cada publicação. */
+      const urlOk = json.supabaseUrl || ((json.finalUrl && !/\/uploads\//.test(json.finalUrl)) ? json.finalUrl : '') || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? json.localUrl : '');
+      if (json.success && urlOk) {
         return {
           success: true,
-          url: json.finalUrl || json.supabaseUrl || json.localUrl,
+          url: urlOk,
           fileName: json.originalName || file.name,
           source: json.supabaseUrl ? 'Supabase Storage' : 'Servidor'
         };

@@ -173,6 +173,13 @@
   H.pode = cap => !!(H.db && H.userKey && W.pode(H.db, H.userKey, cap));
   H.podeFin = () => H.pode('fin.ver');
   H.aprova = () => H.pode('fin.autorizar');
+  /** Link de um envio que deu certo. Link para o disco do servidor não vale: ele é apagado a cada publicação. */
+  H.linkDoUpload = j => {
+    const l = j && j.success ? (j.supabaseUrl || j.finalUrl || '') : '';
+    const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+    if (!l || (/\/uploads\//.test(l) && !local)) throw new Error('Arquivo não enviado, tente de novo');
+    return l;
+  };
   H.perfil = () => W.perfilDe(H.db, H.userKey);
 
   /* ---------------- Navegação ---------------- */

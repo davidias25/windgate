@@ -11,7 +11,7 @@
   async function subir(f) {
     const fd = new FormData(); fd.append('arquivo', f);
     const r = await H.api('/api/upload', { method: 'POST', body: fd }); const j = await r.json().catch(() => ({}));
-    if (!j.success) throw new Error(j.message || 'falha no envio'); return j.finalUrl || j.supabaseUrl || j.localUrl;
+    if (!j.success) throw new Error(j.message || 'falha no envio'); return H.linkDoUpload(j);
   }
 
   /** Abre a janela de envio. opts.op: operação da ficha (pré-seleciona no lançamento novo). */
