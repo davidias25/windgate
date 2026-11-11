@@ -572,7 +572,15 @@ function triCalcular(e){
     { nome: 'Produto pronto', gatilho: 'saldo à fábrica · pré-embarque', vinculo: 'saldo' },
     { nome: 'Chegada ao porto', gatilho: 'frete · impostos · despesas · entrega', vinculo: 'chegada' }];
   const DIAS_PADRAO = [5, 35, 95];
-  const num2 = v => { const x = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(x) ? x : 0; };
+  /* Valor digitado do jeito brasileiro ("109.264,00", "109264,00") ou com ponto decimal ("109264.00"). Com vírgula, o ponto
+     é de milhar; sem vírgula, ponto seguido de grupos de 3 dígitos ("109.264") também é milhar. */
+  const num2 = v => {
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    let s = String(v == null ? '' : v).replace(/R\$|\s/g, '');
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    const x = parseFloat(s); return isFinite(x) ? x : 0;
+  };
   function normalizarParcela(p, i) {
     const o = p || {};
     const out = { id: String(o.id || ('p' + (i + 1))), nome: String(o.nome || ('Parcela ' + (i + 1))).trim(), gatilho: String(o.gatilho || '').trim(),

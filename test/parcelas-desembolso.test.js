@@ -42,6 +42,13 @@ console.log('\nLista de parcelas:');
   ok(p.valor === 1234.5 && p.vinculo === 'nenhuma' && p.reajuste === 576 && p.diasAposAnterior === 20, 'valor com vírgula, vínculo desconhecido vira "nenhuma", reajuste e prazo relativo');
 }
 
+console.log('\nValor digitado:');
+{
+  const v = x => W.parcelasDe({ parcelas: [{ valor: x }] })[0].valor;
+  ok(v('109.264,00') === 109264 && v('109264,00') === 109264 && v('109264.00') === 109264 && v('109.264') === 109264 && v('R$ 1.234.567,89') === 1234567.89, '"109.264,00", "109264,00", "109264.00" e "109.264" valem R$ 109.264');
+  ok(v('108486.5') === 108486.5 && v('25,5') === 25.5 && v(109744) === 109744 && v('') === 0, 'ponto decimal, vírgula decimal, número e vazio');
+}
+
 console.log('\nOP228 — saídas e cobertura:');
 {
   const q = q228(), R = R228(0), c = W.coberturaDesembolso(q, R);
