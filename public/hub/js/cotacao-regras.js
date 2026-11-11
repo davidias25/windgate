@@ -651,16 +651,27 @@ function triCalcular(e){
     return { ok: true, mudou: true };
   }
   const SAIDA_TXT = { sinal: 'o sinal da fábrica', saldo: 'o saldo da fábrica', chegada: 'os custos de chegada', entrega: 'a entrega' };
+  /**
+   * O que bloqueia: cronograma vazio e soma diferente do valor a receber. Saída maior que o recebimento não bloqueia:
+   * aparece como aviso, com a diferença (desemAvisos).
+   */
   function desemErros(q, R) {
     const c = coberturaDesembolso(q, R), errs = [];
     if (!c.linhas.some(l => l.parcela.valor)) { errs.push('preencha o cronograma de desembolso (use Sugerir).'); return errs; }
+    if (Math.round(Math.abs(c.base - precoDesem(R)) * 100) > 1) errs.push('A soma das parcelas (' + fmt(c.base) + ') difere do valor a receber (' + fmt(precoDesem(R)) + (R.aReceber != null ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.difalCliente || 0) : R.st > 0 ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.st || 0) : '') + ').');
+    return errs;
+  }
+  /** Avisos de cobertura: a parcela que não cobre a saída, com a diferença, e a saída sem parcela ligada. Não bloqueiam. */
+  function desemAvisos(q, R) {
+    const c = coberturaDesembolso(q, R), errs = [];
+    if (!c.linhas.some(l => l.parcela.valor)) return errs;
     c.soltos.forEach(k => errs.push('A saída com ' + SAIDA_TXT[k] + ' (' + fmt(saidasPorParcela(q, R).balde[k]) + ') não está ligada a nenhuma parcela.'));
     c.linhas.filter(l => !l.cobre).forEach(l => {
       if (c.modo === 'acumulada') return errs.push('Parcela ' + l.n + ' (' + l.parcela.nome + '): o saldo acumulado fica negativo (' + fmt(l.saldoAcum) + ').');
       const v = l.parcela.vinculo, ini = 'Parcela ' + l.n + ' (' + fmt(l.recebe) + ') MENOR que ';
-      errs.push(v === 'sinal' ? ini + 'a saída da etapa (' + fmt(l.saida) + ') — o cliente precisa cobrir o sinal da fábrica.' : v === 'saldo' ? ini + 'o saldo da fábrica (' + fmt(l.saida) + ').' : v === 'chegada' ? ini + 'os custos de chegada (' + fmt(l.saida) + ').' : ini + 'a saída da etapa (' + fmt(l.saida) + ').');
+      const dif = ' Diferença: ' + fmt(l.saida - l.recebe) + '.';
+      errs.push((v === 'sinal' ? ini + 'a saída da etapa (' + fmt(l.saida) + ') — o cliente precisa cobrir o sinal da fábrica.' : v === 'saldo' ? ini + 'o saldo da fábrica (' + fmt(l.saida) + ').' : v === 'chegada' ? ini + 'os custos de chegada (' + fmt(l.saida) + ').' : ini + 'a saída da etapa (' + fmt(l.saida) + ').') + dif);
     });
-    if (Math.round(Math.abs(c.base - precoDesem(R)) * 100) > 1) errs.push('A soma das parcelas (' + fmt(c.base) + ') difere do valor a receber (' + fmt(precoDesem(R)) + (R.aReceber != null ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.difalCliente || 0) : R.st > 0 ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.st || 0) : '') + ').');
     return errs;
   }
   /** Sugestão: cada parcela cobre a sua saída; da margem, 21% vai no sinal, 14% no saldo e o resto nas demais. */
@@ -1379,6 +1390,6 @@ function triCalcular(e){
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
-    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
+    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
     separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

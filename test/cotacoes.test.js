@@ -91,7 +91,7 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     if (L.preco > 0 && (s.desR1 !== sug.desR1 || s.desR2 !== sug.desR2 || s.desR3 !== sug.desR3)) difD.push(q.id + ' sugestão');
     const q2 = Object.assign({}, q, { fields: Object.assign({}, q.fields, i % 2 ? s : { desR1: '1', desR2: '1', desR3: '1' }) });
     rodarLegado(app, q2, 'pct');
-    const el = JSON.stringify(app.desemErrors().map(e => e.replace(/ \(use ⚖ Sugerir\)/, ' (use Sugerir)'))), eh = JSON.stringify(C.desemErros(q2, C.calcular(q2)));
+    const el = JSON.stringify(app.desemErrors().map(e => e.replace(/ \(use ⚖ Sugerir\)/, ' (use Sugerir)'))), Rq2 = C.calcular(q2), errQ2 = C.desemErros(q2, Rq2), eh = JSON.stringify(errQ2.length && /^preencha/.test(errQ2[0]) ? errQ2 : C.desemAvisos(q2, Rq2).map(e => e.replace(/ Diferença: .*$/, '')).concat(errQ2));   // mesma regra; a cobertura agora só avisa
     if (el !== eh) difD.push(q.id + ' erros: ' + el.slice(0, 80) + ' × ' + eh.slice(0, 80));
   }
   ok(difD.length === 0, 'sugestão de parcelas e travas do desembolso iguais ao sistema atual (60 cotações)' + (difD.length ? ' — ' + difD.slice(0, 3).join(' | ') : ''));

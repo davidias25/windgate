@@ -240,7 +240,11 @@
     const cob = desenharCobertura(el);
     const errs = W.desemErros(ed, R), preenchido = cob.linhas.some(l => l.parcela.valor);
     painelCambio(el);
-    el.querySelector('#cderr').innerHTML = errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> ${cob.modo === 'acumulada' ? 'o saldo acumulado nunca fica negativo' : 'em todas as etapas o recebimento cobre a saída'} e a soma fecha com o valor a receber.</div>` : '';
+    /* Bloqueia só o que impede a proposta (vazio, soma diferente). Saída maior que o recebimento é aviso, com a diferença. */
+    const avisos = W.desemAvisos(ed, R);
+    el.querySelector('#cderr').innerHTML = (errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : '')
+      + (avisos.length ? `<div class="banner" style="margin-top:8px">⚠ <b>Atenção ao caixa (não bloqueia):</b> ${avisos.map(esc).join('<br>⚠ ')}</div>` : '')
+      + (!errs.length && !avisos.length ? `<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> ${cob.modo === 'acumulada' ? 'o saldo acumulado nunca fica negativo' : 'em todas as etapas o recebimento cobre a saída'} e a soma fecha com o valor a receber.</div>` : '');
   }
 
   /* ================= VÁRIOS CLIENTES ================= */
@@ -343,7 +347,8 @@
       [1, 2, 3].forEach((n, i) => { const s = el.querySelector(`#cmo_${id}_${n}`); if (s) s.textContent = fmt(os[i]);
         const t = el.querySelector(`#cms_${id}_${n}`); if (t) t.innerHTML = !rs[i] ? pill('—') : rs[i] >= os[i] - 0.01 ? pill('cobre (+' + fmt(rs[i] - os[i]) + ')', 'ok') : pill('NÃO cobre', 'crit'); });
       const errs = W.desemErros(cc.q, cc.R), box = el.querySelector('#cme_' + id);
-      if (box) box.innerHTML = errs.length && rs.some(Boolean) ? `<div class="banner crit" style="margin-top:8px">⛔ ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px">Recebimento cobre a saída em todas as etapas. A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</div>` : `<p class="note" style="margin-top:6px">A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</p>`;
+      const av = W.desemAvisos(cc.q, cc.R);
+      if (box) box.innerHTML = errs.length && rs.some(Boolean) ? `<div class="banner crit" style="margin-top:8px">⛔ ${errs.map(esc).join('<br>⛔ ')}</div>` : av.length ? `<div class="banner" style="margin-top:8px">⚠ <b>Não bloqueia:</b> ${av.map(esc).join('<br>⚠ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px">Recebimento cobre a saída em todas as etapas. A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</div>` : `<p class="note" style="margin-top:6px">A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</p>`;
     });
   }
   function ligarMulti(el) {

@@ -54,20 +54,22 @@ console.log('\nOP228 — saídas e cobertura:');
   const q = q228(), R = R228(0), c = W.coberturaDesembolso(q, R);
   ok(c.linhas.map(l => l.saida.toFixed(2)).join(' / ') === '52022.92 / 121386.81 / 186685.65 / 0.00', 'saídas: sinal, saldo, chegada e zero na 4ª');
   ok(igual(c.base, 435424) && W.desemErros(q, R).every(e => !/soma/.test(e)), 'as 4 parcelas fecham os R$ 435.424');
-  ok(c.modo === 'etapa' && !c.linhas[1].cobre && W.desemErros(q, R).some(e => /^Parcela 2 .*MENOR que o saldo da fábrica/.test(e)), 'por etapa (padrão): a 2ª não cobre o saldo da fábrica — a trava de hoje');
+  ok(c.modo === 'etapa' && !c.linhas[1].cobre && W.desemAvisos(q, R).some(e => /^Parcela 2 .*MENOR que o saldo da fábrica .*Diferença: R\$\s?12\.890,81/.test(e)) && W.desemErros(q, R).length === 0, 'por etapa (padrão): a 2ª não cobre o saldo da fábrica — aparece com a diferença (R$ 12.890,81), sem bloquear');
   ok(!W.mudarCobertura(q, 'acumulada', 'Davi', false).ok && W.modoCobertura(q) === 'etapa', 'só o Samir troca a regra');
   const r = W.mudarCobertura(q, 'acumulada', 'Samir', true, '2026-11-11T10:00:00Z');
   ok(r.ok && q.coberturaDesembolso === 'acumulada' && q.coberturaHist[0].por === 'Samir' && q.coberturaHist[0].em === '2026-11-11T10:00:00Z' && q.coberturaHist[0].de === 'etapa', 'a troca fica registrada: quem, quando, de e para');
   const a = W.coberturaDesembolso(q, R);
   ok(a.linhas.map(l => l.saldoAcum).join(' / ') === '55897.08 / 43006.27 / -34415.38 / 75328.62', 'saldo acumulado por parcela: 55.897,08 / 43.006,27 / −34.415,38 / 75.328,62');
-  ok(!a.linhas[2].cobre && W.desemErros(q, R).some(e => /Parcela 3 .*saldo acumulado fica negativo \(-R\$\s?34\.415,38\)/.test(e)), 'com esses números, a 3ª fica R$ 34.415,38 negativa: a regra acumulada também trava');
+  ok(!a.linhas[2].cobre && W.desemAvisos(q, R).some(e => /Parcela 3 .*saldo acumulado fica negativo \(-R\$\s?34\.415,38\)/.test(e)) && W.desemErros(q, R).length === 0, 'com esses números, a 3ª fica R$ 34.415,38 negativa: aparece, sem bloquear');
   /* A entrega na obra (frete nacional) ligada à 4ª tira esse valor da 3ª. */
   const q2 = q228(); q2.coberturaDesembolso = 'acumulada'; q2.parcelas[3].vinculo = 'entrega';
   const R2 = R228(40000), a2 = W.coberturaDesembolso(q2, R2);
   ok(igual(a2.linhas[2].saida, CHEGADA - 40000) && igual(a2.linhas[3].saida, 40000), 'parcela de entrega: o frete nacional sai da chegada e vai para a 4ª');
-  ok(a2.linhas.every(l => l.cobre) && W.desemErros(q2, R2).length === 0, 'com R$ 40.000 de entrega na 4ª, o saldo acumulado nunca fica negativo e a trava some');
+  ok(a2.linhas.every(l => l.cobre) && W.desemErros(q2, R2).length === 0 && W.desemAvisos(q2, R2).length === 0, 'com R$ 40.000 de entrega na 4ª, o saldo acumulado nunca fica negativo e o aviso some');
   const solto = q228(); solto.parcelas[2].vinculo = 'nenhuma';
-  ok(W.desemErros(solto, R).some(e => /custos de chegada .* não está ligada a nenhuma parcela/.test(e)), 'saída sem parcela ligada é erro');
+  ok(W.desemAvisos(solto, R).some(e => /custos de chegada .* não está ligada a nenhuma parcela/.test(e)) && W.desemErros(solto, R).length === 0, 'saída sem parcela ligada aparece como aviso');
+  const errada = q228(); errada.parcelas[3].valor = 109.74;
+  ok(W.desemErros(errada, R).some(e => /A soma das parcelas/.test(e)), 'soma diferente do preço continua bloqueando');
 }
 
 console.log('\nReajuste cambial por parcela:');

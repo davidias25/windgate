@@ -190,7 +190,7 @@
       }
       if (contratoDesatualizado(db, contrato)) add('bloqueante', 'A cotação mudou depois de gerar o contrato', 'Gere de novo.');
       /* Risco financeiro que dá para medir. */
-      const des = W.desemErros(q, R); des.forEach(e => add('atencao', 'Pagamento à fábrica antes do recebimento', e));
+      const des = W.desemAvisos(q, R); des.forEach(e => add('atencao', 'Pagamento à fábrica antes do recebimento', e));
       if (dados.tabelaRaw) { const s = W.simulacaoCambio(q, dados.tabelaRaw.referencia - 0.05); const pior = s && s.cenarios.reduce((a, b) => (b.lucro < a.lucro ? b : a)); if (pior && pior.lucro < 0) add('atencao', 'Margem negativa no pior cenário do dólar', `dólar ${pior.dolar.toLocaleString('pt-BR')}: ${moeda(pior.lucro)}`); }
     }
     /* Prazo × ETA e free time. */
