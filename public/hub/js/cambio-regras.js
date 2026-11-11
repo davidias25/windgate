@@ -98,7 +98,7 @@
   /* ---------- Parcelas ---------- */
   /** Número da parcela: pela descrição ("2º recebimento", "2ª parcela", "parcela 2") ou pela ordem de vencimento. */
   function numeroNaOp(db, l) {
-    const m = /([123])\s*[ºªo°]\s*(recebimento|parcela)|parcela\s*([123])\b/i.exec(String((l && (l.descCliente || l.desc)) || ''));
+    const m = /([1-8])\s*[ºªo°]\s*(recebimento|parcela)|parcela\s*([1-8])\b/i.exec(String((l && (l.descCliente || l.desc)) || ''));
     if (m) return +(m[1] || m[3]);
     const ps = parcelasDoCliente(db, l.op);
     return ps.indexOf(l) + 1 || null;
@@ -198,13 +198,16 @@
     const f = W.camposDe(q);
     return Object.assign({}, q, { fields: Object.assign({}, f, { txDesp: String((parseFloat(f.txDesp) || 0) + delta), txFrete: String((parseFloat(f.txFrete) || 0) + delta) }) });
   }
-  const saidas = q => { const R = W.calcular(q); if (q.clienteId) W.separarDifal(R); const o = W.desemOuts(q, R); return [o.o1, o.o2, o.o3]; };
+  /* Uma saída por parcela, na ordem do cronograma (3 nas cotações antigas). */
+  const saidas = q => { const R = W.calcular(q); if (q.clienteId) W.separarDifal(R); return W.saidasPorParcela(q, R).saidas; };
   /** Quanto muda o custo de cada parcela quando o dólar sobe R$ 0,10. A 1ª é fixa para o cliente: valor 0 na tabela. */
   function valoresPor010(q) {
     const a = saidas(q), b = saidas(comCambio(q, PASSO)), custo = b.map((v, i) => r2(v - a[i]));
-    return { custo, cliente: [0, custo[1], custo[2]] };
+    return { custo, cliente: custo.map((v, i) => (i === 0 ? 0 : v)) };
   }
-  const parcelasDe = q => { const f = W.camposDe(q); return [f.desR1, f.desR2, f.desR3].map(v => parseFloat(v) || 0); };
+  const parcelasDe = q => W.parcelasDe(q).map(p => p.valor);
+  /* Regra de PTAX pela saída da parcela: sinal é fixo; saldo, o vencimento; chegada, a DI. Sem dólar (entrega, nenhuma): fixa. */
+  const REGRA_POR_VINCULO = { sinal: 'Fixa', saldo: 'PTAX do dia útil anterior ao vencimento', chegada: 'PTAX do dia útil anterior ao registro da DI', entrega: 'Fixa', nenhuma: 'Fixa' };
   /** Painel interno: 3 cenários, por parcela, com preço ao cliente, custo e lucro. */
   function simulacaoCambio(q, ptax) {
     const ref = referenciaDaProposta(ptax); if (!ref) return null;
@@ -229,25 +232,34 @@
   function tabelaCambio(q) {
     const c = q && q.cambioProposta; if (!c || !(c.referencia > 0)) return null;
     const por = c.por010 || valoresPor010(q).cliente, rec = parcelasDe(q);
-    const regra = ['Fixa', 'PTAX do dia útil anterior ao vencimento', 'PTAX do dia útil anterior ao registro da DI'];
+    const ps = W.parcelasDe(q);
     return { data: c.data, referencia: c.referencia, piso: c.piso, teto: c.teto, tolerancia: TOLERANCIA, repasseQueda: REPASSE_QUEDA,
-      parcelas: rec.map((v, i) => ({ n: i + 1, valor: r2(v), por010: i === 0 ? 0 : r2(por[i]), fixa: i === 0, regra: regra[i] })) };
+      parcelas: rec.map((v, i) => { const regra = i === 0 ? 'Fixa' : REGRA_POR_VINCULO[ps[i].vinculo] || 'Fixa', fixa = regra === 'Fixa';
+        return { n: i + 1, valor: r2(v), por010: fixa ? 0 : r2(por[i] || 0), fixa, regra }; }) };
   }
   const moeda = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const taxa = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   /** O texto e as linhas da tabela, iguais na proposta e no contrato: o mesmo quadro do Anexo II. */
+  /* "a 1ª parcela é fixa; a 2ª usa…; a 3ª, …": o texto de sempre para 3 parcelas, e o mesmo jeito para mais. */
+  function regraDasParcelas(ps) {
+    const padrao = ['Fixa', 'PTAX do dia útil anterior ao vencimento', 'PTAX do dia útil anterior ao registro da DI'];
+    if (ps.length === 3 && ps.every((p, i) => p.regra === padrao[i])) return 'a 1ª parcela é fixa; a 2ª usa o dia útil anterior ao vencimento; a 3ª, o dia útil anterior ao registro da DI';
+    const txt = r => (r === 'Fixa' ? 'é fixa' : r === padrao[1] ? 'usa o dia útil anterior ao vencimento' : 'usa o dia útil anterior ao registro da DI');
+    const fixas = ps.filter(p => p.fixa).map(p => p.n + 'ª'), outras = ps.filter(p => !p.fixa).map(p => `a ${p.n}ª ${txt(p.regra)}`);
+    return [fixas.length ? (fixas.length === 1 ? `a ${fixas[0]} parcela é fixa` : `as parcelas ${fixas.join(', ')} são fixas`) : ''].concat(outras).filter(Boolean).join('; ');
+  }
   function textoCambio(t) {
     if (!t) return null;
     return {
       referencia: `Dólar de referência: R$ ${taxa(t.referencia)}.`,
-      regra: `Vale a PTAX de venda do Banco Central: a 1ª parcela é fixa; a 2ª usa o dia útil anterior ao vencimento; a 3ª, o dia útil anterior ao registro da DI. Dentro da faixa de R$ ${taxa(t.piso)} a R$ ${taxa(t.teto)} (1% sobre a referência), a parcela não muda. Fora dela, o ajuste é integral desde a referência, proporcional por fração de R$ 0,10. Cliente em atraso: vale a maior PTAX entre a data da parcela e o dia útil anterior ao pagamento.`,
+      regra: `Vale a PTAX de venda do Banco Central: ${regraDasParcelas(t.parcelas)}. Dentro da faixa de R$ ${taxa(t.piso)} a R$ ${taxa(t.teto)} (1% sobre a referência), a parcela não muda. Fora dela, o ajuste é integral desde a referência, proporcional por fração de R$ 0,10. Cliente em atraso: vale a maior PTAX entre a data da parcela e o dia útil anterior ao pagamento.`,
       colunas: ['Parcela', `Alta (acima de R$ ${taxa(t.teto)})`, `Queda (abaixo de R$ ${taxa(t.piso)})`],
       linhas: t.parcelas.map(p => [`${p.n}ª parcela`, p.fixa ? 'Fixa' : 'R$ ' + moeda(p.por010), p.fixa ? 'Fixa' : 'R$ ' + moeda(p.por010 * REPASSE_QUEDA)])
     };
   }
 
   /* ---------- Parcelas previstas no Financeiro ---------- */
-  const numeroDaParcela = l => { const m = /^([123])º recebimento/.exec(String((l && l.desc) || '')); return m ? +m[1] : null; };
+  const numeroDaParcela = l => { const m = /^([1-8])º recebimento/.exec(String((l && l.desc) || '')); return m ? +m[1] : null; };
   function registroDaDI(db, o) {
     if (o.dataRegistroDI) return W.soData(o.dataRegistroDI);
     const r = W.retratoDuimp(db, o.duimp || (o.duimpDados && o.duimpDados.geral && o.duimpDados.geral.numero));
@@ -263,6 +275,8 @@
       const o = (db.ops || []).find(x => x && x.id === l.op); if (!o) return;
       if (o.clausulaCambial && !normalizarClausula(o.clausulaCambial).remessas.some(m => m.parcela === n && m.quando !== 'cambio')) return;
       const q = W.cotacaoDaOp(db, o); if (!q || !q.cambioProposta) return;
+      /* Parcela sem dólar (4ª em diante, sem valor por R$ 0,10): não tem correção. */
+      if (n > 3 && !((q.cambioProposta.por010 || [])[n - 1] > 0)) return;
       const d = datasDaParcela(n, { vencimento: W.vencDe(l), registroDI: registroDaDI(db, o), hoje: h });
       out.push({ l, n, o, q, pendente: d.pendente || '', datas: d.datas || [], atraso: !!d.atraso, chegou: !!(d.datas || []).length && d.datas.every(x => x <= h) });
     });

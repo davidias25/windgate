@@ -9789,6 +9789,7 @@ async function gerarPropostaPDF(){
     yD=yE+Math.ceil(etapas.length/2)*46+14+prazoLinhas.length*10;   // acompanha o número de etapas e as linhas do prazo
     }
     if(B.cronograma){
+    if(!(Array.isArray(state.parcelasPDF)&&state.parcelasPDF.length)){
     yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — 3 PARCELAS',PDF_MAG);
     const recs=[[N('desR1'),'PARCELA 01','Assinatura · libera a produção'],
                 [N('desR2'),'PARCELA 02','Produto pronto · pré-embarque'],
@@ -9805,13 +9806,34 @@ async function gerarPropostaPDF(){
       xD+=177.7;
     });
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
+    }else{
+    /* Cronograma com a lista própria da cotação (1 a 8 parcelas, Hub 2.0): mesmos cards, 3 ou 4 por linha. */
+    const ps=state.parcelasPDF, porLinha=ps.length<=3?3:4, larg=(523-(porLinha-1)*10)/porLinha, linhas=Math.ceil(ps.length/porLinha), altC=86;
+    if(yD+20+linhas*(altC+10)>790){ doc.addPage(); pdfHeader(doc,cliente+' · Cronograma de desembolso · '+mesAno); yD=110; }
+    yD=bandPDF(doc,yD,'CRONOGRAMA DE DESEMBOLSO — '+ps.length+(ps.length===1?' PARCELA':' PARCELAS'),PDF_MAG);
+    ps.forEach((p,i)=>{
+      const xD=36+(i%porLinha)*(larg+10), yC=yD+14+Math.floor(i/porLinha)*(altC+10);
+      doc.setDrawColor(221,228,234); doc.setLineWidth(.8); doc.rect(xD,yC,larg,altC);
+      doc.setFillColor(...PDF_MAG); doc.rect(xD,yC,4,altC,'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...PDF_GRAY); doc.text('PARCELA '+String(i+1).padStart(2,'0')+' · '+Math.round(p.pct)+'%',xD+12,yC+14);
+      doc.setFontSize(12); doc.setTextColor(...PDF_NAVY); doc.text(fmt(p.valor),xD+12,yC+31);
+      doc.setFontSize(7.5); doc.text(doc.splitTextToSize(p.nome,larg-18)[0],xD+12,yC+43);
+      doc.setFont('helvetica','normal'); doc.setFontSize(6.6); doc.setTextColor(...PDF_GRAY);
+      const extra=p.reajuste?'+ reajuste cambial '+fmt(p.reajuste)+(p.reajusteObs?' · '+p.reajusteObs:''):'';
+      const rel=p.prazo&&!/^\d{2}\/\d{2}\/\d{4}$/.test(p.prazo)?p.prazo:'';
+      const limpo=s=>String(s||'').replace(/→/g,'–').replace(/[^\u0000-ÿ–—•’“”]/g,'');   // a fonte do PDF não tem seta nem emoji
+      doc.text(doc.splitTextToSize(limpo([p.gatilho,rel,extra].filter(Boolean).join(' · ')),larg-18).slice(0,3),xD+12,yC+53);
+      doc.text('Previsão: '+(p.previsaoBR||p.prazo||''),xD+12,yC+altC-6);
+    });
+    yD+=14+linhas*(altC+10)-78;
+    }
     let yN=yD+92;
     if(difalV>0){
       doc.setFillColor(252,247,227); doc.rect(36,yN-10,523,30,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
       doc.text('+ ICMS-DIFAL na chegada · '+fmt(difalV)+' (previsto)',44,yN+2);
       doc.setFont('helvetica','normal'); doc.setFontSize(7.3);
-      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado junto à 3ª parcela. Valor sujeito à alíquota da guia definitiva.':'Recolhido em guia à SEFAZ, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
+      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado junto à '+(state.nChegada||3)+'ª parcela. Valor sujeito à alíquota da guia definitiva.':'Recolhido em guia à SEFAZ, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
       yN+=34;
     }
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);

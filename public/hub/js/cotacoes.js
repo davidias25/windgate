@@ -134,12 +134,7 @@
           <p class="lbl" style="margin-top:12px">Demais despesas (porto · agente de carga · bancárias)</p>
           <div class="list">${ed.exps.map((e, i) => `<div class="row"><input class="inp" data-ex="${i}" data-c="l" value="${esc(e.l || '')}" placeholder="Descrição" style="flex:1"><input class="inp" data-ex="${i}" data-c="v" value="${esc(e.v)}" inputmode="decimal" style="width:120px;text-align:right">${bloq ? '' : `<button class="btn ghost sm" data-rmex="${i}">✕</button>`}</div>`).join('')}</div>
           ${bloq ? '' : '<button class="btn sm" id="cexp" style="margin-top:8px">+ Despesa</button>'}</div></div>
-        ${multi ? blocoRateio() + blocoDesembolso(bloq) : `<div class="box"><div class="box-h"><h2>Cronograma de desembolso: cliente × fábrica</h2>${bloq ? '' : '<button class="btn blue sm" id="csug">Sugerir distribuição</button>'}</div><div class="box-b">
-          <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}<p class="note w3">Padrão das fábricas: 30% para iniciar a produção e 70% na finalização. A regra WindGate: o recebimento do cliente em cada etapa SEMPRE cobre a nossa saída.</p></div>
-          <div class="tw" style="margin-top:10px"><table><thead><tr><th>Etapa</th><th class="num">Nossa saída</th><th class="num">% do total</th><th class="num">Recebimento do cliente (R$)</th><th>Situação</th></tr></thead><tbody>
-            ${[[1, '1 · Assinatura', 'sinal à fábrica → produção'], [2, '2 · Produto pronto', 'saldo à fábrica · pré-embarque'], [3, '3 · Chegada ao porto', 'frete · impostos · despesas · entrega']].map(([n, t, d]) => `<tr><td><b>${t}</b><br><small class="note">${d}</small></td><td class="num" id="cdo${n}">—</td>
-              <td class="num"><input class="inp" id="cdp${n}" data-pct="${n}" inputmode="decimal" style="width:80px;text-align:right"></td><td class="num"><input class="inp" id="cf_desR${n}" data-f="desR${n}" value="${esc(F('desR' + n))}" inputmode="decimal" style="width:130px;text-align:right"></td><td id="cds${n}"></td></tr>`).join('')}</tbody></table></div>
-          <p class="note" id="cdbase" style="margin-top:6px"></p><div id="cderr"></div></div></div>`}
+        ${multi ? blocoRateio() + blocoDesembolso(bloq) : blocoParcelas(bloq)}
       </fieldset>
       <div class="box" style="position:sticky;top:12px"><div class="box-h"><h2>Custo da operação</h2>${stPill(ed.status)}</div><div class="box-b" id="cresumo"></div>
         <div class="box-b" style="border-top:1px solid var(--line)">${multi ? '' : `<h3 class="h3">Margem WindGate</h3>
@@ -156,6 +151,60 @@
           <p class="note" style="margin-top:8px">${multi ? 'Cada cliente é aprovado e tem a sua proposta. Os botões ficam no resumo, ao lado do nome.' : ed.status === 'wait' && !podeAprovar() ? 'Enviada. Aguardando o Samir aprovar a margem; o PDF é liberado em seguida.' : ed.status === 'ok' ? 'Proposta liberada: gere o PDF no padrão WindGate.' : 'Nada sai sem aprovação.'}</p></div></div></div>`;
     ligar(el);
     atualizar(el);
+  }
+
+  /* ---------- Cronograma de desembolso: de 1 a 8 parcelas ---------- */
+  const souSamir = () => H.userKey === 'samir';
+  function blocoParcelas(bloq) {
+    const ps = W.parcelasDe(ed), modo = W.modoCobertura(ed), hist = (ed.coberturaHist || []).slice(-1)[0];
+    const opt = (lista, v) => lista.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const campo = (i, k, v, o) => { o = o || {}; return `<input class="inp" data-parc="${i}" data-pcampo="${k}" id="cp_${k}_${i}" value="${esc(v == null ? '' : v)}" ${o.tipo ? `type="${o.tipo}"` : ''} ${o.num ? 'inputmode="decimal"' : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.lista ? `list="${o.lista}"` : ''} style="width:${o.w || 120}px${o.num ? ';text-align:right' : ''}">`; };
+    return `<div class="box"><div class="box-h"><h2>Cronograma de desembolso: cliente × fábrica</h2>${bloq ? '' : '<button class="btn blue sm" id="csug">Sugerir distribuição</button>'}</div><div class="box-b">
+      <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}
+        <div class="f w2"><label class="lbl" for="ccob">Regra de cobertura</label><select id="ccob" ${souSamir() ? '' : 'disabled'}>${opt([['etapa', 'Por etapa: cada recebimento cobre a saída dele'], ['acumulada', 'Acumulada: o saldo nunca fica negativo']], modo)}</select>
+          <small class="note">${souSamir() ? 'Só o Samir troca.' : 'Só o Samir troca esta regra.'}${hist ? ` Última troca: ${esc(hist.por)} em ${esc(W.dataBR(String(hist.em).slice(0, 10)))}.` : ''}</small></div>
+        <p class="note">Padrão das fábricas: 30% para iniciar a produção e 70% na finalização.</p></div>
+      <datalist id="cpnomes">${W.NOMES_ETAPA.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <div class="tw" style="margin-top:10px"><table><thead><tr><th>#</th><th>Etapa</th><th>Saída ligada</th><th class="num">Nossa saída</th><th class="num">% do total</th><th class="num">Recebimento do cliente (R$)</th><th class="num">Saldo acumulado</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${ps.map((p, i) => `<tr><td class="mono"><b>${i + 1}</b></td><td>${campo(i, 'nome', p.nome, { w: 130, lista: 'cpnomes' })}</td>
+          <td><select class="inp" data-parc="${i}" data-pcampo="vinculo" style="width:140px">${opt(W.VINCULOS, p.vinculo)}</select></td><td class="num" id="cpo${i}">—</td>
+          <td class="num">${campo(i, 'pct', '', { num: true, w: 56 })}</td><td class="num">${campo(i, 'valor', p.valor || '', { num: true, w: 105 })}</td>
+          <td class="num" id="cpa${i}">—</td><td id="cps${i}"></td><td>${bloq || ps.length <= 1 ? '' : `<button class="btn ghost sm" type="button" data-rmp="${i}" title="Remover parcela">✕</button>`}</td></tr>
+          <tr class="sub"><td></td><td colspan="8"><div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+            ${campo(i, 'gatilho', p.gatilho, { w: 230, ph: 'Gatilho: ex. em até 72h após o aviso de presença de carga' })}
+            <label class="note">Data ${campo(i, 'data', p.data, { tipo: 'date', w: 140 })}</label>
+            <label class="note">ou ${campo(i, 'diasAposAnterior', p.diasAposAnterior != null ? p.diasAposAnterior : '', { num: true, w: 56, ph: 'dias' })} dias após a anterior</label>
+            <label class="note"><input type="checkbox" data-parc="${i}" data-pcampo="ouDepois" ${p.ouDepois ? 'checked' : ''} style="width:auto"> o que ocorrer depois</label>
+            <label class="note">Reajuste cambial (R$) ${campo(i, 'reajuste', p.reajuste || '', { num: true, w: 90 })}</label>${campo(i, 'reajusteObs', p.reajusteObs, { w: 200, ph: 'Obs. do reajuste: ex. 1ª remessa · PTAX 5,56' })}</div></td></tr>`).join('')}</tbody></table></div>
+      ${bloq || ps.length >= W.MAX_PARCELAS ? '' : '<button class="btn sm" type="button" id="cpadd" style="margin-top:8px">+ Parcela</button>'}
+      <p class="note" id="cdbase" style="margin-top:6px"></p><p class="note" id="cdtot"></p><div id="cderr"></div></div></div>`;
+  }
+  /** Lê o que foi digitado numa parcela. Devolve true se precisa redesenhar. */
+  function digitouParcela(t) {
+    if (t.dataset.parc == null) return null;
+    const ps = W.parcelasDe(ed), i = +t.dataset.parc, k = t.dataset.pcampo, p = ps[i]; if (!p) return null;
+    if (k === 'pct') { const base = W.precoDesem(R); if (!(base > 0)) return false; p.valor = +(base * (parseFloat(String(t.value).replace(',', '.')) || 0) / 100).toFixed(2); const v = document.getElementById('cp_valor_' + i); if (v) v.value = p.valor; }
+    else if (k === 'ouDepois') p.ouDepois = t.checked;
+    else if (k === 'diasAposAnterior') { if (t.value === '') delete p.diasAposAnterior; else p.diasAposAnterior = t.value; }
+    else p[k] = t.value;
+    W.definirParcelas(ed, ps);
+    return false;
+  }
+  function desenharCobertura(el) {
+    const cob = W.coberturaDesembolso(ed, R), base = W.precoDesem(R), acum = cob.modo === 'acumulada';
+    cob.linhas.forEach(l => {
+      const i = l.i, o = el.querySelector('#cpo' + i); if (!o) return;
+      o.textContent = fmt(l.saida);
+      el.querySelector('#cpa' + i).innerHTML = `<span style="${l.saldoAcum < -0.005 ? 'color:var(--crit);font-weight:700' : ''}">${fmt(l.saldoAcum)}</span>`;
+      el.querySelector('#cps' + i).innerHTML = !l.recebe && !l.saida ? pill('—') : acum ? (l.cobre ? pill('saldo ok', 'ok') : pill('saldo negativo', 'crit')) : !l.recebe ? pill('—') : l.cobre ? pill('cobre (+' + fmt(l.recebe - l.saida) + ')', 'ok') : pill('NÃO cobre', 'crit');
+      const p = el.querySelector('#cp_pct_' + i); if (p && document.activeElement !== p) p.value = base > 0 && l.parcela.valor ? (l.parcela.valor / base * 100).toFixed(1) : '';
+    });
+    const n = cob.linhas.length, soma = cob.base;
+    el.querySelector('#cdbase').innerHTML = (R.tri ? `As parcelas fecham com <b>${fmt(base)}</b>, o preço fechado: o DIFAL de ${fmt(R.tri.difal || 0)} é recolhido pela JeT em GNRE e já está dentro dele.`
+      : (R.st || 0) > 0 ? `As parcelas fecham com <b>${fmt(base)}</b>: preço ${fmt(R.preco || 0)} menos o ICMS-DIFAL ${fmt(R.st || 0)}, que o cliente recolhe em guia própria.` : `As parcelas fecham com <b>${fmt(base)}</b>, o preço aprovado.`)
+      + (base > 0 && soma ? ' ' + (Math.round(Math.abs(soma - base) * 100) <= 1 ? pill(`as ${n} somam 100%`, 'ok') : pill(`as ${n} somam ${(soma / base * 100).toFixed(1)}%`, 'crit')) : '');
+    el.querySelector('#cdtot').innerHTML = `Valor base <b>${fmt(cob.base)}</b> + reajustes cambiais <b>${fmt(cob.reajustes)}</b> = <b>${fmt(cob.total)}</b>`;
+    return cob;
   }
 
   /* Recalcula e reescreve só os números — os campos não são redesenhados,
@@ -188,19 +237,10 @@
     el.querySelector('#cavisoinv').innerHTML = (parseFloat(F('pctInv')) || 0) < 100 ? '⚠ <b>% Invoice</b> abaixo de 100% calcula os tributos sobre menos que o valor da invoice. O Simulador Siscomex usa sempre o valor aduaneiro integral.' : '';
     el.querySelector('#cncmcurto').textContent = R.ncmCurto ? '⚠ Existe NCM com menos de 8 dígitos: confira antes de aprovar.' : '';
     /* desembolso */
-    const o = W.desemOuts(ed, R), base = W.precoDesem(R), rs = [1, 2, 3].map(n => parseFloat(F('desR' + n)) || 0), os = [o.o1, o.o2, o.o3];
-    [1, 2, 3].forEach((n, i) => {
-      el.querySelector('#cdo' + n).textContent = fmt(os[i]);
-      el.querySelector('#cds' + n).innerHTML = !rs[i] ? pill('—') : rs[i] >= os[i] - 0.01 ? pill('cobre (+' + fmt(rs[i] - os[i]) + ')', 'ok') : pill('NÃO cobre', 'crit');
-      const p = el.querySelector('#cdp' + n); if (p && document.activeElement !== p) p.value = base > 0 && rs[i] ? (rs[i] / base * 100).toFixed(1) : '';
-    });
-    const soma = rs.reduce((a, x) => a + x, 0);
-    el.querySelector('#cdbase').innerHTML = (R.tri ? `As parcelas fecham com <b>${fmt(base)}</b>, o preço fechado: o DIFAL de ${fmt(R.tri.difal || 0)} é recolhido pela JeT em GNRE e já está dentro dele.`
-      : (R.st || 0) > 0 ? `As parcelas fecham com <b>${fmt(base)}</b>: preço ${fmt(R.preco || 0)} menos o ICMS-DIFAL ${fmt(R.st || 0)}, que o cliente recolhe em guia própria.` : `As parcelas fecham com <b>${fmt(base)}</b>, o preço aprovado.`)
-      + (base > 0 && soma ? ' ' + (Math.abs(soma - base) <= 0.05 ? pill('as 3 somam 100%', 'ok') : pill('as 3 somam ' + (soma / base * 100).toFixed(1) + '%', 'crit')) : '');
-    const errs = W.desemErros(ed, R), preenchido = rs.some(Boolean);
+    const cob = desenharCobertura(el);
+    const errs = W.desemErros(ed, R), preenchido = cob.linhas.some(l => l.parcela.valor);
     painelCambio(el);
-    el.querySelector('#cderr').innerHTML = errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? '<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> em todas as etapas o recebimento cobre a saída e a soma fecha com o valor a receber.</div>' : '';
+    el.querySelector('#cderr').innerHTML = errs.length && preenchido ? `<div class="banner crit" style="margin-top:8px">⛔ <b>Bloqueado:</b> ${errs.map(esc).join('<br>⛔ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px"><b>Regra do desembolso atendida:</b> ${cob.modo === 'acumulada' ? 'o saldo acumulado nunca fica negativo' : 'em todas as etapas o recebimento cobre a saída'} e a soma fecha com o valor a receber.</div>` : '';
   }
 
   /* ================= VÁRIOS CLIENTES ================= */
@@ -245,7 +285,7 @@
   function tabelaSimulacao(q, nome) {
     const s = W.simulacaoCambio(q, ptaxDaProposta()); if (!s) return '';
     return `${nome ? `<p class="lbl" style="margin-top:10px">${esc(nome)}</p>` : ''}<div class="tw"><table><thead><tr><th>Dólar</th><th>Parcela</th><th class="num">Cliente</th><th class="num">Custo</th><th class="num">Lucro</th></tr></thead><tbody>
-      ${s.cenarios.map(c => c.parcelas.map((p, i) => `<tr>${i === 0 ? `<td rowspan="3" class="mono">${num4(c.dolar)}<br><small class="note">${c.delta > 0 ? '+' : ''}${c.delta.toFixed(2).replace('.', ',')}${c.dentro ? ' · na faixa' : ''}</small></td>` : ''}<td>${p.n}ª</td><td class="num">${fmt(p.preco)}</td><td class="num">${fmt(p.custo)}</td><td class="num" style="${p.lucro < 0 ? 'color:var(--crit);font-weight:700' : ''}">${fmt(p.lucro)}</td></tr>`).join('')).join('')}</tbody></table></div>`;
+      ${s.cenarios.map(c => c.parcelas.map((p, i) => `<tr>${i === 0 ? `<td rowspan="${c.parcelas.length}" class="mono">${num4(c.dolar)}<br><small class="note">${c.delta > 0 ? '+' : ''}${c.delta.toFixed(2).replace('.', ',')}${c.dentro ? ' · na faixa' : ''}</small></td>` : ''}<td>${p.n}ª</td><td class="num">${fmt(p.preco)}</td><td class="num">${fmt(p.custo)}</td><td class="num" style="${p.lucro < 0 ? 'color:var(--crit);font-weight:700' : ''}">${fmt(p.lucro)}</td></tr>`).join('')).join('')}</tbody></table></div>`;
   }
   function painelCambio(el, clientes) {
     const box = el.querySelector('#ccambio'); if (!box) return;
@@ -349,7 +389,10 @@
     on('#caprova', () => aprovar(el));
     on('#cdevolve', () => { ed.status = 'draft'; if (salvar(true, true)) { H.toast('Devolvida para ajuste.'); editor(el); } });
     on('#cop', () => criarOperacao());
-    on('#csug', () => { if (!(R && R.preco > 0)) return H.toast('Complete a cotação primeiro.'); Object.assign(ed.fields, W.desemSugerir(ed, R)); [1, 2, 3].forEach(n => { el.querySelector('#cf_desR' + n).value = ed.fields['desR' + n]; }); atualizar(el); H.toast('Distribuição sugerida: 35% da margem já nas parcelas 1 e 2.'); });
+    on('#csug', () => { if (!(R && R.preco > 0)) return H.toast('Complete a cotação primeiro.'); W.definirParcelas(ed, W.sugerirParcelas(ed, R)); W.parcelasDe(ed).forEach((p, i) => { const v = el.querySelector('#cp_valor_' + i); if (v) v.value = p.valor; }); atualizar(el); H.toast('Distribuição sugerida: cada parcela cobre a sua saída; 35% da margem já no sinal e no saldo.'); });
+    on('#cpadd', () => { const ps = W.parcelasDe(ed); if (ps.length >= W.MAX_PARCELAS) return; ps.push({ id: 'p' + Date.now(), nome: ps.length === 3 ? 'Entrega na obra' : 'Outra', vinculo: 'nenhuma', valor: 0, diasAposAnterior: 20 }); W.definirParcelas(ed, ps); editor(el); });
+    el.querySelectorAll('[data-rmp]').forEach(b => b.onclick = () => { const ps = W.parcelasDe(ed); if (ps.length <= 1) return; ps.splice(+b.dataset.rmp, 1); W.definirParcelas(ed, ps); editor(el); });
+    const cob = el.querySelector('#ccob'); if (cob) cob.onchange = () => { const r = W.mudarCobertura(ed, cob.value, eu(), souSamir()); if (!r.ok) { H.toast(esc(r.msg)); cob.value = W.modoCobertura(ed); return; } if (r.mudou) H.toast(`Cobertura <b>${cob.value === 'acumulada' ? 'acumulada' : 'por etapa'}</b>: fica registrado que foi você.`); atualizar(el); };
     on('#citem', () => { ed.items.push(W.ITEM_PADRAO()); editor(el); });
     ptaxNaCotacao(el, travada());
     on('#cexp', () => { ed.exps.push({ l: '', v: 0 }); editor(el); });
@@ -363,6 +406,7 @@
     form.addEventListener('input', e => {
       const t = e.target;
       if (digitouMulti(t, el)) return;
+      if (t.dataset.parc != null) { digitouParcela(t); return atualizar(el); }
       if (t.dataset.f) {
         ed.fields[t.dataset.f] = t.value;
         if (t.dataset.f === 'tipoOp') return editor(el);
@@ -596,7 +640,7 @@
     H.salvar();
     H.toast('Margem aprovada: proposta liberada e negócio no <b>Funil</b> em Proposta enviada.');
     editor(el);
-    const m = H.modal('Cotação aprovada', `<p>Criar já a operação <b>${esc((F('opNum') || '—').toUpperCase())}</b> e lançar o <b>previsto</b> no Financeiro (as 3 parcelas do cliente e os 3 pagamentos)?</p>`,
+    const m = H.modal('Cotação aprovada', `<p>Criar já a operação <b>${esc((F('opNum') || '—').toUpperCase())}</b> e lançar o <b>previsto</b> no Financeiro (${W.parcelasDe(ed).length} parcela(s) do cliente e os pagamentos)?</p>`,
       '<button class="btn" data-x>Agora não</button><button class="btn pri" id="mop">Criar operação + previsto</button>');
     m.querySelector('#mop').onclick = () => { H.fecharModal(); criarOperacao(); };
   }
@@ -751,6 +795,12 @@
       return { ok: true, doc: d, cliente: cli, oport };
     } catch (e) { return { ok: false, motivo: e.message || 'erro inesperado' }; }
   }
+  /* Lista própria de parcelas (1 a 8): o PDF mostra todas. Cotação de sempre: os 3 cards de sempre. */
+  function parcelasDoPDF(alvo) {
+    if (!W.temListaPropria(alvo.q)) return {};
+    const ps = W.resumoProposta(alvo.q, alvo.R).parcelas;
+    return { parcelasPDF: ps.map(p => Object.assign({}, p, { previsaoBR: W.dataBR(p.previsao) })), nChegada: (ps.findIndex(p => p.chegada) + 1) || 3 };
+  }
   function gerarPDF() {
     if (!window.HUB_PROPOSTA) return H.toast('Gerador da proposta não carregou.');
     let print = document.getElementById('printProposal');
@@ -761,7 +811,7 @@
       crmDocAnexarProposta: anexarNoCRM, desemErrors: () => W.desemErros(alvo.q, alvo.R),
       carregarFotosDaProposta: async () => { const out = []; for (const f of (alvo.q.fotos || [])) { try { out.push(await fotoParaPDF(f.url)); } catch (e) { console.warn('foto ignorada', f.url, e); } } return out; },
       openModal: () => {}, closeModal: H.fecharModal, saveDB: H.salvar, DB: H.db,
-      state: { items: alvo.q.items, fotos: alvo.q.fotos, blocos: ed.blocos, status: 'ok', id: ed.id, tabelaCambio: W.textoCambio(W.tabelaCambio(alvo.q)) }, R: alvo.R
+      state: Object.assign({ items: alvo.q.items, fotos: alvo.q.fotos, blocos: ed.blocos, status: 'ok', id: ed.id, tabelaCambio: W.textoCambio(W.tabelaCambio(alvo.q)) }, parcelasDoPDF(alvo)), R: alvo.R
     });
     P.gerarPropostaPDF();
   }
