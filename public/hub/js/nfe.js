@@ -82,11 +82,12 @@
 
   /* ---------------- Nova nota ---------------- */
   /* Venda que nasce de uma nota já feita: a NF de entrada (venda da SF) ou a SF → JeT (venda da JeT ao cliente). */
-  const ORIGEM_VENDA = { A: ['B', 'C', 'D'], D: ['E', 'F'] };
+  const ORIGEM_VENDA = { A: ['B', 'C', 'D', 'H'], D: ['E', 'F'] };
   function vendaSugerida(n) {
     const o = (ctx.ops || []).find(x => x.id === n.op) || {}, mod = String(o.modalidade || '').toLowerCase();
     if (n.cenario === 'D') return mod.includes('consumidor') || (o.contribuinte === false) ? 'F' : 'E';
-    return mod.includes('conta e ordem') ? 'B' : mod.includes('encomenda') ? 'C' : 'D';
+    /* Venda direta (H) é o padrão: triangular (D) só quando a operação é triangular. */
+    return mod.includes('conta e ordem') ? 'B' : mod.includes('encomenda') ? 'C' : o.triangular ? 'D' : 'H';
   }
   function nova(pre) {
     pre = pre || {};
@@ -103,7 +104,7 @@
       <p class="note">O sistema preenche itens, destinatário e DUIMP com o que há na operação, na cotação, no Catálogo de NCM e no CRM. Você corrige o que faltar na tela seguinte.</p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="ncok">Montar nota</button>');
     const atual = () => { const c = cens.find(x => x.k === v(m, '#ncn')) || {}; m.querySelector('#ngref').hidden = m.querySelector('#ngfin').hidden = c.k !== 'G';
-      m.querySelector('#ngori').hidden = !['B', 'C', 'D', 'E', 'F'].includes(c.k);
+      m.querySelector('#ngori').hidden = !['B', 'C', 'D', 'E', 'F', 'H'].includes(c.k);
       const so = m.querySelector('#nno').selectedOptions[0], cenOri = so && so.dataset.cen;
       const fora = cenOri && !(ORIGEM_VENDA[cenOri] || []).includes(c.k) ? `<br><b>Atenção:</b> a partir de ${cenOri === 'A' ? 'uma NF de entrada' : 'uma NF SF → JeT'}, o normal é ${(ORIGEM_VENDA[cenOri] || []).join(', ')}.` : '';
       m.querySelector('#ncobs').innerHTML = (c.k === 'A' ? '<b>A NF de entrada nasce da DUIMP.</b> Use <b>Importar DUIMP</b>: o rascunho é criado sozinho, com itens, valores e tributos federais da DUIMP. Aqui só se abre a nota de uma DUIMP já importada.' : esc(c.obs || '')) + fora; };
@@ -113,7 +114,7 @@
     m.querySelector('#ncok').onclick = async () => {
       const b = m.querySelector('#ncok'); b.disabled = true; b.textContent = 'Montando…';
       const k = v(m, '#ncn'), corpo = { cenario: k, opId: v(m, '#nco') };
-      if (['B', 'C', 'D', 'E', 'F'].includes(k) && v(m, '#nno')) corpo.origemNota = v(m, '#nno');
+      if (['B', 'C', 'D', 'E', 'F', 'H'].includes(k) && v(m, '#nno')) corpo.origemNota = v(m, '#nno');
       if (k === 'G') corpo.extras = { referencia: v(m, '#ncr'), finalidade: +v(m, '#ncf') };
       const r = await post('/api/nfe/montar', corpo).catch(() => ({ ok: false, j: {} }));
       if (!r.ok) { b.disabled = false; b.textContent = 'Montar nota'; return H.toast(esc(r.j.message || 'Não consegui montar.')); }

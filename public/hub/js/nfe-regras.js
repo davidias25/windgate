@@ -82,6 +82,13 @@
       ipi_cst: '53', ipi_enquadramento: '999', pis_cst: '01', cofins_cst: '01', pis_aliquota: 1.65, cofins_aliquota: 7.6, pis_cofins_exclui_icms: true, pis_cst_extinto: '08', pis_cst_monofasico: '04',
       carga_5291: 8.8, fcp_destino: 0, ibs_cbs_cst: '', ibs_cbs_classificacao: '', difal: true, aplica_monofasico: true, exige_referencia: false, piso_saida: false,
       obs: 'Grupo DIFAL (EC 87/2015). Item com Convênio 52/91: base do destino reduzida para a carga de 8,8% (mesma conta da apuração triangular). CST 04 nos itens monofásicos. Confirmar FECOP do CE.' },
+    { k: 'H', nome: 'Venda direta: SF → cliente contribuinte', emitente: 'WindGate', destino: 'cliente', tipo_documento: 1, finalidade_emissao: 1,
+      natureza_operacao: 'Venda de mercadoria importada', cfop_exterior: '', cfop_interna: '5102', cfop_interestadual: '6102',
+      consumidor_final: 0, presenca_comprador: 9, modalidade_frete: 9,
+      icms_origem: '1', icms_cst: '00', icms_aliquota_interna: 19, icms_aliquota_interestadual: 4, icms_reducao_base: 0,
+      ipi_cst: '50', ipi_enquadramento: '999', pis_cst: '01', cofins_cst: '01', pis_aliquota: 1.65, cofins_aliquota: 7.6, pis_cofins_exclui_icms: true, pis_cst_extinto: '08',
+      ibs_cbs_cst: '', ibs_cbs_classificacao: '', difal: false, aplica_monofasico: false, exige_referencia: false, piso_saida: false,
+      obs: 'Venda da SF (AL) direto à empresa do cliente, contribuinte de ICMS, sem passar pela JeT. Origem 1, 4% interestadual (Res. Senado 13/2012). Valor = preço da cotação sem o DIFAL, que o cliente recolhe em guia própria. Cliente não contribuinte: use a triangular (D e F).' },
     { k: 'G', nome: 'Complementar, ajuste ou devolução', emitente: 'qualquer', destino: 'referenciada', tipo_documento: null, finalidade_emissao: 2,
       natureza_operacao: '', cfop_exterior: '', cfop_interna: '', cfop_interestadual: '',
       consumidor_final: null, presenca_comprador: 9, modalidade_frete: 9,
@@ -181,6 +188,16 @@
    * operação, da cotação, do Catálogo e da última nota. A tela mostra e deixa
    * corrigir; montarNFe é quem decide o que falta.
    */
+  /* Valor da venda direta: o preço da cotação sem o DIFAL que o cliente contribuinte recolhe em guia (o mesmo valor das parcelas). */
+  function precoSemDifal(q) {
+    try {
+      const C = W.calcular && W.precoDesem ? W : (typeof require === 'function' ? require('./cotacao-regras.js') : null);
+      if (!C) return num(q && q.preco);
+      /* Vale o preço aprovado (q.preco); o cálculo só diz quanto dele é DIFAL. */
+      const R = C.calcular(q), semDifal = C.precoDesem(R);
+      return num(q && q.preco) > 0 && R.preco > 0 ? num(q.preco) * semDifal / R.preco : semDifal;
+    } catch (e) { return num(q && q.preco); }
+  }
   function sugerirEntrada(db, a) {
     const cen = cenarioDe(db, a.cenario); if (!cen) return null;
     /* Nota de origem: a venda nasce de uma nota já feita (a entrada, ou a SF → JeT para a venda da JeT). */
@@ -221,7 +238,8 @@
           const totEnt = itensEnt[i] && ent === fonte ? baseEnt(itensEnt[i]) * fatorEnt : 0;
           const sh = mesmaOrdem && fobTot > 0 ? num(qi[i].q) * num(qi[i].u) * txD / fobTot : 0;
           /* Valor: conta e ordem = custo da entrada; SF → JeT = piso da entrada; venda = preço da cotação. Sem cotação: o da nota de origem (venda da JeT) ou em branco para preencher. */
-          const total = cen.k === 'B' ? totEnt : cen.k === 'D' ? (totEnt && inter < 1 ? totEnt / (1 - inter) : 0) : sh && num(q && q.preco) ? num(q.preco) * sh : fonte.cenario !== 'A' ? num(x.valorUnitario) * qtd : 0;
+          const preco = cen.k === 'H' ? precoSemDifal(q) : num(q && q.preco);
+          const total = cen.k === 'B' ? totEnt : cen.k === 'D' ? (totEnt && inter < 1 ? totEnt / (1 - inter) : 0) : sh && preco ? preco * sh : fonte.cenario !== 'A' ? num(x.valorUnitario) * qtd : 0;
           return { codigo: x.codigo || ('IT' + (i + 1)), descricao: x.descricao || '', ncm: soDig(x.ncm), unidade: x.unidade || 'UN', quantidade: qtd,
             ii: al.ii, ipi: al.ipi, pis: al.pis, cofins: al.cofins, c5291: al.c5291, mono: al.mono, valorUnitario: qtd && total ? +(total / qtd).toFixed(10) : null };
         });
@@ -233,7 +251,7 @@
         let total = 0;
         if (cen.k === 'B') total = totEnt;
         else if (cen.k === 'D') total = totEnt && inter < 1 ? totEnt / (1 - inter) : 0;
-        else total = num(q && q.preco) * sh;
+        else total = (cen.k === 'H' ? precoSemDifal(q) : num(q && q.preco)) * sh;
         return Object.assign(b, { valorUnitario: b.quantidade ? +(total / b.quantidade).toFixed(10) : 0 });
       });
     }
@@ -533,7 +551,7 @@
     else if (dest.contribuinte === true) indIE = 1;
     else if (dest.contribuinte === false) indIE = 9;
     if (cen.destino === 'consumidor' && dest.contribuinte === true) P('destinatario', 'O cliente está marcado como contribuinte de ICMS no CRM: use o cenário E.');
-    if (cen.destino === 'cliente' && dest.contribuinte === false) P('destinatario', 'O cliente está marcado como NÃO contribuinte no CRM: use o cenário F.');
+    if (cen.destino === 'cliente' && dest.contribuinte === false) P('destinatario', cen.emitente === 'JeT' ? 'O cliente está marcado como NÃO contribuinte no CRM: use o cenário F.' : 'O cliente está marcado como NÃO contribuinte no CRM: a venda direta da SF é para contribuinte. Use a triangular (D e F).');
     if (!indIE) P('indicador_inscricao_estadual_destinatario', 'Confirme se o destinatário é contribuinte de ICMS (cadastro do cliente no CRM).');
     if (!txt(dest.nome)) P('nome_destinatario', 'Nome do destinatário.');
     if (estrangeiro) {

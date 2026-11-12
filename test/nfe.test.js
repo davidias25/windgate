@@ -168,6 +168,21 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(!R.sugerirEntrada(canc, { cenario: 'D', origemNota: canc.hubNFe[0]._id }).extras.notaOrigem, 'nota cancelada não serve de origem');
   }
 
+  console.log('\nH · venda direta SF → cliente contribuinte:');
+  {
+    const C = require('../public/hub/js/cotacao-regras.js');
+    const dbH = banco(), q40 = dbH.quotes.q40, Rq = C.calcular(q40), esperado = r2(50000 * C.precoDesem(Rq) / Rq.preco);
+    ok(R.cenarios(dbH).some(c => c.k === 'H' && c.emitente === 'WindGate' && c.destino === 'cliente' && c.tipo_documento === 1), 'cenário H existe: SF emite, para o cliente, nota de saída');
+    const mH = montar(dbH, 'H', 'OP40'), iH = mH.payload.items[0];
+    ok(mH.pendencias.length === 0 && iH.cfop === '6102' && iH.icms_origem === '1' && iH.icms_aliquota === 4 && mH.payload.cnpj_destinatario === '45997418000153' && mH.payload.tipo_documento === 1, 'SF (AL) → Construtora Beta (CE): CFOP 6102, origem 1, ICMS 4%, destinatário o cliente, sem pendência');
+    ok(Math.abs(mH.payload.items.reduce((s, x) => s + x.valor_bruto, 0) - esperado) < 0.02, `valor = preço aprovado sem o DIFAL do cliente (${esperado.toLocaleString('pt-BR')})`);
+    const naoContrib = banco(); naoContrib.crm[1].contribuinte = false;
+    ok(montar(naoContrib, 'H', 'OP40').pendencias.some(p => p.campo === 'destinatario' && /triangular/.test(p.msg)), 'cliente não contribuinte: pendência, aponta a triangular');
+    const dbHA = banco(); delete dbHA.quotes.q40; dbHA.hubNFe.push(autorizada(dbHA, 'A', 'OP40', mA, '4'.repeat(44)));
+    const sHA = R.sugerirEntrada(dbHA, { cenario: 'H', origemNota: dbHA.hubNFe[0]._id });
+    ok(sHA.itens.length === 1 && sHA.itens[0].valorUnitario == null && sHA.empresa === 'WindGate', 'a partir da NF de entrada, sem cotação: itens vêm, o preço fica para preencher');
+  }
+
   console.log('\nE · JeT → cliente contribuinte:');
   const mE = montar(db, 'E', 'OP40'), [e1, e2] = mE.payload.items;
   // Preço 50.000 rateado pelo FOB (2/3 e 1/3): 33.333,33 + 16.666,67

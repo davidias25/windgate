@@ -108,7 +108,7 @@ module.exports = function registrar(app, ctx) {
     res.json({ success: true, ambiente: focus.ambiente(), podeEmitir: W.pode(d, k, 'nfe.emitir'), usuario: k,
       tokens: { WindGate: focus.configurado('WindGate'), JeT: focus.configurado('JeT') }, webhook: !!process.env.FOCUS_WEBHOOK_TOKEN,
       config: W.configNFe(d), cenarios: W.cenarios(d),
-      ops: (d.ops || []).filter(o => o && o.id).map(o => ({ id: o.id, cliente: o.cliente || '', modalidade: o.modalidade || '', empresa: o.empresa || 'WindGate', duimp: o.duimp || '', status: o.status || '', retrato: !!W.retratoDuimp(d, o.duimp), duimpVersao: ((W.retratoDuimp(d, o.duimp) || {}).dados || {}).versao || '' })) });
+      ops: (d.ops || []).filter(o => o && o.id).map(o => ({ id: o.id, cliente: o.cliente || '', modalidade: o.modalidade || '', empresa: o.empresa || 'WindGate', triangular: o.estruturaFiscal === 'jt' || ((W.cotacaoDaOp(d, o) || {}).fields || {}).tipoOp === 'triangular', duimp: o.duimp || '', status: o.status || '', retrato: !!W.retratoDuimp(d, o.duimp), duimpVersao: ((W.retratoDuimp(d, o.duimp) || {}).dados || {}).versao || '' })) });
   });
 
   /* ---------- Montar (nova ou atualizar) ---------- */
