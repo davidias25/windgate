@@ -146,6 +146,28 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   const mDbaixo = R.montarNFe(dbD, Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }, { itens: [Object.assign(R.sugerirEntrada(dbD, { cenario: 'D', opId: 'OP20' }).itens[0], { valorUnitario: 6000 })] }));
   ok(mDbaixo.pendencias.some(p => p.campo === 'piso'), 'abaixo do piso (12.000 < 14.145,03): pendência, não transmite');
 
+  console.log('\nVenda a partir da nota (sem depender da cotação):');
+  {
+    const semCot = () => { const d = banco(); delete d.quotes.q20; d.hubNFe.push(autorizada(d, 'A', 'OP20', mA, '2'.repeat(44))); d.hubPainel._nfeCenarios = { B: { campos: { cfop_interna: '5949', cfop_interestadual: '6949', pis_cst: '49', cofins_cst: '49' } } }; return d; };
+    const dbV = semCot(), nA = dbV.hubNFe[0];
+    const sD = R.sugerirEntrada(dbV, { cenario: 'D', origemNota: nA._id });
+    ok(sD.opId === 'OP20' && sD.itens.length === 1 && sD.itens[0].descricao && sD.itens[0].ncm === '84743100' && sD.itens[0].quantidade === 2 && sD.extras.notaOrigem === nA._id, 'da NF de entrada: operação, itens, NCM e quantidades vêm da própria nota');
+    const mDv = R.montarNFe(dbV, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
+    ok(mDv.pendencias.length === 0 && mDv.payload.items[0].valor_bruto === 14145.03 && mDv.payload.tipo_documento === 1, 'SF → JeT sem cotação: venda (tipo 1) no piso de 14.145,03, sem pendência');
+    const mBv = R.montarNFe(dbV, Object.assign({}, R.sugerirEntrada(dbV, { cenario: 'B', origemNota: nA._id }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
+    ok(mBv.pendencias.length === 0 && mBv.payload.items[0].valor_bruto === 13579.23 && mBv.payload.notas_referenciadas[0].chave_nfe === '2'.repeat(44), 'conta e ordem sem cotação: custo da entrada (13.579,23) e a entrada referenciada');
+    const sSemOrigem = R.sugerirEntrada(dbV, { cenario: 'D', opId: 'OP20' });
+    ok(sSemOrigem.itens.length === 1 && sSemOrigem.itens[0].quantidade === 2, '"Nova nota" sem cotação na operação: os itens saem da NF de entrada, em vez de vir vazios');
+    const sC = R.sugerirEntrada(dbV, { cenario: 'C', origemNota: nA._id });
+    const mCv = R.montarNFe(dbV, Object.assign({}, sC, { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
+    ok(sC.itens.length === 1 && sC.itens[0].valorUnitario == null && mCv.pendencias.some(p => /valor_unitario_comercial/.test(p.campo)), 'venda sem cotação e sem preço: itens vêm, o valor fica como pendência para preencher (não transmite em branco)');
+    const nD = autorizada(dbV, 'D', 'OP20', Object.assign({}, mDv, { entrada: sD }), '3'.repeat(44)); dbV.hubNFe.push(nD);
+    const sE = R.sugerirEntrada(dbV, { cenario: 'E', origemNota: nD._id });
+    ok(sE.itens.length === 1 && Math.abs(sE.itens[0].valorUnitario * sE.itens[0].quantidade - 14145.03) < 0.01 && sE.empresa === 'JeT', 'da NF SF → JeT: a venda da JeT nasce com os mesmos itens e, sem cotação, o valor da nota de origem');
+    const canc = semCot(); canc.hubNFe[0].status = 'cancelada';
+    ok(!R.sugerirEntrada(canc, { cenario: 'D', origemNota: canc.hubNFe[0]._id }).extras.notaOrigem, 'nota cancelada não serve de origem');
+  }
+
   console.log('\nE · JeT → cliente contribuinte:');
   const mE = montar(db, 'E', 'OP40'), [e1, e2] = mE.payload.items;
   // Preço 50.000 rateado pelo FOB (2/3 e 1/3): 33.333,33 + 16.666,67

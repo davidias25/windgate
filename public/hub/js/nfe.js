@@ -76,27 +76,44 @@
     el.querySelector('#nop').onchange = e => { filtro.op = e.target.value; H.estado.param = filtro.op || null; H.render(); };
     el.querySelectorAll('[data-n]').forEach(r => r.onclick = () => detalhe(r.dataset.n));
     const on = (s, fn) => { const x = el.querySelector(s); if (x) x.onclick = fn; };
-    on('#nnova', nova); on('#ncen', telaCenarios); on('#ncfg', telaConfig); on('#nduimp', () => importarDuimp(filtro.op));
+    on('#nnova', () => nova()); on('#ncen', telaCenarios); on('#ncfg', telaConfig); on('#nduimp', () => importarDuimp(filtro.op));
     if (abrir) setTimeout(() => detalhe(abrir), 0);
   };
 
   /* ---------------- Nova nota ---------------- */
-  function nova() {
+  /* Venda que nasce de uma nota já feita: a NF de entrada (venda da SF) ou a SF → JeT (venda da JeT ao cliente). */
+  const ORIGEM_VENDA = { A: ['B', 'C', 'D'], D: ['E', 'F'] };
+  function vendaSugerida(n) {
+    const o = (ctx.ops || []).find(x => x.id === n.op) || {}, mod = String(o.modalidade || '').toLowerCase();
+    if (n.cenario === 'D') return mod.includes('consumidor') || (o.contribuinte === false) ? 'F' : 'E';
+    return mod.includes('conta e ordem') ? 'B' : mod.includes('encomenda') ? 'C' : 'D';
+  }
+  function nova(pre) {
+    pre = pre || {};
     const cens = ctx.cenarios || [], autorizadas = (H.db.hubNFe || []).filter(n => n && n.status === 'autorizada');
-    const m = H.modal('Nova NF-e', `${faixaAmbiente()}
-      <div class="fields" style="margin-top:10px"><div class="f w2"><label class="lbl" for="ncn">Cenário fiscal</label><select id="ncn">${cens.map(c => `<option value="${c.k}">${c.k} · ${esc(c.nome)}${c.conferido && c.conferido.em ? '' : ' (a validar)'}</option>`).join('')}</select></div>
-        <div class="f w2"><label class="lbl" for="nco">Operação</label><select id="nco"><option value="">—</option>${(ctx.ops || []).map(o => `<option value="${esc(o.id)}" ${filtro.op === o.id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.cliente)}${o.modalidade ? ' · ' + esc(o.modalidade) : ''}</option>`).join('')}</select></div>
+    const origens = (H.db.hubNFe || []).filter(n => n && ORIGEM_VENDA[n.cenario] && n.status !== 'cancelada');
+    const cenPre = pre.cenario || '';
+    const m = H.modal(pre.origem ? 'NF de venda a partir da nota' : 'Nova NF-e', `${faixaAmbiente()}
+      <div class="fields" style="margin-top:10px"><div class="f w2"><label class="lbl" for="ncn">Cenário fiscal</label><select id="ncn">${cens.map(c => `<option value="${c.k}" ${c.k === cenPre ? 'selected' : ''}>${c.k} · ${esc(c.nome)}${c.conferido && c.conferido.em ? '' : ' (a validar)'}</option>`).join('')}</select></div>
+        <div class="f w2" id="ngori"><label class="lbl" for="nno">A partir da nota (itens e quantidades)</label><select id="nno"><option value="">— da cotação da operação —</option>${origens.map(n => `<option value="${esc(n._id)}" data-op="${esc(n.op || '')}" data-cen="${esc(n.cenario)}" ${pre.origem === n._id ? 'selected' : ''}>${esc(n.cenario === 'A' ? 'Entrada' : 'SF → JeT')} · ${esc(n.ref)}${n.numero ? ' · nº ' + esc(n.numero) : ''} · ${esc(n.op || '')}</option>`).join('')}</select></div>
+        <div class="f w2"><label class="lbl" for="nco">Operação</label><select id="nco"><option value="">—</option>${(ctx.ops || []).map(o => `<option value="${esc(o.id)}" ${(pre.op || filtro.op) === o.id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.cliente)}${o.modalidade ? ' · ' + esc(o.modalidade) : ''}</option>`).join('')}</select></div>
         <div class="f w2" id="ngref" hidden><label class="lbl" for="ncr">Nota original</label><select id="ncr"><option value="">—</option>${autorizadas.map(n => `<option value="${esc(n._id)}">${esc(n.ref)} · nº ${esc(n.numero || '')} · ${esc((n.destinatario || {}).nome || '')}</option>`).join('')}</select></div>
         <div class="f" id="ngfin" hidden><label class="lbl" for="ncf">Finalidade</label><select id="ncf"><option value="2">Complementar</option><option value="3">Ajuste</option><option value="4">Devolução</option></select></div></div>
       <p class="note" id="ncobs" style="margin-top:8px"></p>
       <p class="note">O sistema preenche itens, destinatário e DUIMP com o que há na operação, na cotação, no Catálogo de NCM e no CRM. Você corrige o que faltar na tela seguinte.</p>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="ncok">Montar nota</button>');
     const atual = () => { const c = cens.find(x => x.k === v(m, '#ncn')) || {}; m.querySelector('#ngref').hidden = m.querySelector('#ngfin').hidden = c.k !== 'G';
-      m.querySelector('#ncobs').innerHTML = c.k === 'A' ? '<b>A NF de entrada nasce da DUIMP.</b> Use <b>Importar DUIMP</b>: o rascunho é criado sozinho, com itens, valores e tributos federais da DUIMP. Aqui só se abre a nota de uma DUIMP já importada.' : esc(c.obs || ''); };
-    m.querySelector('#ncn').onchange = atual; atual();
+      m.querySelector('#ngori').hidden = !['B', 'C', 'D', 'E', 'F'].includes(c.k);
+      const so = m.querySelector('#nno').selectedOptions[0], cenOri = so && so.dataset.cen;
+      const fora = cenOri && !(ORIGEM_VENDA[cenOri] || []).includes(c.k) ? `<br><b>Atenção:</b> a partir de ${cenOri === 'A' ? 'uma NF de entrada' : 'uma NF SF → JeT'}, o normal é ${(ORIGEM_VENDA[cenOri] || []).join(', ')}.` : '';
+      m.querySelector('#ncobs').innerHTML = (c.k === 'A' ? '<b>A NF de entrada nasce da DUIMP.</b> Use <b>Importar DUIMP</b>: o rascunho é criado sozinho, com itens, valores e tributos federais da DUIMP. Aqui só se abre a nota de uma DUIMP já importada.' : esc(c.obs || '')) + fora; };
+    m.querySelector('#ncn').onchange = atual;
+    m.querySelector('#nno').onchange = () => { const so = m.querySelector('#nno').selectedOptions[0]; if (so && so.dataset.op) m.querySelector('#nco').value = so.dataset.op; atual(); };
+    atual();
     m.querySelector('#ncok').onclick = async () => {
       const b = m.querySelector('#ncok'); b.disabled = true; b.textContent = 'Montando…';
       const k = v(m, '#ncn'), corpo = { cenario: k, opId: v(m, '#nco') };
+      if (['B', 'C', 'D', 'E', 'F'].includes(k) && v(m, '#nno')) corpo.origemNota = v(m, '#nno');
       if (k === 'G') corpo.extras = { referencia: v(m, '#ncr'), finalidade: +v(m, '#ncf') };
       const r = await post('/api/nfe/montar', corpo).catch(() => ({ ok: false, j: {} }));
       if (!r.ok) { b.disabled = false; b.textContent = 'Montar nota'; return H.toast(esc(r.j.message || 'Não consegui montar.')); }
@@ -143,6 +160,7 @@
       `<button class="btn" data-x>Fechar</button>
        ${n.xmlLink ? `<a class="btn ghost" href="${esc(n.xmlLink)}" target="_blank" rel="noopener">XML</a>` : ''}${n.danfeLink ? `<a class="btn ghost" href="${esc(n.danfeLink)}" target="_blank" rel="noopener">DANFE</a>` : ''}
        ${pode('montar').ok ? '<button class="btn" id="dEd">Corrigir dados</button>' : ''}
+       ${ctx.podeEmitir && ORIGEM_VENDA[n.cenario] && n.status !== 'cancelada' ? '<button class="btn blue" id="dVd">Gerar NF de venda</button>' : ''}
        ${ctx.podeEmitir && n.payload && ['rascunho', 'conferida', 'rejeitada'].includes(n.status) ? '<button class="btn" id="dPv">Prévia do DANFE</button>' : ''}
        ${['enviada', 'autorizada'].includes(n.status) ? '<button class="btn" id="dSt">Atualizar situação</button>' : ''}
        ${pode('carta').ok ? '<button class="btn" id="dEm">Enviar por e-mail</button><button class="btn" id="dCc">Carta de correção</button><button class="btn" id="dCa">Cancelar nota</button>' : ''}
@@ -159,6 +177,7 @@
     };
     on('#dEd', () => n.cenario === 'A' && n.duimp ? editarEntrada(n) : editar(n));
     on('#dDu', () => verDuimp(n.duimp.numero));
+    on('#dVd', () => { H.fecharModal(); nova({ origem: n._id, op: n.op, cenario: vendaSugerida(n) }); });
     on('#dCf', e => acao(`/api/nfe/${n._id}/conferir`, {}, 'Nota conferida.', e.target));
     on('#dTx', () => {
       const c = H.modal('Transmitir à SEFAZ', `${faixaAmbiente()}<p style="margin-top:10px">Transmitir a nota <b class="mono">${esc(n.ref)}</b> de ${W.fmtBRL(t.total || 0)} para ${esc((n.destinatario || {}).nome || '')}?</p><p class="note">A referência é única: transmitir de novo só consulta a situação, nunca emite outra nota.</p>`,

@@ -162,7 +162,7 @@ module.exports = function registrar(app, ctx) {
         return res.json({ success: true, nota: final });
       }
     } else if (!n) {
-      entrada = W.sugerirEntrada(d, { cenario: b.cenario, opId: b.opId, empresa: b.empresa, referencia: b.extras && b.extras.referencia, dataEmissao: b.dataEmissao });
+      entrada = W.sugerirEntrada(d, { cenario: b.cenario, opId: b.opId, empresa: b.empresa, referencia: b.extras && b.extras.referencia, dataEmissao: b.dataEmissao, origemNota: b.origemNota });
       if (!entrada) return res.status(400).json({ success: false, message: 'Cenário fiscal desconhecido.' });
     } else entrada = JSON.parse(JSON.stringify(n.entrada || {}));
     if (cenario !== 'A') {

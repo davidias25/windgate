@@ -183,6 +183,9 @@
    */
   function sugerirEntrada(db, a) {
     const cen = cenarioDe(db, a.cenario); if (!cen) return null;
+    /* Nota de origem: a venda nasce de uma nota já feita (a entrada, ou a SF → JeT para a venda da JeT). */
+    const orig = a.origemNota ? (db.hubNFe || []).find(n => n && n._id === a.origemNota && n.status !== 'cancelada') || null : null;
+    if (orig && !a.opId) a = Object.assign({}, a, { opId: orig.op || '' });
     const o = opDe(db, a.opId), q = o ? W.cotacaoDaOp(db, o) : null, f = (q && q.fields) || {};
     const ref = a.referencia ? (db.hubNFe || []).find(n => n && n._id === a.referencia) : null;
     const empresa = cen.emitente === 'qualquer' ? (a.empresa || (ref && ref.empresa) || (o && o.empresa) || 'WindGate') : cen.emitente;
@@ -201,10 +204,29 @@
       if (ref && ref.entrada) { out.itens = (ref.entrada.itens || []).map(x => Object.assign({}, x)); out.opId = ref.op || out.opId; }
       out.extras = { referencia: ref ? ref._id : '', finalidade: 2, cfop: '' };
     } else {
-      const ent = notaEntradaDaOp(db, a.opId), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
+      const ent = orig && orig.cenario === 'A' ? orig : notaEntradaDaOp(db, a.opId), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
       const baseEnt = x => num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ipi_valor) + num(x.ii_valor) + num(x.valor_outras_despesas);
       const somaBaseEnt = itensEnt.reduce((s, x) => s + baseEnt(x), 0), fatorEnt = somaBaseEnt > 0 && ent && ent.totais && num(ent.totais.total) > 0 ? num(ent.totais.total) / somaBaseEnt : 1;
       const inter = num(cen.icms_aliquota_interestadual) / 100;
+      /* Itens de uma nota: os da tela, quando ela tem; senão os do JSON enviado à Focus. */
+      const itensDaNota = nn => (nn && nn.cenario !== 'A' && nn.entrada && Array.isArray(nn.entrada.itens) && nn.entrada.itens.length ? nn.entrada.itens.map(x => Object.assign({}, x))
+        : ((nn && nn.payload && nn.payload.items) || []).map(x => ({ codigo: x.codigo_produto || '', descricao: x.descricao || '', ncm: soDig(x.codigo_ncm), unidade: x.unidade_comercial || 'UN', quantidade: num(x.quantidade_comercial), valorUnitario: num(x.valor_unitario_comercial) })));
+      /* Com nota de origem, os itens são os dela. Sem cotação na operação, os da NF de entrada: a venda não fica sem itens. */
+      const fonte = orig || (!qi.length ? ent : null);
+      if (fonte) {
+        if (orig) out.extras.notaOrigem = orig._id;
+        const mesmaOrdem = qi.length === itensDaNota(fonte).length;
+        out.itens = itensDaNota(fonte).map((x, i) => {
+          const al = aliquotasItem(db, x.ncm, mesmaOrdem ? Object.assign({}, qi[i], x) : x), qtd = num(x.quantidade);
+          const totEnt = itensEnt[i] && ent === fonte ? baseEnt(itensEnt[i]) * fatorEnt : 0;
+          const sh = mesmaOrdem && fobTot > 0 ? num(qi[i].q) * num(qi[i].u) * txD / fobTot : 0;
+          /* Valor: conta e ordem = custo da entrada; SF → JeT = piso da entrada; venda = preço da cotação. Sem cotação: o da nota de origem (venda da JeT) ou em branco para preencher. */
+          const total = cen.k === 'B' ? totEnt : cen.k === 'D' ? (totEnt && inter < 1 ? totEnt / (1 - inter) : 0) : sh && num(q && q.preco) ? num(q.preco) * sh : fonte.cenario !== 'A' ? num(x.valorUnitario) * qtd : 0;
+          return { codigo: x.codigo || ('IT' + (i + 1)), descricao: x.descricao || '', ncm: soDig(x.ncm), unidade: x.unidade || 'UN', quantidade: qtd,
+            ii: al.ii, ipi: al.ipi, pis: al.pis, cofins: al.cofins, c5291: al.c5291, mono: al.mono, valorUnitario: qtd && total ? +(total / qtd).toFixed(10) : null };
+        });
+        return out;
+      }
       out.itens = qi.map((it, i) => {
         const b = baseItem(it, i), fob = num(it.q) * num(it.u) * txD, sh = fobTot > 0 ? fob / fobTot : 0;
         const totEnt = itensEnt[i] ? baseEnt(itensEnt[i]) * fatorEnt : 0;
