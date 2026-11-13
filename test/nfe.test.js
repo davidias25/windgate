@@ -184,6 +184,28 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(!R.sugerirEntrada(canc, { cenario: 'D', origemNota: canc.hubNFe[0]._id }).extras.notaOrigem, 'nota cancelada não serve de origem');
   }
 
+  console.log('\nNota de saída: peso líquido e bruto editáveis:');
+  {
+    const dbP = banco(), mAp = R.montarNFe(dbP, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { pesoBruto: '950' } } });
+    dbP.hubNFe.push(autorizada(dbP, 'A', 'OP20', mAp, '2'.repeat(44)));
+    const volA = mAp.payload.volumes[0], sD = R.sugerirEntrada(dbP, { cenario: 'D', opId: 'OP20' });
+    const mS = R.montarNFe(dbP, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29' })), vS = (mS.payload.volumes || [])[0] || {};
+    ok(vS.peso_bruto === 950 && !volA.peso_liquido && vS.peso_liquido === 200, 'automático: bruto da NF de entrada (950); a DUIMP não trouxe o líquido, então ele vem da cotação (2 × 100 kg)');
+    const dbL = banco(); dbL.ops[0].duimpDados.itens.forEach(i => { i.pesoLiquido = 321.5; });
+    const mAl = R.montarNFe(dbL, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }); dbL.hubNFe.push(autorizada(dbL, 'A', 'OP20', mAl, '2'.repeat(44)));
+    const mSl = R.montarNFe(dbL, Object.assign({}, R.sugerirEntrada(dbL, { cenario: 'D', opId: 'OP20' }), { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
+    ok(mSl.payload.volumes[0].peso_liquido === 321.5 && mSl.totais.auto.fonte === 'NF de entrada', 'com o líquido na NF de entrada, ele vem de lá');
+    const mE = R.montarNFe(dbP, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29', extras: Object.assign({}, sD.extras, { pesoLiquido: '180', pesoBruto: '210,5' }) })), vE = mE.payload.volumes[0];
+    ok(vE.peso_liquido === 180 && vE.peso_bruto === 210.5 && mE.avisos.some(a => /Peso líquido digitado/.test(a)) && mE.avisos.some(a => /Peso bruto digitado/.test(a)), 'digitado vale no lugar, com aviso');
+    const mV = R.montarNFe(dbP, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29', extras: Object.assign({}, sD.extras, { pesoLiquido: '', pesoBruto: '' }) }));
+    ok(mV.payload.volumes[0].peso_bruto === 950 && !mV.avisos.some(a => /digitado/.test(a)), 'vazio: volta ao automático');
+    const semEnt = banco(), mC2 = montar(semEnt, 'C', 'OP30');
+    ok(mC2.payload.volumes === undefined || mC2.totais.auto.fonte !== 'NF de entrada', 'sem NF de entrada nem peso na cotação: sem volumes inventados');
+    const comPeso = banco(); comPeso.quotes.q30.items[0].p = 2.5;
+    const mC3 = montar(comPeso, 'C', 'OP30');
+    ok(mC3.payload.volumes[0].peso_liquido === 250 && mC3.totais.auto.fonte === 'cotação', 'sem NF de entrada: peso líquido da cotação (100 × 2,5 kg)');
+  }
+
   console.log('\nH · venda direta SF → cliente contribuinte:');
   {
     const C = require('../public/hub/js/cotacao-regras.js');

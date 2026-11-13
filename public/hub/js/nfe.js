@@ -323,6 +323,9 @@
           return `<tr>${['descricao', 'ncm', 'unidade', 'quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].map(c => `<td>${inp(c, it[c], c === 'descricao' ? 200 : c === 'unidade' ? 48 : c === 'valorUnitario' || c === 'ncm' ? 110 : 64)}</td>`).join('')}
             <td><input type="checkbox" data-i="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td><input type="checkbox" data-i="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
             ${A ? `<td>${inp('ad.numero', ad.numero, 48)}</td><td>${inp('ad.sequencial', ad.sequencial, 48)}</td><td>${inp('ad.fabricante', ad.fabricante, 140)}</td>` : ''}${cen === 'G' ? `<td>${inp('cfop', it.cfop, 60)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+      ${A ? '' : (() => { const au = (n.totais || {}).auto || {}, fl = (k, l) => { const val = ex[k] !== '' && ex[k] != null ? ex[k] : (au[k] === '' || au[k] == null ? '' : au[k]);
+          return `<div class="f"><label class="lbl" for="e_${k}">${l}</label><input id="e_${k}" data-pso="${k}" inputmode="decimal" value="${esc(val === '' ? '' : String(val).replace('.', ','))}"><small class="note">automático: ${au[k] === '' || au[k] == null ? '—' : esc(String(au[k]).replace('.', ','))}${au.fonte ? ' · da ' + esc(au.fonte) : ''}${ex[k] !== '' && ex[k] != null && String(ex[k]) !== String(au[k]) ? ' · <b>editado</b>' : ''}</small></div>`; };
+        return `<h3 class="h3" style="margin-top:10px">Pesos</h3><div class="fields">${fl('pesoLiquido', 'Peso líquido (kg)')}${fl('pesoBruto', 'Peso bruto (kg)')}</div><p class="note">Já vêm da NF de entrada da operação. Mude se a venda não leva a carga inteira; apagar volta ao automático.</p>`; })()}
       <div class="fields" style="margin-top:10px"><div class="f w4"><label class="lbl" for="e_infos">Informações complementares (além das automáticas)</label><textarea id="e_infos" rows="2">${esc(ex.informacoes || '')}</textarea></div></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="e_ok">Salvar e montar de novo</button>');
     m.querySelector('.modal').classList.add('larga');
@@ -331,6 +334,9 @@
       const ct = m.querySelector('#e_contrib'); if (ct) destino.contribuinte = ct.value === 'sim' ? true : ct.value === 'nao' ? false : null;
       const extras = {}; ['icmsAliquota', 'terceiroCnpj', 'terceiroUf', 'cfop', 'finalidade', 'tipo_documento', 'natureza', 'referencia', 'informacoesItem'].forEach(k => { const i = m.querySelector('#e_' + k); if (i) extras[k] = i.value.trim(); });
       extras.informacoes = v(m, '#e_infos');
+      /* Pesos: igual ao automático (ou vazio) fica automático. */
+      const auP = (n.totais || {}).auto || {}, numP = s => { const t = String(s || '').trim(); if (!t) return null; const x = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : /^\d{1,3}(\.\d{3})+$/.test(t) ? +t.replace(/\./g, '') : +t; return isFinite(x) ? x : null; };
+      m.querySelectorAll('[data-pso]').forEach(i => { const k = i.dataset.pso, x = numP(i.value); extras[k] = x == null || (auP[k] !== '' && auP[k] != null && Math.abs(x - (+auP[k] || 0)) < 0.0005) ? '' : String(x); });
       if (A) { extras.duimp = {}; m.querySelectorAll('#fduimp [data-k]').forEach(i => { extras.duimp[i.dataset.k] = i.value.trim(); }); extras.duimp.manual = !v(m, '#e_duconf'); }
       const novos = itens.map((it, i) => { const x = Object.assign({}, it, { adicao: Object.assign({}, it.adicao) });
         m.querySelectorAll(`[data-i="${i}"]`).forEach(inp => { const c = inp.dataset.c; const val = inp.type === 'checkbox' ? inp.checked : inp.value.trim();

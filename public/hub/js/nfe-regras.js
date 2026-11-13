@@ -541,6 +541,16 @@
     const cfg = configNFe(db), prod = a.ambiente === 'producao';
     const o = a.opId ? opDe(db, a.opId) : null;
     if (a.opId && !o) P('op', `Operação ${a.opId} não encontrada.`);
+    /* Peso líquido e bruto da nota de saída: os da NF de entrada da operação (já com o que foi editado lá); sem ela,
+       o líquido da cotação (quantidade × peso). O que for digitado na nota vale no lugar. */
+    const entPeso = a.opId ? notaEntradaDaOp(db, a.opId) : null, volE = (entPeso && entPeso.payload && Array.isArray(entPeso.payload.volumes) && entPeso.payload.volumes[0]) || {};
+    const qPeso = o && W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null, pesoCot = qPeso ? (qPeso.items || []).filter(Boolean).reduce((s, it) => s + num(it.q) * num(it.p), 0) : 0;
+    const pesoAuto = { pesoLiquido: num(volE.peso_liquido) || +pesoCot.toFixed(3) || '', pesoBruto: num(volE.peso_bruto) || '', fonte: volE.peso_liquido ? 'NF de entrada' : pesoCot ? 'cotação' : '' };
+    const pesoDig = k => (ex[k] !== '' && ex[k] != null && isFinite(num(ex[k])) ? num(ex[k]) : null);
+    const pesoLiqS = pesoDig('pesoLiquido') != null ? pesoDig('pesoLiquido') : pesoAuto.pesoLiquido, pesoBrutoS = pesoDig('pesoBruto') != null ? pesoDig('pesoBruto') : pesoAuto.pesoBruto;
+    const volumesSaida = num(pesoLiqS) || num(pesoBrutoS) ? [limpar({ peso_liquido: num(pesoLiqS) ? +num(pesoLiqS).toFixed(3) : '', peso_bruto: num(pesoBrutoS) ? +num(pesoBrutoS).toFixed(3) : '' })] : '';
+    if (pesoDig('pesoLiquido') != null && pesoDig('pesoLiquido') !== num(pesoAuto.pesoLiquido)) A(`Peso líquido digitado na nota: ${pesoDig('pesoLiquido')} kg (automático: ${pesoAuto.pesoLiquido || '—'}${pesoAuto.fonte ? ', da ' + pesoAuto.fonte : ''}).`);
+    if (pesoDig('pesoBruto') != null && pesoDig('pesoBruto') !== num(pesoAuto.pesoBruto)) A(`Peso bruto digitado na nota: ${pesoDig('pesoBruto')} kg (automático: ${pesoAuto.pesoBruto || '—'}).`);
     if (!a.opId && cen.k !== 'G') P('op', 'Escolha a operação da nota.');
 
     /* Complementar/ajuste/devolução segue a tributação da nota original. */
@@ -725,11 +735,11 @@
       uf_destinatario: estrangeiro ? '' : ufDest, cep_destinatario: estrangeiro ? '' : soDig(dest.cep), pais_destinatario: estrangeiro ? txt(dest.pais, 60) : 'Brasil', codigo_pais_destinatario: estrangeiro ? soDig(dest.codigo_pais) : '1058',
       id_estrangeiro_destinatario: estrangeiro ? txt(dest.id_estrangeiro, 20) : '', telefone_destinatario: soDig(dest.telefone).slice(0, 14), email_destinatario: txt(dest.email, 60),
       informacoes_adicionais_contribuinte: infos.join(' ').slice(0, 5000),
-      notas_referenciadas: notasRef.length ? notasRef : '', items
+      notas_referenciadas: notasRef.length ? notasRef : '', volumes: volumesSaida, items
     });
     const somaItens = r2(items.reduce((s, x) => s + num(x.valor_bruto) + num(x.ii_valor) + num(x.ipi_valor) + num(x.valor_outras_despesas), 0));
     if (Math.abs(somaItens - tot.total) > 0.005) P('total', `Total da nota (R$ ${tot.total.toFixed(2)}) não bate com a soma dos itens (R$ ${somaItens.toFixed(2)}).`);
-    return { payload, pendencias: pend, avisos, totais: Object.assign(tot, { somaItens }), empresa, cenario: cen.k, opId: a.opId || (refNota && refNota.op) || '',
+    return { payload, pendencias: pend, avisos, totais: Object.assign(tot, { somaItens, auto: pesoAuto }), empresa, cenario: cen.k, opId: a.opId || (refNota && refNota.op) || '',
       destinatario: { nome: txt(dest.nome, 60), cnpj: soDig(dest.cnpj || dest.cpf), uf: ufDest }, formaIntermedio: null };
   }
 
