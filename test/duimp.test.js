@@ -247,6 +247,22 @@ function banco() {
   r = await chamar('pedro', 'POST', '/api/duimp/OP16/importar', {});
   ok(r.status === 200, 'o contador também importa a DUIMP');
 
+  /* Nota de homologação (teste) não vale em produção: ligar a produção e reimportar monta uma NF de entrada nova. */
+  process.env.FOCUS_NFE_AMBIENTE = 'producao';
+  r = await chamar('davi', 'POST', '/api/duimp/OP16/importar', {});
+  b = lerBanco();
+  const notaProd = b.hubNFe.find(n => n.cenario === 'A' && n.ambiente === 'producao' && n.duimp && n.duimp.numero === notaB.duimp.numero);
+  const notaTeste = b.hubNFe.find(n => n._id === nota._id);
+  ok(r.status === 200 && !r.j.notaIntocada && notaProd && notaProd._id !== nota._id && notaProd.status === 'rascunho' && r.j.nota._id === notaProd._id,
+    'em produção, a nota de homologação não trava a DUIMP: nasce uma NF de entrada nova, em produção');
+  ok(notaTeste.status === 'enviada' && notaTeste.ambiente === 'homologacao', 'a nota de homologação fica como estava');
+  r = await chamar('davi', 'POST', '/api/duimp/OP16/importar', {});
+  ok(r.status === 200 && r.j.nota._id === notaProd._id && lerBanco().hubNFe.filter(n => n.cenario === 'A' && n.ambiente === 'producao').length === 1, 'reimportar em produção remonta a mesma nota de produção (sem duplicar)');
+  const bTeste = { hubNFe: [Object.assign({}, notaTeste, { op: 'OPX', status: 'autorizada' }), Object.assign({}, notaProd, { op: 'OPX' })] };
+  ok(W.notaEntradaDaOp(bTeste, 'OPX', 'producao')._id === notaProd._id && W.notaEntradaDaOp(bTeste, 'OPX', 'homologacao')._id === notaTeste._id,
+    'a nota de venda em produção usa a NF de entrada de produção, nunca a autorizada em homologação');
+  process.env.FOCUS_NFE_AMBIENTE = 'homologacao';
+
   if (srv.closeAllConnections) srv.closeAllConnections();
   await new Promise(x => srv.close(() => x()));
   try { fs.unlinkSync(TMP); fs.unlinkSync(TMP + '.bak'); } catch (e) {}

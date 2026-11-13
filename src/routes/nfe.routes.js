@@ -27,7 +27,8 @@ module.exports = function registrar(app, ctx) {
   const emUso = new Set();
   const salvar = (n, extra) => gravarParcial(Object.assign({ hubNFe: [n] }, extra || {}));
   const hist = (n, por, acao, msg) => Object.assign({}, n, { historico: (n.historico || []).concat([{ em: agora(), por, acao, msg: String(msg || '').slice(0, 500) }]) });
-  const notaDaDuimp = (d, num) => ((d || {}).hubNFe || []).filter(n => n && n.cenario === 'A' && n.duimp && W.numDuimp(n.duimp.numero) === W.numDuimp(num) && n.status !== 'cancelada').sort((a, b) => String(b.criadaEm || '').localeCompare(String(a.criadaEm || '')))[0] || null;
+  /* Só a nota do ambiente atual: uma nota de homologação (teste) não vale em produção e não trava a NF de entrada oficial. */
+  const notaDaDuimp = (d, num) => ((d || {}).hubNFe || []).filter(n => n && n.cenario === 'A' && n.duimp && W.numDuimp(n.duimp.numero) === W.numDuimp(num) && n.status !== 'cancelada' && (!n.ambiente || n.ambiente === focus.ambiente())).sort((a, b) => String(b.criadaEm || '').localeCompare(String(a.criadaEm || '')))[0] || null;
   /* Operação antiga sem _id: o _id tem de ser o do conteúdo original, senão a mesclagem duplica a operação. */
   const comId = o => Object.assign({ _id: o._id || W.idDeterministico(o) }, o);
   const falha = (res, e) => res.status(e.semIntegracao ? 200 : 502).json({ success: false, semIntegracao: !!e.semIntegracao, message: e.message });
@@ -162,7 +163,7 @@ module.exports = function registrar(app, ctx) {
         return res.json({ success: true, nota: final });
       }
     } else if (!n) {
-      entrada = W.sugerirEntrada(d, { cenario: b.cenario, opId: b.opId, empresa: b.empresa, referencia: b.extras && b.extras.referencia, dataEmissao: b.dataEmissao, origemNota: b.origemNota });
+      entrada = W.sugerirEntrada(d, { cenario: b.cenario, opId: b.opId, empresa: b.empresa, referencia: b.extras && b.extras.referencia, dataEmissao: b.dataEmissao, origemNota: b.origemNota, ambiente: focus.ambiente() });
       if (!entrada) return res.status(400).json({ success: false, message: 'Cenário fiscal desconhecido.' });
     } else entrada = JSON.parse(JSON.stringify(n.entrada || {}));
     if (cenario !== 'A') {

@@ -157,8 +157,9 @@
     return (db.crm || []).find(c => c && ((cn && soDig(c.cnpj) === cn) || (alvo && [c.empresa, c.nome].some(x => String(x || '').trim().toLowerCase() === alvo)))) || null;
   }
   /** Nota de entrada (cenário A) da operação: a autorizada, senão a mais recente não cancelada. */
-  function notaEntradaDaOp(db, opId) {
-    const ns = (db.hubNFe || []).filter(n => n && n.op === opId && n.cenario === 'A' && n.status !== 'cancelada');
+  /** NF de entrada da operação. Com `ambiente`, só a do mesmo ambiente: a nota de homologação (teste) não serve de base para a nota de produção. */
+  function notaEntradaDaOp(db, opId, ambiente) {
+    const ns = (db.hubNFe || []).filter(n => n && n.op === opId && n.cenario === 'A' && n.status !== 'cancelada' && (!ambiente || !n.ambiente || n.ambiente === ambiente));
     return ns.find(n => n.status === 'autorizada') || ns.sort((a, b) => String(b.criadaEm || '').localeCompare(String(a.criadaEm || '')))[0] || null;
   }
   const destDeCliente = c => c ? { nome: c.empresa || c.nome || '', cnpj: soDig(c.cnpj), ie: c.ie || '', contribuinte: c.contribuinte, email: c.email || '', telefone: soDig(c.fone),
@@ -221,7 +222,7 @@
       if (ref && ref.entrada) { out.itens = (ref.entrada.itens || []).map(x => Object.assign({}, x)); out.opId = ref.op || out.opId; }
       out.extras = { referencia: ref ? ref._id : '', finalidade: 2, cfop: '' };
     } else {
-      const ent = orig && orig.cenario === 'A' ? orig : notaEntradaDaOp(db, a.opId), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
+      const ent = orig && orig.cenario === 'A' ? orig : notaEntradaDaOp(db, a.opId, a.ambiente), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
       const baseEnt = x => num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ipi_valor) + num(x.ii_valor) + num(x.valor_outras_despesas);
       const somaBaseEnt = itensEnt.reduce((s, x) => s + baseEnt(x), 0), fatorEnt = somaBaseEnt > 0 && ent && ent.totais && num(ent.totais.total) > 0 ? num(ent.totais.total) / somaBaseEnt : 1;
       const inter = num(cen.icms_aliquota_interestadual) / 100;
@@ -565,7 +566,7 @@
     if (a.opId && !o) P('op', `Operação ${a.opId} não encontrada.`);
     /* Peso líquido e bruto da nota de saída: os da NF de entrada da operação (já com o que foi editado lá); sem ela,
        o líquido da cotação (quantidade × peso). O que for digitado na nota vale no lugar. */
-    const entPeso = a.opId ? notaEntradaDaOp(db, a.opId) : null, volE = (entPeso && entPeso.payload && Array.isArray(entPeso.payload.volumes) && entPeso.payload.volumes[0]) || {};
+    const entPeso = a.opId ? notaEntradaDaOp(db, a.opId, a.ambiente) : null, volE = (entPeso && entPeso.payload && Array.isArray(entPeso.payload.volumes) && entPeso.payload.volumes[0]) || {};
     const qPeso = o && W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null, pesoCot = qPeso ? (qPeso.items || []).filter(Boolean).reduce((s, it) => s + num(it.q) * num(it.p), 0) : 0;
     const pesoAuto = { pesoLiquido: num(volE.peso_liquido) || +pesoCot.toFixed(3) || '', pesoBruto: num(volE.peso_bruto) || '', fonte: volE.peso_liquido ? 'NF de entrada' : pesoCot ? 'cotação' : '' };
     const pesoDig = k => (ex[k] !== '' && ex[k] != null && isFinite(num(ex[k])) ? num(ex[k]) : null);
@@ -633,7 +634,7 @@
     /* ---- Referência ---- */
     const notasRef = [];
     if (cen.k === 'B') {
-      const ent = notaEntradaDaOp(db, a.opId);
+      const ent = notaEntradaDaOp(db, a.opId, a.ambiente);
       if (ent && ent.status === 'autorizada' && ent.chave) notasRef.push({ chave_nfe: ent.chave });
       else P('notas_referenciadas', 'A saída na conta e ordem referencia a NF de entrada: autorize primeiro a NF de entrada (cenário A) desta operação.');
     }
@@ -731,7 +732,7 @@
 
     /* Trava do piso (triangular): sair abaixo do custo de entrada é vender no prejuízo. */
     if (cen.piso_saida) {
-      const ent = notaEntradaDaOp(db, a.opId);
+      const ent = notaEntradaDaOp(db, a.opId, a.ambiente);
       if (!ent || !ent.totais) A('Sem NF de entrada da operação no sistema: não dá para conferir o piso da NF de saída.');
       else { const piso = r2(num(ent.totais.total) / (1 - num(cen.icms_aliquota_interestadual) / 100)); if (tot.produtos < piso - 0.005) P('piso', `NF de saída (R$ ${tot.produtos.toFixed(2)}) abaixo do piso de R$ ${piso.toFixed(2)} = NF de entrada ÷ (1 − ${num(cen.icms_aliquota_interestadual)}%).`); }
     }
