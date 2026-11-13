@@ -307,6 +307,11 @@
   function editar(n) {
     const e = n.entrada || {}, d = e.destinatario || {}, ex = e.extras || {}, du = ex.duimp || {}, itens = e.itens || [], cen = n.cenario;
     const estr = cen === 'A' || d.estrangeiro, A = cen === 'A';
+    /* Venda sobre a NF de entrada (como no Maino): valor do item = custo dele na entrada ÷ divisor; alíquotas que faltam vêm da entrada. */
+    const entV = A || cen === 'G' ? null : W.entradaDaVenda(H.db, n), custos = entV ? W.custosEntrada(entV) : null;
+    const ces = itens.map((it, i) => custos ? W.custoDoItem(custos, it, i) : null), cenO = ((ctx || {}).cenarios || []).find(c => c.k === cen) || {};
+    const divPadrao = cen === 'D' && +cenO.icms_aliquota_interestadual > 0 ? 1 - cenO.icms_aliquota_interestadual / 100 : 1;
+    const fmtN = x => String(+(+x).toFixed(6)).replace('.', ','), lerN = t => { t = String(t || '').trim(); const x = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : +t; return isFinite(x) && x > 0 ? x : null; };
     const campo = (k, l, val, extra) => `<div class="f ${extra || ''}"><label class="lbl" for="e_${k}">${l}</label><input id="e_${k}" data-k="${k}" value="${esc(val == null ? '' : val)}"></div>`;
     const dest = estr ? [['nome', 'Exportador'], ['pais', 'País'], ['codigo_pais', 'Código do país (BACEN)'], ['logradouro', 'Endereço'], ['numero', 'Número'], ['id_estrangeiro', 'ID estrangeiro']]
       : [['nome', 'Razão social'], ['cnpj', 'CNPJ ou CPF'], ['ie', 'Inscrição estadual'], ['logradouro', 'Logradouro'], ['numero', 'Número'], ['complemento', 'Complemento'], ['bairro', 'Bairro'], ['municipio', 'Município'], ['codigo_municipio', 'Código IBGE do município'], ['uf', 'UF'], ['cep', 'CEP'], ['email', 'E-mail'], ['telefone', 'Telefone']];
@@ -323,20 +328,35 @@
       <h3 class="h3" style="margin-top:10px">Itens</h3>
       <div class="tw"><table id="fitens"><thead><tr><th>Descrição</th><th>NCM</th><th>Un</th><th>Qtd</th><th>Valor unit. (R$)</th><th>II %</th><th>IPI %</th><th>PIS %</th><th>COFINS %</th><th>52/91</th><th>Mono</th>${A ? '<th>Adição</th><th>Seq.</th><th>Fabricante</th>' : ''}${cen === 'G' ? '<th>CFOP</th>' : ''}</tr></thead><tbody>
         ${itens.map((it, i) => { const ad = it.adicao || {}, inp = (c, val, w) => `<input class="inp" data-i="${i}" data-c="${c}" value="${esc(val == null ? '' : val)}" style="width:${w || 80}px">`;
-          return `<tr>${['descricao', 'ncm', 'unidade', 'quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].map(c => `<td>${inp(c, it[c], c === 'descricao' ? 200 : c === 'unidade' ? 48 : c === 'valorUnitario' || c === 'ncm' ? 110 : 64)}</td>`).join('')}
+          const ce = ces[i], val = c => ['ii', 'ipi', 'pis', 'cofins'].includes(c) && (it[c] == null || it[c] === '') && ce && ce[c] != null ? ce[c] : it[c];
+          return `<tr>${['descricao', 'ncm', 'unidade', 'quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].map(c => `<td>${inp(c, val(c), c === 'descricao' ? 200 : c === 'unidade' ? 48 : c === 'valorUnitario' || c === 'ncm' ? 110 : 64)}</td>`).join('')}
             <td><input type="checkbox" data-i="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td><input type="checkbox" data-i="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
             ${A ? `<td>${inp('ad.numero', ad.numero, 48)}</td><td>${inp('ad.sequencial', ad.sequencial, 48)}</td><td>${inp('ad.fabricante', ad.fabricante, 140)}</td>` : ''}${cen === 'G' ? `<td>${inp('cfop', it.cfop, 60)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+      ${custos ? `<h3 class="h3" style="margin-top:10px">Valor de venda sobre a NF de entrada</h3>
+      <div class="fields"><div class="f"><label class="lbl" for="e_div">Divisor (venda = custo da entrada ÷ divisor)</label><input id="e_div" inputmode="decimal" value="${esc(fmtN(lerN(ex.divisorEntrada) || divPadrao))}"></div>
+        <div class="f w2"><span class="lbl">Total</span><span class="ro" id="e_divres"></span></div><div class="f"><span class="lbl">&nbsp;</span><button class="btn" id="e_divok" type="button">Aplicar nos itens</button></div></div>
+      <p class="note">Custo de cada item = o valor dele na NF de entrada ${esc(entV.ref)}${entV.numero ? ' (nº ' + esc(entV.numero) + ')' : ''}: produto, frete, seguro, II, IPI e despesas, rateados até o total da nota. Ex.: divisor 0,8 → venda = entrada ÷ 0,8. Mudar o divisor recalcula o valor unitário de todos os itens.${ces.some(c => !c) ? ` <b>${ces.filter(c => !c).length} item(ns) sem par na NF de entrada</b> ficam com o valor digitado.` : ''}</p>` : ''}
+      ${A || cen === 'G' ? '' : `<p class="note">Impostos da saída: IPI pela alíquota de cada item${custos ? ' (vem da NF de entrada)' : ''}; ICMS ${cenO.icms_cst ? 'CST ' + esc(cenO.icms_cst) : ''}${cenO.icms_aliquota_interestadual != null || cenO.icms_aliquota_interna != null ? ' · ' + esc([cenO.icms_aliquota_interna != null ? cenO.icms_aliquota_interna + '% interna' : '', cenO.icms_aliquota_interestadual != null ? cenO.icms_aliquota_interestadual + '% interestadual' : ''].filter(Boolean).join(' / ')) : ''}, PIS ${cenO.pis_aliquota != null ? esc(cenO.pis_aliquota) + '%' : '—'} e COFINS ${cenO.cofins_aliquota != null ? esc(cenO.cofins_aliquota) + '%' : '—'} pelo cenário ${esc(cen)}. II, PIS e COFINS das colunas são os da importação (referência).</p>`}
       ${A ? '' : (() => { const au = (n.totais || {}).auto || {}, fl = (k, l) => { const val = ex[k] !== '' && ex[k] != null ? ex[k] : (au[k] === '' || au[k] == null ? '' : au[k]);
           return `<div class="f"><label class="lbl" for="e_${k}">${l}</label><input id="e_${k}" data-pso="${k}" inputmode="decimal" value="${esc(val === '' ? '' : String(val).replace('.', ','))}"><small class="note">automático: ${au[k] === '' || au[k] == null ? '—' : esc(String(au[k]).replace('.', ','))}${au.fonte ? ' · da ' + esc(au.fonte) : ''}${ex[k] !== '' && ex[k] != null && String(ex[k]) !== String(au[k]) ? ' · <b>editado</b>' : ''}</small></div>`; };
         return `<h3 class="h3" style="margin-top:10px">Pesos</h3><div class="fields">${fl('pesoLiquido', 'Peso líquido (kg)')}${fl('pesoBruto', 'Peso bruto (kg)')}</div><p class="note">Já vêm da NF de entrada da operação. Mude se a venda não leva a carga inteira; apagar volta ao automático.</p>`; })()}
       <div class="fields" style="margin-top:10px"><div class="f w4"><label class="lbl" for="e_infos">Informações complementares (além das automáticas)</label><textarea id="e_infos" rows="2">${esc(ex.informacoes || '')}</textarea></div></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="e_ok">Salvar e montar de novo</button>');
     m.querySelector('.modal').classList.add('larga');
+    if (custos) {
+      const divI = m.querySelector('#e_div'), res = m.querySelector('#e_divres');
+      const mostra = () => { const dv = lerN(divI.value); res.textContent = dv ? `NF de entrada ${W.fmtBRL(custos.total)} ÷ ${fmtN(dv)} = ${W.fmtBRL(custos.total / dv)}` : 'Informe um divisor maior que zero.'; return dv; };
+      const aplicar = () => { const dv = mostra(); if (!dv) return;
+        ces.forEach((ce, i) => { if (!ce) return; const q = +String(m.querySelector(`[data-i="${i}"][data-c="quantidade"]`).value).replace(',', '.') || 0, vu = m.querySelector(`[data-i="${i}"][data-c="valorUnitario"]`);
+          if (q > 0 && vu) vu.value = String(+(ce.custo / dv / q).toFixed(10)); }); };
+      mostra(); divI.oninput = aplicar; m.querySelector('#e_divok').onclick = aplicar;
+    }
     m.querySelector('#e_ok').onclick = async ev => {
       const destino = Object.assign({}, d); m.querySelectorAll('#fdest [data-k]').forEach(i => { destino[i.dataset.k] = i.value.trim(); });
       const ct = m.querySelector('#e_contrib'); if (ct) destino.contribuinte = ct.value === 'sim' ? true : ct.value === 'nao' ? false : null;
       const extras = {}; ['icmsAliquota', 'terceiroCnpj', 'terceiroUf', 'cfop', 'finalidade', 'tipo_documento', 'natureza', 'referencia', 'informacoesItem'].forEach(k => { const i = m.querySelector('#e_' + k); if (i) extras[k] = i.value.trim(); });
       extras.informacoes = v(m, '#e_infos');
+      if (custos) { const dv = lerN(v(m, '#e_div')); if (dv) extras.divisorEntrada = String(dv); }
       /* Pesos: igual ao automático (ou vazio) fica automático. */
       const auP = (n.totais || {}).auto || {}, numP = s => { const t = String(s || '').trim(); if (!t) return null; const x = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : /^\d{1,3}(\.\d{3})+$/.test(t) ? +t.replace(/\./g, '') : +t; return isFinite(x) ? x : null; };
       m.querySelectorAll('[data-pso]').forEach(i => { const k = i.dataset.pso, x = numP(i.value); extras[k] = x == null || (auP[k] !== '' && auP[k] != null && Math.abs(x - (+auP[k] || 0)) < 0.0005) ? '' : String(x); });

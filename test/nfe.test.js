@@ -201,7 +201,17 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(sSemOrigem.itens.length === 1 && sSemOrigem.itens[0].quantidade === 2, '"Nova nota" sem cotação na operação: os itens saem da NF de entrada, em vez de vir vazios');
     const sC = R.sugerirEntrada(dbV, { cenario: 'C', origemNota: nA._id });
     const mCv = R.montarNFe(dbV, Object.assign({}, sC, { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
-    ok(sC.itens.length === 1 && sC.itens[0].valorUnitario == null && mCv.pendencias.some(p => /valor_unitario_comercial/.test(p.campo)), 'venda sem cotação e sem preço: itens vêm, o valor fica como pendência para preencher (não transmite em branco)');
+    ok(sC.itens.length === 1 && Math.abs(sC.itens[0].valorUnitario * 2 - 13579.23) < 0.01 && !mCv.pendencias.some(p => /valor_unitario_comercial/.test(p.campo)), 'venda sem cotação: o valor vem do custo do item na NF de entrada (13.579,23), em vez de ficar em branco');
+    const custos = R.custosEntrada(nA);
+    ok(custos.total === 13579.23 && custos.itens.length === 1 && Math.abs(custos.itens[0].custo - 13579.23) < 0.01, 'custo do item na entrada: produto + frete + seguro + II + IPI + despesas, rateado até o total da nota (13.579,23)');
+    const sC8 = R.sugerirEntrada(dbV, { cenario: 'C', origemNota: nA._id, divisor: '0,8' }), mC8 = R.montarNFe(dbV, Object.assign({}, sC8, { ambiente: 'homologacao', dataEmissao: '2026-10-29' }));
+    ok(sC8.extras.divisorEntrada === '0.8' && mC8.payload.items[0].valor_bruto === 16974.04, 'divisor 0,8 sobre a NF de entrada: venda = 13.579,23 ÷ 0,8 = 16.974,04 (e o divisor fica guardado na nota)');
+    const ipiEnt = nA.payload.items[0].ipi_aliquota;
+    const semCat = semCot(); semCat.ncmlib = {}; const nAc = semCat.hubNFe[0];
+    const sCa = R.sugerirEntrada(semCat, { cenario: 'C', origemNota: nAc._id });
+    ok(ipiEnt != null && sCa.itens[0].ipi === ipiEnt && sCa.itens[0].pis === nAc.payload.items[0].pis_aliquota_porcentual, `alíquotas da saída sem Catálogo de NCM: vêm da NF de entrada (IPI ${ipiEnt}%)`);
+    const vend = { cenario: 'C', op: 'OP20', ambiente: nA.ambiente, entrada: { extras: { notaOrigem: nA._id }, itens: sC.itens } };
+    ok(R.entradaDaVenda(dbV, vend) === nA && R.custoDoItem(custos, sC.itens[0], 0) === custos.itens[0] && R.custoDoItem(custos, Object.assign({}, sC.itens[0], { ncm: '11111111' }), 0) === null, 'nota de venda já montada acha a NF de entrada e o custo de cada item (pela posição, conferindo NCM)');
     const nD = autorizada(dbV, 'D', 'OP20', Object.assign({}, mDv, { entrada: sD }), '3'.repeat(44)); dbV.hubNFe.push(nD);
     const sE = R.sugerirEntrada(dbV, { cenario: 'E', origemNota: nD._id });
     ok(sE.itens.length === 1 && Math.abs(sE.itens[0].valorUnitario * sE.itens[0].quantidade - 14145.03) < 0.01 && sE.empresa === 'JeT', 'da NF SF → JeT: a venda da JeT nasce com os mesmos itens e, sem cotação, o valor da nota de origem');
@@ -243,7 +253,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(montar(naoContrib, 'H', 'OP40').pendencias.some(p => p.campo === 'destinatario' && /triangular/.test(p.msg)), 'cliente não contribuinte: pendência, aponta a triangular');
     const dbHA = banco(); delete dbHA.quotes.q40; dbHA.hubNFe.push(autorizada(dbHA, 'A', 'OP40', mA, '4'.repeat(44)));
     const sHA = R.sugerirEntrada(dbHA, { cenario: 'H', origemNota: dbHA.hubNFe[0]._id });
-    ok(sHA.itens.length === 1 && sHA.itens[0].valorUnitario == null && sHA.empresa === 'WindGate', 'a partir da NF de entrada, sem cotação: itens vêm, o preço fica para preencher');
+    ok(sHA.itens.length === 1 && Math.abs(sHA.itens[0].valorUnitario * sHA.itens[0].quantidade - R.custosEntrada(dbHA.hubNFe[0]).total) < 0.01 && sHA.empresa === 'WindGate', 'a partir da NF de entrada, sem cotação: itens vêm com o custo da entrada (divisor 1) para ajustar');
   }
 
   console.log('\nE · JeT → cliente contribuinte:');

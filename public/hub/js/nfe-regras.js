@@ -162,6 +162,32 @@
     const ns = (db.hubNFe || []).filter(n => n && n.op === opId && n.cenario === 'A' && n.status !== 'cancelada' && (!ambiente || !n.ambiente || n.ambiente === ambiente));
     return ns.find(n => n.status === 'autorizada') || ns.sort((a, b) => String(b.criadaEm || '').localeCompare(String(a.criadaEm || '')))[0] || null;
   }
+  /**
+   * Custo de cada item na NF de entrada: produto + frete + seguro + II + IPI + outras, rateado para
+   * a soma bater com o total da nota (que também leva PIS/COFINS e taxas). Mais as alíquotas do item.
+   * É a base da venda: valor de venda do item = custo ÷ divisor (como no Maino).
+   */
+  function custosEntrada(ent) {
+    const its = (ent && ent.payload && ent.payload.items) || [];
+    const base = x => num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ipi_valor) + num(x.ii_valor) + num(x.valor_outras_despesas);
+    const soma = its.reduce((s, x) => s + base(x), 0), total = ent && ent.totais && num(ent.totais.total) > 0 ? num(ent.totais.total) : soma;
+    const fator = soma > 0 ? total / soma : 1, pctDe = (v, b) => num(b) > 0 ? r2(num(v) / num(b) * 100) : null;
+    return { nota: ent || null, total: r2(total), itens: its.map(x => ({ codigo: x.codigo_produto || '', ncm: soDig(x.codigo_ncm), quantidade: num(x.quantidade_comercial), custo: base(x) * fator,
+      ii: pctDe(x.ii_valor, x.ii_base_calculo), ipi: temNum(x.ipi_aliquota) ? num(x.ipi_aliquota) : null, pis: temNum(x.pis_aliquota_porcentual) ? num(x.pis_aliquota_porcentual) : null, cofins: temNum(x.cofins_aliquota_porcentual) ? num(x.cofins_aliquota_porcentual) : null })) };
+  }
+  /** NF de entrada que serve de base para uma nota de venda já montada (a de origem, ou a da operação). */
+  function entradaDaVenda(db, nota) {
+    const ex = (nota && nota.entrada && nota.entrada.extras) || {};
+    const orig = ex.notaOrigem ? (db.hubNFe || []).find(n => n && n._id === ex.notaOrigem && n.status !== 'cancelada') : null;
+    if (orig) return orig.cenario === 'A' ? orig : null;
+    return nota && nota.op ? notaEntradaDaOp(db, nota.op, nota.ambiente) : null;
+  }
+  /** Item de venda × item da entrada: pela posição quando NCM e código batem; senão pelo código. */
+  function custoDoItem(custos, it, i) {
+    const c = custos.itens[i], cod = txt(it && it.codigo);
+    if (c && c.ncm === soDig(it && it.ncm) && (!cod || !c.codigo || c.codigo === cod)) return c;
+    return cod ? custos.itens.find(x => x.codigo === cod && x.ncm === soDig(it.ncm)) || null : null;
+  }
   const destDeCliente = c => c ? { nome: c.empresa || c.nome || '', cnpj: soDig(c.cnpj), ie: c.ie || '', contribuinte: c.contribuinte, email: c.email || '', telefone: soDig(c.fone),
     logradouro: (c.end || {}).logradouro || '', numero: (c.end || {}).numero || '', bairro: (c.end || {}).bairro || '', municipio: (c.end || {}).cidade || '', codigo_municipio: (c.end || {}).codigoMunicipio || '', uf: (c.end || {}).uf || '', cep: soDig((c.end || {}).cep) } : {};
   /** Destinatário de partida: CRM, empresa do grupo ou exportador; completa com a última nota para o mesmo CNPJ. */
@@ -234,13 +260,21 @@
       if (fonte) {
         if (orig) out.extras.notaOrigem = orig._id;
         const mesmaOrdem = qi.length === itensDaNota(fonte).length;
+        const custos = fonte.cenario === 'A' ? custosEntrada(fonte) : null;
+        /* Divisor sobre a NF de entrada (venda = custo ÷ divisor): o informado; sem ele, o piso do cenário D (1 − interestadual) ou 1 (o custo). */
+        const divisor = num(a.divisor) > 0 ? num(a.divisor) : cen.k === 'D' && inter < 1 ? 1 - inter : 1;
+        if (custos && (num(a.divisor) > 0 || cen.k === 'D')) out.extras.divisorEntrada = String(+divisor.toFixed(6));
         out.itens = itensDaNota(fonte).map((x, i) => {
-          const al = aliquotasItem(db, x.ncm, mesmaOrdem ? Object.assign({}, qi[i], x) : x), qtd = num(x.quantidade);
-          const totEnt = itensEnt[i] && ent === fonte ? baseEnt(itensEnt[i]) * fatorEnt : 0;
+          const ce = custos ? custoDoItem(custos, x, i) : null;
+          /* Alíquotas: Catálogo de NCM; depois as da própria NF de entrada (a DUIMP); por último a cotação. */
+          const daEnt = {}; if (ce) ['ii', 'ipi', 'pis', 'cofins'].forEach(k => { if (ce[k] != null) daEnt[k] = ce[k]; });
+          const al = aliquotasItem(db, x.ncm, Object.assign({}, mesmaOrdem ? qi[i] : {}, x, daEnt)), qtd = num(x.quantidade);
+          const totEnt = ce ? ce.custo : 0;
           const sh = mesmaOrdem && fobTot > 0 ? num(qi[i].q) * num(qi[i].u) * txD / fobTot : 0;
-          /* Valor: conta e ordem = custo da entrada; SF → JeT = piso da entrada; venda = preço da cotação. Sem cotação: o da nota de origem (venda da JeT) ou em branco para preencher. */
+          /* Valor: conta e ordem = custo da entrada; com divisor informado ou SF → JeT = custo ÷ divisor; venda = preço da cotação.
+             Sem cotação: o da nota de origem (venda da JeT) ou o custo da entrada ÷ divisor. */
           const preco = cen.k === 'H' ? precoSemDifal(q) : num(q && q.preco);
-          const total = cen.k === 'B' ? totEnt : cen.k === 'D' ? (totEnt && inter < 1 ? totEnt / (1 - inter) : 0) : sh && preco ? preco * sh : fonte.cenario !== 'A' ? num(x.valorUnitario) * qtd : 0;
+          const total = cen.k === 'B' ? totEnt : totEnt && (num(a.divisor) > 0 || cen.k === 'D') ? totEnt / divisor : sh && preco ? preco * sh : fonte.cenario !== 'A' ? num(x.valorUnitario) * qtd : totEnt / divisor;
           return { codigo: x.codigo || ('IT' + (i + 1)), descricao: x.descricao || '', ncm: soDig(x.ncm), unidade: x.unidade || 'UN', quantidade: qtd,
             ii: al.ii, ipi: al.ipi, pis: al.pis, cofins: al.cofins, c5291: al.c5291, mono: al.mono, valorUnitario: qtd && total ? +(total / qtd).toFixed(10) : null };
         });
@@ -854,5 +888,5 @@
 
   return { montarEntradaDuimp, conferirDuimpCotacao, dataDesembaracoDaOp, PAISES_BACEN, paisBacen,
     CENARIOS_PADRAO, CAMPOS_CENARIO, cenarios, cenarioDe, CONFIG_PADRAO, configNFe, empresaDados, FORMA_INTERMEDIO, formaIntermedio, STATUS_NFE, HOMOLOGACAO_NOME,
-    clienteDaOp, notaEntradaDaOp, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, totaisCabecalho, r2 };
+    clienteDaOp, notaEntradaDaOp, custosEntrada, entradaDaVenda, custoDoItem, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, totaisCabecalho, r2 };
 });
