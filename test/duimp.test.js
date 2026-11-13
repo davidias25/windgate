@@ -156,7 +156,7 @@ function banco() {
   const desvio = clone(db); desvio.ops[0].duimpDados.itens[0].tributos.ii.devido = 2101.5;
   ok(W.montarNFe(desvio, { cenario: 'A', opId: 'OP16', duimpNumero: NUM }).pendencias.some(p => p.campo === 'total.ii'), 'soma dos itens diferente do total da DUIMP (> R$ 0,01): pendência');
   const naoValidado = W.montarNFe(db, { cenario: 'A', opId: 'OP16', duimpNumero: NUM, ambiente: 'producao' });
-  ok(naoValidado.pendencias.some(p => /Cenário A ainda não foi conferido/.test(p.msg)), 'CFOP/cenário não validado pelo contador: pendência em produção');
+  ok(!naoValidado.pendencias.some(p => p.campo === 'cenario') && naoValidado.avisos.some(x => /Cenário A a validar/.test(x)), 'cenário não validado pelo contador: só aviso, não trava (nem em produção)');
 
   console.log('\nConferência contra a cotação e custeio:');
   const avisos16 = W.conferirDuimpCotacao(db, 'OP16'), avisos21 = W.conferirDuimpCotacao(db, 'OP21');

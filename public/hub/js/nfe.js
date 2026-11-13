@@ -357,7 +357,7 @@
   /* ---------------- Cenários fiscais ---------------- */
   function telaCenarios() {
     const dir = H.perfil().id === 'diretoria', marca = dir || ctx.podeEmitir;
-    const m = H.modal('Cenários fiscais', `<p class="note" style="margin-bottom:10px">Sugestões de partida. <b>O contador (Pedro) e a contadora de AL (Gil) validam</b> CFOP, CST e alíquotas; em produção só sai nota de cenário conferido. Mudar um cenário desfaz a conferência.</p>
+    const m = H.modal('Cenários fiscais', `<p class="note" style="margin-bottom:10px">Sugestões de partida. <b>O contador (Pedro) e a contadora de AL (Gil) validam</b> CFOP, CST e alíquotas; enquanto não conferido, a nota sai com um aviso. Mudar um cenário desfaz a conferência.</p>
       <div class="tw"><table><thead><tr><th>Cenário</th><th>CFOP (int. / interest. / ext.)</th><th>ICMS</th><th>IPI</th><th>PIS/COFINS</th><th>IBS/CBS</th><th>Situação</th><th></th></tr></thead><tbody>
       ${(ctx.cenarios || []).map(c => `<tr><td><b>${c.k}</b> · ${esc(c.nome)}<br><small class="note">${esc(c.obs || '')}</small></td>
         <td class="mono">${esc(c.cfop_interna || '—')} / ${esc(c.cfop_interestadual || '—')} / ${esc(c.cfop_exterior || '—')}</td>

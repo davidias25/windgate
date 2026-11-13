@@ -322,8 +322,8 @@
     if (!ret) { P('duimp', 'DUIMP não importada: a NF de entrada nasce da DUIMP. Importe a DUIMP na ficha da operação (ou na tela de NF-e).'); return vazio; }
     const r = ret.dados, g = r.geral, itensD = (r.itens || []).filter(Boolean);
     const opsD = W.opsDaDuimp(db, numero), varias = opsD.length > 1;
-    if (prod && !(cen.conferido && cen.conferido.em)) P('cenario', 'Cenário A ainda não foi conferido pelo contador: em produção só sai nota de cenário conferido.');
-    else if (!(cen.conferido && cen.conferido.em)) A('Cenário A a validar pelo contador (CFOP, CST, alíquotas e composição do valor do produto são sugestões).');
+    /* Cenário não conferido avisa, mas não trava (decisão da diretoria): nem em produção. */
+    if (!(cen.conferido && cen.conferido.em)) A('Cenário A a validar pelo contador (CFOP, CST, alíquotas e composição do valor do produto são sugestões).');
     if (!itensD.length) P('items', 'A DUIMP importada não tem itens ativos.');
     const semOp = varias ? itensD.filter(i => !i.op) : [];
     if (semOp.length) P('itens.op', `${semOp.length} item(ns) da DUIMP sem operação (${semOp.map(i => i.numero).join(', ')}): a DUIMP serve a ${opsD.map(x => x.id).join(' e ')} e cada item precisa dizer de qual é.`);
@@ -586,8 +586,8 @@
       if (!chaveRef) P('notas_referenciadas', 'Informe a nota original (chave de 44 dígitos ou uma NF-e autorizada do sistema).');
       if (!base) P('cenario', 'Sem a nota original do sistema, a tributação não tem de onde vir: escolha a NF-e original.');
     }
-    if (prod && !(cen.conferido && cen.conferido.em)) P('cenario', `Cenário ${cen.k} ainda não foi conferido pelo contador: em produção só sai nota de cenário conferido.`);
-    else if (!(cen.conferido && cen.conferido.em)) A(`Cenário ${cen.k} a validar pelo contador (CFOP, CST e alíquotas são sugestões).`);
+    /* Cenário não conferido avisa, mas não trava (decisão da diretoria): nem em produção. */
+    if (!(cen.conferido && cen.conferido.em)) A(`Cenário ${cen.k} a validar pelo contador (CFOP, CST e alíquotas são sugestões).`);
 
     const data = ehData(a.dataEmissao) ? a.dataEmissao : W.soData(W.hojeISO());
     const t = W.tributosNaData(db, data);

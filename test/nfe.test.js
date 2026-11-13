@@ -156,7 +156,7 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(pA(r => { r.itens[0].afrmm = 0; }).includes('documentos_importacao.valor_afrmm'), 'marítimo sem AFRMM: pendência');
   ok(pA(r => { r.itens[0].fabricante = null; }).some(c => /adicoes/.test(c)), 'item sem fabricante: pendência');
   const prodNC = R.montarNFe(db, { cenario: 'A', opId: 'OP20', ambiente: 'producao', dataEmissao: '2026-10-29' });
-  ok(prodNC.pendencias.some(p => p.campo === 'cenario'), 'em produção, cenário não conferido pelo contador é pendência');
+  ok(!prodNC.pendencias.some(p => p.campo === 'cenario') && prodNC.avisos.some(x => /Cenário A a validar/.test(x)), 'em produção, cenário não conferido pelo contador só avisa (não trava)');
 
   console.log('\nB · saída na conta e ordem:');
   const dbB = banco(); dbB.hubNFe.push(autorizada(dbB, 'A', 'OP20', mA, '2'.repeat(44)));
