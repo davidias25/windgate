@@ -35,6 +35,14 @@
   /* ================= LISTA ================= */
   H.telas.cotacoes = function (el, param) {
     garantir();
+    /* Sem custos e margens (só Samir e Davi): a lista mostra código, cliente, produto e status, sem abrir a cotação. */
+    if (!H.pode('fin.resultado')) {
+      const st = { draft: 'Rascunho', wait: 'Aguardando aprovação', ok: 'Aprovada' };
+      const ls = (H.db.qindex || []).filter(q => q && q.id).map(q => ({ q, s: (H.db.quotes || {})[q.id] || {} }));
+      el.innerHTML = `<div class="head"><div><h1>Cotações & Propostas</h1><p class="sub">Custos e margens ficam só com Samir e Davi. Aqui: código, cliente, produto e situação.</p></div></div>
+        <div class="box"><div class="tw"><table><thead><tr><th>Cotação</th><th>Cliente</th><th>Produto</th><th>Situação</th></tr></thead><tbody>${ls.length ? ls.map(({ q, s }) => `<tr><td class="mono">${esc((s.fields || {}).opNum || q.label || q.id)}</td><td>${esc(q.cliente || (s.fields || {}).cliente || '')}</td><td>${esc((s.fields || {}).mercadoria || '')}</td><td>${esc(st[q.status] || q.status || '')}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">Nenhuma cotação.</td></tr>'}</tbody></table></div></div>`;
+      return;
+    }
     if (param === 'nova') { if (!ed || ed.id) { ed = nova(); editando = false; modo = 'pct'; } return editor(el); }
     if (param) { if (!ed || ed.id !== param) { if (!abrir(param)) { H.estado.param = null; return H.telas.cotacoes(el); } } return editor(el); }
     ed = null;

@@ -705,6 +705,16 @@ async function gravarParcial(parcial) {
 }
 const podeOperar = req => { const k = req.usuario && req.usuario.k; return k === '(sem-auth)' || ['diretoria', 'operacoes'].includes(acesso.perfil(memoryDB, k)); };
 
+/* ---------- Busca global: filtrada por permissão AQUI, nunca só na tela ---------- */
+const busca = require('./services/busca.service');
+app.get('/api/search', auth.exigirTokenSeAtiva, async (req, res) => {
+  await bancoPronto;
+  if (!memoryDB) return res.status(503).json({ success: false, message: 'Banco central indisponível.' });
+  const k = req.usuario && req.usuario.k, q = req.query || {};
+  try { res.json(Object.assign({ success: true }, busca.buscar(memoryDB, k, { q: String(q.q || '').slice(0, 120), tipo: String(q.tipo || ''), periodo: String(q.periodo || ''), pagina: q.pagina, porGrupo: q.porGrupo }))); }
+  catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 /* ---------- Tarefas automáticas: rodada diária, prévia das operações em andamento ---------- */
 const gestorTarefas = req => { const k = req.usuario && req.usuario.k; return k === '(sem-auth)' || tarefasAuto.podeGerir(k); };
 async function rodarTarefas(forcar) {

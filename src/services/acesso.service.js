@@ -85,8 +85,39 @@ function gravacaoPins(atual, recebido, k) {
   return out;
 }
 
+/* Custos e margens das cotações: só quem tem fin.resultado (Samir e Davi). Os demais recebem a cotação reduzida
+   (código, cliente, produto, status e itens sem preço) e o índice sem o preço. Na gravação, o que essas pessoas
+   mandarem de cotação é descartado: a cópia reduzida nunca sobrescreve a cotação de verdade. */
+const CAMPOS_COTACAO_LIVRES = ['opNum', 'opMae', 'cliente', 'mercadoria', 'ufDestino', 'tipoOp', 'origem', 'destino', 'incoterm', 'modalCntr', 'qtdCntr', 'prazo', 'validade'];
+const veCustos = (db, k) => k === '(sem-auth)' || W.pode(db || {}, k, 'fin.resultado');
+function cotacaoReduzida(q) {
+  if (!q || typeof q !== 'object') return q;
+  const f = q.fields || {}, fields = {};
+  CAMPOS_COTACAO_LIVRES.forEach(c => { if (f[c] != null) fields[c] = f[c]; });
+  return { id: q.id, status: q.status, criadoPor: q.criadoPor, aprovadoPor: q.aprovadoPor, fields, _reduzida: true,
+    items: (q.items || []).filter(Boolean).map(i => ({ d: i.d, ncm: i.ncm, q: i.q, clienteId: i.clienteId })),
+    clientes: Array.isArray(q.clientes) ? q.clientes.map(c => c && ({ id: c.id, nome: c.nome, opNum: c.opNum, ufDestino: c.ufDestino, tipoOperacao: c.tipoOperacao, status: c.status })) : undefined };
+}
+function semCustos(db, k) {
+  if (!db || veCustos(db, k) || (!db.quotes && !db.qindex)) return db;
+  const out = Object.assign({}, db);
+  if (db.quotes) { out.quotes = {}; Object.entries(db.quotes).forEach(([id, q]) => { out.quotes[id] = cotacaoReduzida(q); }); }
+  if (Array.isArray(db.qindex)) out.qindex = db.qindex.map(x => { if (!x) return x; const c = Object.assign({}, x); delete c.preco; return c; });
+  return out;
+}
+function gravacaoCustos(atual, recebido, k) {
+  if (!recebido || typeof recebido !== 'object' || veCustos(atual, k)) return recebido;
+  const out = Object.assign({}, recebido);
+  delete out.quotes; delete out.qindex;
+  if (recebido._removidos) {
+    const ids = new Set(((atual && atual.qindex) || []).map(x => x && x._id).filter(Boolean));
+    out._removidos = {}; Object.entries(recebido._removidos).forEach(([id, ts]) => { if (!ids.has(id)) out._removidos[id] = ts; });
+  }
+  return out;
+}
+
 /** O que o usuário pode ler de GET /api/db. */
-function paraLeitura(db, k) { return semPinsLeitura(semNFe(semRH(semDinheiroDocs(paraLeitura0(db, k), k), k), k), k, db); }
+function paraLeitura(db, k) { return semPinsLeitura(semNFe(semRH(semDinheiroDocs(semCustos(paraLeitura0(db, k), k), k), k), k), k, db); }
 
 /* Documentação & Atendimento (Ívina) também não vê dinheiro: nem financeiro,
    nem cotações (custo e margem), nem câmbio, nem o valor dos negócios. Na
@@ -134,7 +165,7 @@ function paraLeitura0(db, k) {
 }
 
 /** O que o usuário pode gravar em POST /api/db (o resto é descartado). */
-function paraGravacao(atual, recebido, k) { return gravacaoPins(atual, gravacaoNFe(atual, gravacaoRH(atual, gravacaoDocs(atual, paraGravacao0(atual, recebido, k), k), k), k), k); }
+function paraGravacao(atual, recebido, k) { return gravacaoPins(atual, gravacaoNFe(atual, gravacaoRH(atual, gravacaoDocs(atual, gravacaoCustos(atual, paraGravacao0(atual, recebido, k), k), k), k), k), k); }
 function paraGravacao0(atual, recebido, k) {
   if (recebido && ehRH(atual, k)) {
     const out = Object.assign({}, recebido);
@@ -158,4 +189,4 @@ function paraGravacao0(atual, recebido, k) {
   return out;
 }
 
-module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, podeGerirPins, paraLeitura, paraGravacao, CONTADOR_COLECOES, SEM_DINHEIRO };
+module.exports = { perfil, ehContador, ehRH, ehDocs, podeRH, podeGerirPins, paraLeitura, paraGravacao, veCustos, cotacaoReduzida, CONTADOR_COLECOES, SEM_DINHEIRO };

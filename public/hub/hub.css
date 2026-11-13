@@ -355,3 +355,21 @@ tr.clic:hover td{background:var(--surface-2)}
 /* Proposta: versão de impressão (reserva quando o PDF não sai). Só ela vai para o papel. */
 #printProposal{display:none}
 @media print{body>*:not(#printProposal){display:none!important}#printProposal{display:block}}
+
+/* ---------- Busca global ---------- */
+.search{position:relative}
+.busca-painel{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 32px rgba(15,23,42,.16);max-height:min(70vh,560px);overflow:auto;padding:6px 0;color:var(--ink);text-align:left}
+.busca-painel .bp-h{padding:6px 12px 8px;font-weight:700;color:var(--ink);border-bottom:1px solid var(--line)}
+.busca-painel .bp-sec{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 4px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--blue)}
+.busca-painel .bp-filtros{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px 8px;border-bottom:1px solid var(--line)}
+.busca-painel .bp-filtros .chip{font-size:11px;padding:2px 8px}
+.busca-painel .bp-sep{width:1px;background:var(--line);margin:0 4px}
+.bp-item{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;background:none;border:0;padding:7px 12px;cursor:pointer;color:var(--ink);border-left:3px solid transparent}
+.bp-item small{color:var(--faint);font-size:12px;line-height:1.35}
+.bp-item:hover,.bp-item.on{background:var(--blue-soft);border-left-color:var(--mag)}
+.bp-item mark,.bp-rec mark{background:var(--mag-soft);color:var(--mag);border-radius:2px;padding:0 1px}
+.bp-vt{display:block;width:100%;text-align:left;background:none;border:0;padding:5px 12px 8px;color:var(--mag);font-weight:600;font-size:12px;cursor:pointer}
+.bp-rec{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 12px;color:var(--ink);cursor:pointer}
+.bp-rec:hover{background:var(--blue-soft)}
+.bp-vazio{padding:12px;color:var(--faint)}
+.bp-rod{padding:6px 12px 2px;border-top:1px solid var(--line);font-size:11px}

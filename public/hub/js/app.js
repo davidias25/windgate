@@ -223,6 +223,8 @@
   const TELA_ABA = { cotacoes: 'cotacoes', frete: 'frete', gestao: 'gestao' };
   const ABA_ATUAL = { crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros' };
   function podeTela(k) {
+    // A busca abre para todos: o filtro do que cada um vê é do servidor (GET /api/search).
+    if (k === 'busca') return true;
     // Acesso externo (contador): Fiscal, emissão de NF-e e o canal de contabilidade do chat.
     if (H.db && H.userKey && H.perfil().externo) return k === 'fiscal' || k === 'chat' || (k === 'nfe' && H.pode('nfe.ver'));
     // RH: equipe, cultura e comunicação; nada de operação comercial nem financeiro.
@@ -337,7 +339,8 @@
     $('#pinOk').onclick = () => entrar($('#pin').value);
     $('#sair').onclick = async () => { if (sujo()) { clearTimeout(tSalvar); await enviar(); } sair(); };
     $('#bell').onclick = () => ir(H.perfil().externo ? 'fiscal' : H.perfil().id === 'rh' ? 'rh' : 'torre');
-    $('#busca').addEventListener('keydown', e => { if (e.key === 'Enter') { H.estado = { tela: 'ops', param: null }; H.buscaGlobal = e.target.value; render(); } });
+    // Busca global (busca.js): o servidor devolve só o que a pessoa pode ver.
+    if (H.ligarBusca) H.ligarBusca();
     try {
       const s = JSON.parse(sessionStorage.getItem('wg_hub_sessao') || 'null');
       if (s && s.k) { H.token = s.token; H.userKey = s.k; await iniciar(); return; }
