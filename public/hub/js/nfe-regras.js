@@ -496,7 +496,12 @@
     if (varias) infos.push(`Operações: ${opsD.map(x => x.id).join(', ')}.`);
     const brl = v => 'R$ ' + r2(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     infos.push(`II ${brl(tot.ii)}; IPI ${brl(tot.ipi)}; PIS ${brl(tot.pis)}; COFINS ${brl(tot.cofins)}; AFRMM ${brl(tot.afrmm)}; Taxa Siscomex ${brl(tot.siscomex)}.`);
-    if (txt(ex.informacoes)) infos.push(txt(ex.informacoes, 2000));
+    /* Informações complementares: o texto automático (DUIMP, intermediação, tributos) mais o que foi acrescentado;
+       se o texto inteiro foi editado na nota, vale o editado. Vazio volta ao automático. */
+    const infAuto = infos.concat(txt(ex.informacoes) ? [txt(ex.informacoes, 2000)] : []).join(' ').slice(0, 5000);
+    const infEditado = txt(ex.informacoesTexto, 5000);
+    const infFinal = infEditado && infEditado !== infAuto ? infEditado : infAuto;
+    if (infEditado && infEditado !== infAuto) A('Informações complementares editadas na nota (o texto automático foi substituído): conferir.');
     const pesoBruto = num(ex.duimp && ex.duimp.pesoBruto) || num(ex.pesoBruto) || 0;
     if (!pesoBruto) A('Peso bruto: a DUIMP não informa (só o líquido). Digite na nota se quiser no DANFE.');
     /* Automático: peso líquido da DUIMP, quantidade de itens e a espécie do cenário. O digitado vale no lugar. */
@@ -507,14 +512,14 @@
     if (digitado('pesoLiquido') != null && Math.abs(pesoLiq - pesoLiqAuto) > 0.0005) A(`Peso líquido digitado na nota: ${pesoLiq} kg (a DUIMP trazia ${pesoLiqAuto} kg).`);
     const volumes = [limpar({ quantidade: volQtd || '', especie, peso_liquido: pesoLiq ? +(+pesoLiq).toFixed(3) : '', peso_bruto: pesoBruto ? +pesoBruto.toFixed(3) : '' })];
     /* O que o sistema calcularia sozinho: a tela mostra para editar a partir daí. */
-    tot.auto = { afrmm: afrmmDuimp, siscomex: siscDuimp, outras: 0, pesoLiquido: pesoLiqAuto, pesoBruto: '', volumes: volAuto, especie: especieAuto };   // peso bruto: a DUIMP não informa
+    tot.auto = { afrmm: afrmmDuimp, siscomex: siscDuimp, outras: 0, pesoLiquido: pesoLiqAuto, pesoBruto: '', volumes: volAuto, especie: especieAuto, informacoes: infAuto };   // peso bruto: a DUIMP não informa
     const payload = limpar({
       natureza_operacao: txt(cen.natureza_operacao, 60) || 'IMPORTACAO', data_emissao: data + 'T12:00:00-03:00', tipo_documento: 0, finalidade_emissao: 1,
       local_destino: 3, consumidor_final: 0, presenca_comprador: +cen.presenca_comprador || 9, modalidade_frete: temNum(cen.modalidade_frete) ? +cen.modalidade_frete : 9, cnpj_emitente: soDig(emit.cnpj),
       nome_destinatario: a.ambiente === 'homologacao' ? HOMOLOGACAO_NOME : txt(exp && exp.nome, 60), indicador_inscricao_estadual_destinatario: 9,
       logradouro_destinatario: txt(exp && exp.logradouro, 60), numero_destinatario: 'S/N', bairro_destinatario: txt(exp && exp.cidade, 60) || 'EXTERIOR',
       municipio_destinatario: 'EXTERIOR', codigo_municipio_destinatario: '9999999', pais_destinatario: pais ? pais.nome : '', codigo_pais_destinatario: pais ? pais.codigo : '',
-      id_estrangeiro_destinatario: txt(exp && exp.tin, 20), informacoes_adicionais_contribuinte: infos.join(' ').slice(0, 5000), volumes, items
+      id_estrangeiro_destinatario: txt(exp && exp.tin, 20), informacoes_adicionais_contribuinte: infFinal, volumes, items
     });
     Object.assign(payload, totaisCabecalho(items), { valor_total: tot.total });
     const somaItens = r2(items.reduce((s, x) => s + num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ii_valor) + num(x.ipi_valor) + num(x.valor_outras_despesas)

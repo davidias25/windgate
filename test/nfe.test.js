@@ -122,6 +122,14 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(igual(mEd.totais.total, mEd.totais.somaItens), 'o total da nota continua fechando com os itens');
     const mIgual = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: '500', siscomex: '', pesoLiquido: '' } } });
     ok(mIgual.totais.afrmm === 500 && mIgual.totais.siscomex === 150 && !mIgual.avisos.some(a => /digitad/.test(a)), 'campo vazio ou igual ao automático: fica automático, sem aviso');
+    /* Informações complementares: o texto inteiro editável. */
+    const infA = mAuto.totais.auto.informacoes;
+    ok(/^DUIMP 26BR/.test(infA) && /AFRMM R\$/.test(infA) && mAuto.payload.informacoes_adicionais_contribuinte === infA, 'o texto automático das informações complementares fica guardado e é o que sai na nota');
+    const novoTxt = 'DUIMP 26BR00000123456. Mercadoria destinada a obra em Fortaleza. Processo OP20.';
+    const mInf = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { informacoesTexto: novoTxt } });
+    ok(mInf.payload.informacoes_adicionais_contribuinte === novoTxt && mInf.avisos.some(a => /Informações complementares editadas/.test(a)), 'texto editado substitui o automático, com aviso');
+    const mInfV = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { informacoesTexto: '' } });
+    ok(mInfV.payload.informacoes_adicionais_contribuinte === infA && !mInfV.avisos.some(a => /editadas/.test(a)), 'vazio: volta ao texto automático');
   }
 
   console.log('\nPendências que bloqueiam:');
