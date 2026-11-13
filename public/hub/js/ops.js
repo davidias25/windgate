@@ -161,7 +161,7 @@
   function abaEtapas(box, o) {
     const hist = H.db.opStatusHist.filter(h => h && h.op === o.id).sort((a, b) => String(b.em).localeCompare(String(a.em)));
     box.innerHTML = `${blocoFreteETarefas(o)}<div class="box"><div class="box-h"><h2>Linha do tempo das etapas</h2><span class="note">${hist.length} mudança(s) registrada(s)</span></div><div class="box-b tl">
-      ${hist.length ? hist.map(h => `<div class="ev"><span class="when">${W.dataBR(h.em)}</span><span class="rail"><i></i></span><div class="what">${h.tipo === 'renomeacao' ? `<b>${esc(h.motivo || 'Código alterado')}</b><small>${esc(h.por || '')}</small>` : `<b>${esc(W.stMeta(h.de).l)} → ${esc(W.stMeta(h.para).l)}</b><small>${esc(h.por || '')}${h.motivo ? ' · ' + esc(h.motivo) : ''}${h.tipo && h.tipo !== 'mudanca' ? ' · ' + esc(h.tipo) : ''}</small>`}</div></div>`).join('')
+      ${hist.length ? hist.map(h => `<div class="ev"><span class="when">${W.dataBR(h.em)}</span><span class="rail"><i></i></span><div class="what">${h.tipo === 'renomeacao' || h.tipo === 'prazo' ? `<b>${esc(h.motivo || (h.tipo === 'prazo' ? 'Prazo alterado' : 'Código alterado'))}</b><small>${esc(h.por || '')}${h.tipo === 'prazo' ? ' · prazo da etapa' : ''}</small>` : `<b>${esc(W.stMeta(h.de).l)} → ${esc(W.stMeta(h.para).l)}</b><small>${esc(h.por || '')}${h.motivo ? ' · ' + esc(h.motivo) : ''}${h.tipo && h.tipo !== 'mudanca' ? ' · ' + esc(h.tipo) : ''}</small>`}</div></div>`).join('')
       : '<p class="empty">Nenhuma mudança registrada ainda.</p>'}</div></div>`;
     ligarFrete(box, o);
   }
@@ -202,6 +202,10 @@
     const cont = Array.isArray(o.containers) ? o.containers : [];
     box.innerHTML = `<div class="g2"><div class="box"><div class="box-h"><h2>Embarque</h2><button class="btn blue sm" data-salvar>Salvar</button></div><div class="box-b fields">
         ${campo(o, 'embarque', 'Embarque (ETD)', 'date')}${campo(o, 'eta', 'Chegada prevista (ETA)', 'date')}${campo(o, 'navio', 'Navio', 'text', { w: 'w2' })}
+        ${campo(o, 'transitTime', 'Transit time (dias)', 'number')}${campo(o, 'prazoProducao', 'Prazo de produção (dias)', 'number')}
+        <p class="note w2">${(() => { const t = W.prazoDaOp(H.db, o, 'embarcado'), p = W.prazoDaOp(H.db, o, 'producao');
+          const txt = (x, nome) => `${nome}: <b>${x.alvo || '—'} dia(s)</b> ${x.origem === 'eta' ? 'até o ETA' : x.origem === 'manual' ? '(digitado)' : '(padrão das Configurações)'}`;
+          return txt(t, 'Prazo em trânsito') + ' · ' + txt(p, 'em produção') + '. Transit time vazio: o prazo segue o ETA.'; })()}</p>
         ${campo(o, 'armador', 'Armador')}${campo(o, 'bl', 'BL')}${campo(o, 'tracking', 'Link de tracking do armador', 'url', { w: 'w2' })}
         ${campo(o, 'posAtual', 'Posição atual (texto)', 'text', { w: 'w4' })}
         ${campo(o, 'duimp', 'Número da DUIMP', 'text', { w: 'w2' })}${campo(o, 'duimpVersao', 'Versão')}

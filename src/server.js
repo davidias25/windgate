@@ -62,6 +62,9 @@ const tarefasAuto = require('../public/hub/js/tarefas-auto.js');
 /* Tarefas automáticas por etapa: compara o banco antes e depois de cada gravação. Nunca derruba a gravação. */
 function dispararTarefas(antes, depois, origem) {
   try {
+    /* Prazo da etapa pela operação: mudança de ETA, transit time ou prazo de produção vai para a linha do tempo. */
+    const novosPrazos = require('../public/hub/js/regras.js').mudancasDePrazo(antes, depois, new Date().toISOString());
+    if (novosPrazos.length) depois.opStatusHist = (depois.opStatusHist || []).concat(novosPrazos);
     const r = tarefasAuto.aoGravar(antes, depois, { agora: new Date().toISOString() });
     if (r.criadas.length || r.g4.length || r.concluidas) console.log(`🗓  Tarefas automáticas (${origem}): ${r.criadas.length} criada(s), ${r.g4.length} ajuste(s) de ETA, ${r.concluidas || 0} concluída(s) pelo marco.`);
   } catch (e) { console.warn('⚠️ Tarefas automáticas:', e.message); }

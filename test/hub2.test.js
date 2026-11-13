@@ -139,7 +139,9 @@ function bancoReal() {
   console.log('\n--- 5. Prazos e alertas ---');
   const op = d.ops[0];
   const pi = W.prazoInfo(d, op, '2026-12-20');
-  ok(pi.dias === 80 && pi.alvo === 75 && pi.sit === 'atrasado' && pi.atraso === 5, 'prazo da etapa: 80 dias de 75 = atrasado 5');
+  ok(pi.dias === 80 && pi.alvo === 29 && pi.origem === 'eta' && pi.sit === 'atrasado' && pi.atraso === 51, 'prazo da etapa em trânsito: até o ETA (01/10 → 30/10 = 29 dias); 80 dias = atrasado 51');
+  const piSemEta = W.prazoInfo(d, Object.assign({}, op, { eta: '' }), '2026-12-20');
+  ok(piSemEta.alvo === 75 && piSemEta.atraso === 5, 'sem ETA: o padrão (75 dias); 80 dias = atrasado 5');
   ok(W.checklistPct(d, 'OP20') === 50, 'checklist: 1 de 2 aprovado = 50%');
   const al = W.alertas(d, '2026-10-24');
   ok(al.some(a => a.op === 'OP20' && /chega em 6/.test(a.titulo)), 'alerta de chegada em 6 dias');

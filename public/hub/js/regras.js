@@ -155,14 +155,53 @@
     return isFinite(v) && v > 0 ? v : null;
   }
 
-  /** Dias na etapa, prazo-alvo e situação (no prazo / atenção / atrasado). */
+  /* ---------- Prazo da etapa pela própria operação ----------
+     Em trânsito: o transit time digitado; sem ele, os dias da entrada na etapa até o ETA; sem ETA, o padrão das
+     Configurações. Em produção: o prazo de produção digitado; sem ele, o padrão. Contêiner compartilhado: vale o
+     da mãe (as filhas herdam). */
+  const diasValidos = v => { const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) && n > 0 ? Math.round(n) : null; };
+  function prazoDaOp(db, o, etapa, inicio) {
+    const k = etapa || (o && o.status), padrao = prazoAlvo(db, k);
+    if (!o) return { alvo: padrao, origem: 'padrao' };
+    const c = (o.maeId && db && (db.ops || []).find(x => x && x.id === o.maeId)) || o;
+    if (k === 'embarcado') {
+      const tt = diasValidos(c.transitTime); if (tt) return { alvo: tt, origem: 'manual' };
+      const ini = soData(inicio || o.statusEm), eta = soData(c.eta || o.eta);
+      if (ehISO(ini) && ehISO(eta)) { const d = diasEntre(ini, eta); if (d > 0) return { alvo: d, origem: 'eta', eta }; }
+      return { alvo: padrao, origem: 'padrao' };
+    }
+    if (k === 'producao') { const pp = diasValidos(c.prazoProducao); if (pp) return { alvo: pp, origem: 'manual' }; }
+    return { alvo: padrao, origem: 'padrao' };
+  }
+  const prazoAlvoOp = (db, o, etapa, inicio) => prazoDaOp(db, o, etapa, inicio).alvo;
+  /**
+   * Mudanças de prazo para a linha do tempo, comparando o banco antes e depois de uma gravação: ETA (na mão ou pelo
+   * ShipsGo), transit time e prazo de produção digitados. Só na operação que manda (a mãe; a filha herda). Devolve as
+   * linhas novas de opStatusHist, com _id fixo (gravar duas vezes não repete).
+   */
+  function mudancasDePrazo(antes, depois, agora) {
+    const em = agora || new Date().toISOString(), out = [], velhas = new Map(((antes && antes.ops) || []).filter(x => x && x.id).map(x => [x.id, x]));
+    const ja = new Set(((depois && depois.opStatusHist) || []).map(h => h && h._id));
+    ((depois && depois.ops) || []).forEach(o => {
+      if (!o || !o.id || o.maeId) return;
+      const v = velhas.get(o.id); if (!v) return;
+      const linha = (chave, motivo) => { const id = 'prazo-' + o.id + '-' + chave; if (ja.has(id)) return; ja.add(id); out.push({ _id: id, op: o.id, de: '', para: '', em, por: o.statusPor || '', tipo: 'prazo', origem: 'servidor', motivo }); };
+      const p = () => { const x = prazoDaOp(depois, o, 'embarcado'); return o.status === 'embarcado' ? ` · prazo em trânsito: ${x.alvo} dia(s)${x.origem === 'eta' ? ' até o ETA' : x.origem === 'manual' ? ' (transit time)' : ' (padrão)'}` : ''; };
+      if (soData(v.eta) !== soData(o.eta) && ehISO(soData(o.eta))) linha('eta-' + soData(o.eta), `ETA ${ehISO(soData(v.eta)) ? dataBR(soData(v.eta)) : '—'} → ${dataBR(soData(o.eta))}${p()}`);
+      if (String(v.transitTime == null ? '' : v.transitTime) !== String(o.transitTime == null ? '' : o.transitTime)) linha('tt-' + (diasValidos(o.transitTime) || 'auto') + '-' + soData(em), diasValidos(o.transitTime) ? `Transit time ajustado: ${diasValidos(o.transitTime)} dia(s)` : 'Transit time apagado: prazo em trânsito volta a seguir o ETA');
+      if (String(v.prazoProducao == null ? '' : v.prazoProducao) !== String(o.prazoProducao == null ? '' : o.prazoProducao)) linha('pp-' + (diasValidos(o.prazoProducao) || 'auto') + '-' + soData(em), diasValidos(o.prazoProducao) ? `Prazo de produção ajustado: ${diasValidos(o.prazoProducao)} dia(s)` : 'Prazo de produção apagado: volta ao padrão das Configurações');
+    });
+    return out;
+  }
+
+  /** Dias na etapa, prazo-alvo (da operação) e situação (no prazo / atenção / atrasado). */
   function prazoInfo(db, o, hoje) {
     const h = hoje || hojeISO();
     const dias = ehISO(o.statusEm) ? Math.max(0, diasEntre(o.statusEm, h)) : null;
-    const alvo = prazoAlvo(db, o.status);
+    const pd = prazoDaOp(db, o), alvo = pd.alvo;
     let sit = 'sem';
     if (dias != null && alvo) sit = dias > alvo ? 'atrasado' : (dias >= alvo * 0.8 ? 'atencao' : 'ok');
-    return { dias, alvo, sit, atraso: dias != null && alvo ? Math.max(0, dias - alvo) : 0 };
+    return { dias, alvo, sit, atraso: dias != null && alvo ? Math.max(0, dias - alvo) : 0, origem: pd.origem };
   }
 
   /* Arquivo em /uploads ficou só no disco do servidor, que é apagado a cada publicação: o link não abre mais. */
@@ -252,7 +291,7 @@
      A mãe guarda o contêiner: fornecedor, BL, navio, ETA, DUIMP e as etapas de produção até a chegada.
      Cada filha é uma operação comum, com cliente, parcelas e contrato. O que é da mãe fica copiado nas
      filhas, e as telas que já leem o.eta ou o.containers continuam funcionando; só a mãe é editada. */
-  const CAMPOS_HERDADOS = ['fornecedor', 'fabricaCidade', 'origemPorto', 'destinoPorto', 'embarque', 'eta', 'etaHist', 'navio', 'armador', 'bl', 'tracking', 'trackingEm', 'posAtual', 'duimp', 'duimpVersao', 'duimpSituacao', 'containers'];
+  const CAMPOS_HERDADOS = ['transitTime', 'prazoProducao', 'fornecedor', 'fabricaCidade', 'origemPorto', 'destinoPorto', 'embarque', 'eta', 'etaHist', 'navio', 'armador', 'bl', 'tracking', 'trackingEm', 'posAtual', 'duimp', 'duimpVersao', 'duimpSituacao', 'containers'];
   const ETAPAS_DA_MAE = ['producao', 'preparacao_embarque', 'container_enviado_porto', 'embarcado', 'chegada'];
   const DOCS_DA_MAE = ['invoice', 'packing', 'bl', 'duimp'];
   /* Checklist da filha: o que é por cliente. Câmbio, BL, seguro e DUIMP ficam no checklist da mãe. */
@@ -1025,7 +1064,7 @@
     const tarefas = (db.agendaTasks || []).filter(t => t && t.resp === nome && t.prazo && ((t.status === 'feita' && no(t.doneAt)) || (t.status !== 'feita' && no(t.prazo) && t.prazo < h)));
     const tNoPrazo = tarefas.filter(t => t.status === 'feita' && t.doneAt && t.doneAt <= t.prazo).length;
     const etapas = (db.opStatusHist || []).filter(x => x && x.por === nome && no(x.em) && x.de && x.deEm);
-    const eNoPrazo = etapas.filter(x => { const alvo = prazoAlvo(db, x.de); return !alvo || diasEntre(soData(x.deEm), soData(x.em)) <= alvo; }).length;
+    const eNoPrazo = etapas.filter(x => { const alvo = prazoAlvoOp(db, (db.ops || []).find(o => o && o.id === x.op), x.de, x.deEm); return !alvo || diasEntre(soData(x.deEm), soData(x.em)) <= alvo; }).length;
     const baseP = tarefas.length + etapas.length;
     const prazo = baseP ? 30 * (tNoPrazo + eNoPrazo) / baseP : null;
     const erros = (db.hubErros || []).filter(e => e && e.pessoa === nome && no(e.data));
@@ -1238,9 +1277,9 @@
     const novas = meses.map(m => ops.filter(o => String(o.criadaEm || '').slice(0, 7) === m).length);
     const entregues = meses.map(m => new Set(hist.filter(x => x.para === 'entregue' && String(x.em).slice(0, 7) === m).map(x => x.op)).size);
     const etapas = FLUXO.filter(k => !['entregue', 'concluida'].includes(k)).map(k => {
-      const durs = hist.filter(x => x.de === k && x.deEm).map(x => diasEntre(soData(x.deEm), soData(x.em))).filter(d => d != null && d >= 0);
-      const alvo = prazoAlvo(db, k);
-      return { k, l: stMeta(k).l, c: stMeta(k).c, media: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null, n: durs.length, alvo, noPrazo: durs.length && alvo ? durs.filter(d => d <= alvo).length / durs.length : null };
+      const passagens = hist.filter(x => x.de === k && x.deEm).map(x => ({ d: diasEntre(soData(x.deEm), soData(x.em)), alvo: prazoAlvoOp(db, ops.find(o => o.id === x.op), k, x.deEm) })).filter(p => p.d != null && p.d >= 0);
+      const durs = passagens.map(p => p.d), alvo = prazoAlvo(db, k), comAlvo = passagens.filter(p => p.alvo);
+      return { k, l: stMeta(k).l, c: stMeta(k).c, media: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null, n: durs.length, alvo, noPrazo: comAlvo.length ? comAlvo.filter(p => p.d <= p.alvo).length / comAlvo.length : null };
     });
     const ativas = ops.filter(ativa);
     const res = resultadoPorOp(db, 'todas').filter(r => r.receita > 0);
@@ -1269,7 +1308,7 @@
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
-    STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, checklistPct, diasEntre, hojeISO, soData, ehISO,
+    STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, prazoDaOp, prazoAlvoOp, mudancasDePrazo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,
     novaSerie, realizar, mesSoma, vencDoMes, alertas, fmtBRL, fmtBRLk, dataBR
   };
