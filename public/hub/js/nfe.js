@@ -272,7 +272,7 @@
 
   /* Entrada da DUIMP: só o que a DUIMP não traz ou o cenário permite, sempre com motivo. */
   /* Campos da nota de entrada que podem ser editados a partir do automático. */
-  const EDIT_NF = [['frete', 'Frete internacional (R$)'], ['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['pesoLiquido', 'Peso líquido (kg)'], ['pesoBruto', 'Peso bruto (kg)'], ['volumes', 'Quantidade de volumes'], ['especie', 'Espécie dos volumes']];
+  const EDIT_NF = [['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['pesoLiquido', 'Peso líquido (kg)'], ['pesoBruto', 'Peso bruto (kg)'], ['volumes', 'Quantidade de volumes'], ['especie', 'Espécie dos volumes']];
   function editarEntrada(n) {
     const ex = (n.entrada || {}).extras || {}, du = ex.duimp || {}, auto = (n.totais || {}).auto || {};
     const campo = (id, l, val, tipo) => `<div class="f"><label class="lbl" for="${id}">${l}</label><input id="${id}" ${tipo ? 'type="' + tipo + '"' : ''} value="${esc(val == null ? '' : val)}"></div>`;

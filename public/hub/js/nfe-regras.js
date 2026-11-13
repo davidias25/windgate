@@ -384,13 +384,7 @@
     if (outrasEd) A(`Outras despesas aduaneiras digitadas na nota: ${brl0(outrasEd)}. Conferir com o extrato do despachante.`);
     if (via === 1 && !(afrmmDuimp > 0) && !(afrmmManual > 0)) P('documentos_importacao.valor_afrmm', 'AFRMM ausente: não veio na DUIMP e é obrigatório no marítimo. Informe o valor do despachante.');
     const somaBase = itensD.reduce((s, x) => s + r2(cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL), 0) || 1;
-    /* Frete internacional: o da DUIMP, item a item; digitado na nota, vale no lugar, na mesma proporção da DUIMP.
-       Só no cenário em que o produto é o valor da mercadoria (no aduaneiro o frete já está dentro do produto). */
-    const freteDuimp = somaC(freteAuto), freteEd = digitado('frete'), freteNoItem = cen.a_vprod === 'mercadoria';
-    const freteManual = freteNoItem && freteEd != null && Math.abs(freteEd - freteDuimp) > 0.005 ? freteEd : null;
-    if (freteManual != null) A(`Frete digitado na nota: ${brl0(freteManual)} (a DUIMP trazia ${brl0(freteDuimp)}). Conferir com o contador: o frete compõe o valor aduaneiro.`);
-    if (!freteNoItem && freteEd != null && Math.abs(freteEd - freteDuimp) > 0.005) A('Frete digitado não usado: neste cenário o valor do produto é o aduaneiro, que já inclui o frete.');
-    let freteUsado = 0;
+    const freteNoItem = cen.a_vprod === 'mercadoria';
     /* Rateio pelo valor do item; o último leva a sobra dos centavos. */
     const rateio = (total, V, ult, usado) => (ult ? r2(total - usado) : r2(total * V / somaBase));
 
@@ -455,9 +449,7 @@
         unidade_comercial: un, quantidade_comercial: qtd, valor_unitario_comercial: vu, unidade_tributavel: un, quantidade_tributavel: qtd, valor_unitario_tributavel: vu, valor_bruto: V, inclui_no_total: 1,
         icms_origem: txt(cen.icms_origem), icms_situacao_tributaria: txt(cen.icms_cst) };
       // Produto = mercadoria: frete e seguro do item vão nos campos próprios (no aduaneiro já estão dentro).
-      const freteI = !freteNoItem ? 0 : freteManual == null ? freteAuto[i]
-        : ult ? r2(freteManual - freteUsado) : r2(freteManual * (freteDuimp > 0 ? freteAuto[i] / freteDuimp : V / somaBase));
-      freteUsado = r2(freteUsado + freteI);
+      const freteI = freteNoItem ? freteAuto[i] : 0;
       const seguroI = cen.a_vprod === 'mercadoria' ? seguroAuto[i] : 0;
       if (freteI) x.valor_frete = freteI; if (seguroI) x.valor_seguro = seguroI;
       const II = valorTributo(tr.ii, campoT), IPI = t.ipi ? valorTributo(tr.ipi, campoT) : 0;
@@ -513,9 +505,7 @@
       if (Math.abs(esperado - tot[k]) > 0.01) P('total.' + k, `${l} da nota (R$ ${tot[k].toFixed(2)}) difere do total da DUIMP (R$ ${esperado.toFixed(2)}).`);
     });
     const aduaneiroNota = r2(tot.produtos + (tot.frete || 0) + (tot.seguro || 0));
-    /* Com o frete digitado, a soma deixa de bater com a DUIMP por escolha de quem editou: aviso, não bloqueio. */
-    if (g.valorAduaneiroBRL && Math.abs(r2(g.valorAduaneiroBRL) - aduaneiroNota) > 0.01 && freteManual != null) A(`Produtos + frete + seguro da nota (R$ ${aduaneiroNota.toFixed(2)}) diferem do valor aduaneiro da DUIMP (R$ ${r2(g.valorAduaneiroBRL).toFixed(2)}) por causa do frete digitado: conferir com o contador.`);
-    else if (g.valorAduaneiroBRL && Math.abs(r2(g.valorAduaneiroBRL) - aduaneiroNota) > 0.01) P('total.produtos', `Produtos + frete + seguro da nota (R$ ${aduaneiroNota.toFixed(2)}) diferem do valor aduaneiro da DUIMP (R$ ${r2(g.valorAduaneiroBRL).toFixed(2)}).`);
+    if (g.valorAduaneiroBRL && Math.abs(r2(g.valorAduaneiroBRL) - aduaneiroNota) > 0.01) P('total.produtos', `Produtos + frete + seguro da nota (R$ ${aduaneiroNota.toFixed(2)}) diferem do valor aduaneiro da DUIMP (R$ ${r2(g.valorAduaneiroBRL).toFixed(2)}).`);
     opsD.forEach(x => conferirDuimpCotacao(db, x.id).forEach(A));
 
     const infos = [`DUIMP ${g.numero} versão ${r.versao} de ${W.dataBR(W.soData(g.dataRegistro))}.`];
@@ -539,7 +529,7 @@
     if (digitado('pesoLiquido') != null && Math.abs(pesoLiq - pesoLiqAuto) > 0.0005) A(`Peso líquido digitado na nota: ${pesoLiq} kg (a DUIMP trazia ${pesoLiqAuto} kg).`);
     const volumes = [limpar({ quantidade: volQtd || '', especie, peso_liquido: pesoLiq ? +(+pesoLiq).toFixed(3) : '', peso_bruto: pesoBruto ? +pesoBruto.toFixed(3) : '' })];
     /* O que o sistema calcularia sozinho: a tela mostra para editar a partir daí. */
-    tot.auto = { frete: freteNoItem ? freteDuimp : '', afrmm: afrmmDuimp, siscomex: siscDuimp, outras: 0, pesoLiquido: pesoLiqAuto, pesoBruto: '', volumes: volAuto, especie: especieAuto, informacoes: infAuto };   // peso bruto: a DUIMP não informa
+    tot.auto = { afrmm: afrmmDuimp, siscomex: siscDuimp, outras: 0, pesoLiquido: pesoLiqAuto, pesoBruto: '', volumes: volAuto, especie: especieAuto, informacoes: infAuto };   // peso bruto: a DUIMP não informa
     const payload = limpar({
       natureza_operacao: txt(cen.natureza_operacao, 60) || 'IMPORTACAO', data_emissao: data + 'T12:00:00-03:00', tipo_documento: 0, finalidade_emissao: 1,
       local_destino: 3, consumidor_final: 0, presenca_comprador: +cen.presenca_comprador || 9, modalidade_frete: temNum(cen.modalidade_frete) ? +cen.modalidade_frete : 9, cnpj_emitente: soDig(emit.cnpj),
