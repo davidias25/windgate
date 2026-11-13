@@ -846,7 +846,7 @@ const portalUnico = require('./services/portal-unico.service');
 const mesclaId = require('../public/hub/js/regras.js').idDeterministico;
 app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) => {
   if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
-  if (!portalUnico.configurado()) return res.json({ success: false, semIntegracao: true, message: 'Falta o certificado A1 no servidor (PORTAL_UNICO_CERT_ARQUIVO e PORTAL_UNICO_CERT_SENHA).' });
+  if (!portalUnico.configurado() && !portalUnico.emTeste()) return res.json({ success: false, semIntegracao: true, message: 'Falta o certificado A1 no servidor (PORTAL_UNICO_CERT_ARQUIVO e PORTAL_UNICO_CERT_SENHA).' });
   const alvo = (memoryDB.ops || []).filter(o => o && o.duimp && !['entregue', 'concluida'].includes(o.status));
   const atualizadas = [], erros = [];
   for (const o of alvo.slice(0, 40)) {
@@ -855,8 +855,18 @@ app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) =
       const r = await portalUnico.consultarDuimp(num, v); atualizadas.push(Object.assign({ _id: o._id || mesclaId(o) }, o, { duimpVersao: v, duimpSituacao: { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, versao: v, atualizadoEm: r.atualizadoEm } })); }
     catch (e) { erros.push({ op: o.id, erro: e.message }); if (/60 s/.test(e.message)) break; }
   }
-  if (atualizadas.length) await gravarParcial({ ops: atualizadas });
-  res.json({ success: true, consultadas: alvo.length, atualizadas: atualizadas.length, erros });
+  /* Canal que mudou para amarelo, vermelho ou cinza: recado para Davi e Ívina, uma vez por DUIMP e canal. */
+  const W0 = require('../public/hub/js/regras.js'), recados = [], avisados = new Set(), agoraIso = new Date().toISOString();
+  atualizadas.forEach(n => {
+    const velha = (memoryDB.ops || []).find(x => x && x.id === n.id), antes = W0.canalDuimp(velha), depois = W0.canalDuimp(n);
+    if (!depois || !depois.acao || (antes && antes.k === depois.k) || n.maeId) return;
+    const num = String(n.duimp).toUpperCase().replace(/[^0-9A-Z]/g, ''), chave = num + '-' + depois.k; if (avisados.has(chave)) return; avisados.add(chave);
+    ['davi', 'ivina'].forEach(p => { const id = 'canal-' + chave + '-' + p; if ((memoryDB.hubRecados || []).some(r => r && r._id === id) || ((memoryDB._removidos || {})[id])) return;
+      recados.push({ _id: id, texto: `${n.id}: a DUIMP ${n.duimp} está no canal ${depois.l.toLowerCase()}${antes && antes.k ? ' (era ' + antes.l.toLowerCase() + ')' : ''}. Acompanhar com o despachante.`, para: p, prio: 'alta', por: 'Sistema · Portal Único', em: agoraIso, feito: {}, opId: n.id }); });
+  });
+  if (atualizadas.length || recados.length) await gravarParcial(Object.assign({ ops: atualizadas }, recados.length ? { hubRecados: recados } : {}));
+  res.json({ success: true, consultadas: alvo.length, atualizadas: atualizadas.length, erros, avisos: recados.length,
+    canais: atualizadas.map(n => ({ op: n.id, canal: (W0.canalDuimp(n) || {}).l || '' })).filter(x => x.canal) });
 });
 
 /* ---------- Tempo ativo no sistema ---------- */

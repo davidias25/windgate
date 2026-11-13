@@ -969,6 +969,23 @@
         return { l, sit: d < 0 ? `atrasado ${-d} dia(s)` : d === 0 ? 'pagar hoje' : 'a pagar', nivel: d < 0 ? 'crit' : d === 0 ? 'warn' : 'info', protegido: !(bloq[l.op] || []).length }; });
   }
 
+  /* ---------- Canal da DUIMP (parametrização) ----------
+     Vem do Portal Único pelo botão "Atualizar DUIMPs" (Integrações): só consulta, nada é registrado.
+     Amarelo, vermelho e cinza pedem ação do despachante e da documentação. */
+  const CANAIS_DUIMP = { verde: { l: 'Verde', c: '#0F8A5F', acao: false }, amarelo: { l: 'Amarelo', c: '#B7791F', acao: true }, vermelho: { l: 'Vermelho', c: '#C2283B', acao: true }, cinza: { l: 'Cinza', c: '#5B6B8C', acao: true } };
+  function canalDuimp(o) {
+    const bruto = String((o && o.duimpSituacao && o.duimpSituacao.canal) || '').trim();
+    if (!bruto) return null;
+    const n = bruto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const k = /verde/.test(n) ? 'verde' : /amarel/.test(n) ? 'amarelo' : /vermelh/.test(n) ? 'vermelho' : /cinz/.test(n) ? 'cinza' : '';
+    return Object.assign({ k, bruto, em: (o.duimpSituacao || {}).atualizadoEm || '' }, k ? CANAIS_DUIMP[k] : { l: bruto, c: '#5B6B8C', acao: false });
+  }
+  /** Operações (uma por DUIMP: a mãe, não as filhas) com canal que pede ação e ainda sem desembaraço. */
+  function canaisComAcao(db) {
+    return (db.ops || []).filter(o => o && !o.maeId && !['entregue', 'concluida'].includes(o.status) && !(o.duimpSituacao && o.duimpSituacao.desembaraco))
+      .map(o => ({ o, canal: canalDuimp(o) })).filter(x => x.canal && x.canal.acao);
+  }
+
   /* ---------- Produtividade & ranking ---------- */
   /** Nota de 0 a 100: prazo (30), qualidade (30), resultado da função (20), evolução (10), cultura (10, dada pelo Samir). */
   const PILARES = [['prazo', 'Prazo', 30], ['qualidade', 'Qualidade', 30], ['funcao', 'Função', 20], ['evolucao', 'Evolução', 10], ['cultura', 'Cultura', 10]];
@@ -1248,7 +1265,7 @@
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, decodificarOFX, consertarAcentos, mesDoExtrato, conciliar,
     desembolsoOp, cobrancas, PILARES, produtividade, metricasFuncao,
-    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, arquivoDeTela, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
+    ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, CANAIS_DUIMP, canalDuimp, canaisComAcao, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, arquivoDeTela, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
     vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,

@@ -59,8 +59,9 @@ async function autenticar(req) {
 }
 
 /** Lê a situação de uma DUIMP: devolve os campos que interessam e a resposta completa. */
-async function consultarDuimp(numero, versao, req) {
-  const c = cfg(), enviar = req || requisicaoPadrao;
+async function consultarDuimp(numero, versao, req0) {
+  /* Nos testes, o Portal simulado (_usarRequisicao); em produção, a requisição de verdade com o certificado. */
+  const req = req0 || requisicaoTeste || undefined, c = cfg(), enviar = req || requisicaoPadrao;
   const s = await autenticar(req);
   const url = c.base + c.caminhoDuimp.replace('{numero}', encodeURIComponent(numero)).replace('{versao}', encodeURIComponent(versao || '1'));
   const r = await enviar(url, { method: 'GET', agent: req ? undefined : agente(c), headers: { Authorization: s.token, 'X-CSRF-Token': s.csrf, Accept: 'application/json' } });

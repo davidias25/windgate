@@ -20,6 +20,7 @@
     return r;
   }
   H.api = api;
+  H.sincronizar = () => sincronizar();
 
   /* ---------------- Dados ---------------- */
   function setSync(estado, txt) {
