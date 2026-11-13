@@ -108,6 +108,22 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
   ok(mA2.payload.items[0].ii_despesas_aduaneiras === 33.34 && mA2.payload.items[1].ii_despesas_aduaneiras === 66.68, 'AFRMM do despachante rateado: 33,34 + 66,68 = 100,02, sem centavo perdido');
   ok(igual(mA2.totais.total, mA2.totais.somaItens) && igual(mA2.payload.items.reduce((s, x) => s + x.valor_bruto + (x.valor_frete || 0) + (x.valor_seguro || 0) + x.ii_valor + x.ipi_valor + x.valor_outras_despesas + x.pis_valor + x.cofins_valor + x.documentos_importacao[0].valor_afrmm, 0), mA2.totais.total), 'total da nota = soma dos itens arredondados a 2 casas');
 
+  console.log('\nA · taxas, pesos e volumes editáveis a partir do automático:');
+  {
+    const base = () => { const d = banco(); d.ops[0].duimpDados = retrato({ itens: [itemDuimp(1, 3000, 100, 200), itemDuimp(2, 7000, 50, 300)] }); return d; };
+    const mAuto = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }), au = mAuto.totais.auto;
+    ok(au.afrmm === 500 && au.siscomex === 150 && au.volumes === 4 && au.especie === 'UNIDADES', 'o automático fica guardado na nota para a tela mostrar (AFRMM 500, Siscomex 150, 4 volumes)');
+    const mEd = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: '600', siscomex: '180', outras: '100', pesoLiquido: '1234,5', pesoBruto: '1300', volumes: '2', especie: 'PALETES' } } });
+    const [i1, i2] = mEd.payload.items, vol = mEd.payload.volumes[0];
+    ok(i1.documentos_importacao[0].valor_afrmm === 180 && i2.documentos_importacao[0].valor_afrmm === 420 && mEd.totais.afrmm === 600, 'AFRMM digitado (600) vale no lugar do da DUIMP (500), rateado pelo valor: 180 + 420');
+    ok(mEd.totais.siscomex === 180 && mEd.totais.outrasAduaneiras === 100 && i1.ii_despesas_aduaneiras === r2(54 + 180 + 30) && i2.ii_despesas_aduaneiras === r2(126 + 420 + 70), 'Taxa Siscomex (180) e outras despesas aduaneiras (100) entram nas despesas aduaneiras de cada item');
+    ok(vol.peso_liquido === 1234.5 && vol.peso_bruto === 1300 && vol.quantidade === 2 && vol.especie === 'PALETES', 'peso líquido, peso bruto, quantidade e espécie dos volumes digitados');
+    ok(mEd.avisos.some(a => /AFRMM digitado na nota: R\$ 600,00 \(a DUIMP trazia R\$ 500,00\)/.test(a)) && mEd.avisos.some(a => /Taxa Siscomex digitada/.test(a)) && mEd.avisos.some(a => /Peso líquido digitado/.test(a)), 'cada valor editado vira aviso, com o automático ao lado');
+    ok(igual(mEd.totais.total, mEd.totais.somaItens), 'o total da nota continua fechando com os itens');
+    const mIgual = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: '500', siscomex: '', pesoLiquido: '' } } });
+    ok(mIgual.totais.afrmm === 500 && mIgual.totais.siscomex === 150 && !mIgual.avisos.some(a => /digitad/.test(a)), 'campo vazio ou igual ao automático: fica automático, sem aviso');
+  }
+
   console.log('\nPendências que bloqueiam:');
   const pA = mexe => { const d = banco(); mexe(d.ops[0].duimpDados, d); return R.montarNFe(d, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.map(p => p.campo); };
   ok(pA(r => { r.itens[0].ncm = ''; }).includes('items[1].codigo_ncm'), 'item da DUIMP sem NCM: pendência');

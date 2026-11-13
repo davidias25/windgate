@@ -271,18 +271,28 @@
   H.nfeVerDuimp = verDuimp;
 
   /* Entrada da DUIMP: só o que a DUIMP não traz ou o cenário permite, sempre com motivo. */
+  /* Campos da nota de entrada que podem ser editados a partir do automático. */
+  const EDIT_NF = [['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['pesoLiquido', 'Peso líquido (kg)'], ['pesoBruto', 'Peso bruto (kg)'], ['volumes', 'Quantidade de volumes'], ['especie', 'Espécie dos volumes']];
   function editarEntrada(n) {
-    const ex = (n.entrada || {}).extras || {}, du = ex.duimp || {};
+    const ex = (n.entrada || {}).extras || {}, du = ex.duimp || {}, auto = (n.totais || {}).auto || {};
     const campo = (id, l, val, tipo) => `<div class="f"><label class="lbl" for="${id}">${l}</label><input id="${id}" ${tipo ? 'type="' + tipo + '"' : ''} value="${esc(val == null ? '' : val)}"></div>`;
     const m = H.modal('Correção manual · ' + n.ref, `<p class="note" style="margin-bottom:8px">Itens, quantidades, valores, tributos federais, exportador e dados da declaração vêm da DUIMP e ficam travados. Aqui só o que a API da DUIMP não informa ou o cenário permite; a alteração fica no histórico com quem fez e o motivo.</p>
-      <div class="fields">${campo('ee_dd', 'Data do desembaraço', du.data_desembaraco, 'date')}${campo('ee_via', 'Via de transporte (1 = marítima)', du.via_transporte)}${campo('ee_afrmm', 'AFRMM do despachante (se não veio na DUIMP)', du.afrmm)}
+      <div class="fields">${campo('ee_dd', 'Data do desembaraço', du.data_desembaraco, 'date')}${campo('ee_via', 'Via de transporte (1 = marítima)', du.via_transporte)}
         ${campo('ee_loc', 'Local do desembaraço (se diferente da unidade)', du.local)}${campo('ee_uf', 'UF do desembaraço', du.uf)}${campo('ee_uft', 'UF do adquirente/encomendante', ex.terceiroUf)}</div>
+      <h3 class="h3" style="margin-top:10px">Taxas, pesos e volumes</h3>
+      <p class="note">Já vêm com o que o sistema calculou da DUIMP. Mude só o que precisar: o valor digitado vale no lugar do automático (rateado pelos itens) e fica no histórico. Apagar o campo volta ao automático.</p>
+      <div class="fields">${EDIT_NF.map(([k, l]) => { const a = auto[k], val = du[k] !== '' && du[k] != null ? du[k] : (a == null ? '' : a); return `<div class="f"><label class="lbl" for="ee_${k}">${esc(l)}</label><input id="ee_${k}" data-ednf="${k}" value="${esc(k === 'especie' || val === '' ? val : String(val).replace('.', ','))}" ${k === 'especie' ? '' : 'inputmode="decimal"'}><small class="note">automático: ${a === '' || a == null ? '—' : esc(k === 'especie' ? a : String(a).replace('.', ','))}${du[k] !== '' && du[k] != null && String(du[k]) !== String(a) ? ' · <b>editado</b>' : ''}</small></div>`; }).join('')}</div>
       <div class="fields" style="margin-top:8px"><div class="f w4"><label class="lbl" for="ee_inf">Informações complementares (além das automáticas)</label><textarea id="ee_inf" rows="2">${esc(ex.informacoes || '')}</textarea></div>
         <div class="f w4"><label class="lbl" for="ee_mot">Motivo da correção</label><input id="ee_mot" placeholder="ex.: data do extrato do despachante"></div></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="ee_ok">Salvar e montar de novo</button>');
     m.querySelector('#ee_ok').onclick = async ev => {
       ev.target.disabled = true;
-      const corpo = { id: n._id, motivo: v(m, '#ee_mot'), extras: { informacoes: v(m, '#ee_inf'), terceiroUf: v(m, '#ee_uft'), duimp: { data_desembaraco: v(m, '#ee_dd'), via_transporte: v(m, '#ee_via'), afrmm: v(m, '#ee_afrmm'), local: v(m, '#ee_loc'), uf: v(m, '#ee_uf') } } };
+      const corpo = { id: n._id, motivo: v(m, '#ee_mot'), extras: { informacoes: v(m, '#ee_inf'), terceiroUf: v(m, '#ee_uft'), duimp: { data_desembaraco: v(m, '#ee_dd'), via_transporte: v(m, '#ee_via'), local: v(m, '#ee_loc'), uf: v(m, '#ee_uf') } } };
+      /* Igual ao automático (ou vazio): fica automático. Só o que mudou vai como valor digitado. */
+      const numBR = s => { const t = String(s || '').trim(); if (!t) return null; const x = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : /^\d{1,3}(\.\d{3})+$/.test(t) ? +t.replace(/\./g, '') : +t; return isFinite(x) ? x : null; };
+      EDIT_NF.forEach(([k]) => { const s = v(m, '#ee_' + k), a = auto[k];
+        if (k === 'especie') { corpo.extras.duimp[k] = s && s !== String(a || '') ? s : ''; return; }
+        const x = numBR(s); corpo.extras.duimp[k] = x == null || (a != null && a !== '' && Math.abs(x - (+a || 0)) < 0.0005) ? '' : String(x); });
       const r = await post('/api/nfe/montar', corpo).catch(() => ({ ok: false, j: {} }));
       ev.target.disabled = false;
       if (!r.ok) return H.toast(esc(r.j.message || 'Não salvou.'));

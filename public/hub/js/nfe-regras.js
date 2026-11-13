@@ -356,9 +356,21 @@
     const via = g.viaTransporte || (+exDu.via_transporte || null);
     if (!via) P('documentos_importacao.via_transporte', `Via de transporte: a carga da DUIMP é ${g.tipoIdentificacaoCarga || '(sem tipo)'}, não um CE Mercante. Informe a via na nota.`);
     if (!ehData(W.soData(g.dataRegistro))) P('documentos_importacao.data_registro', 'A DUIMP importada não tem data de registro.');
-    const afrmmDuimp = itensD.reduce((s, i) => s + (+i.afrmm || 0), 0);
-    const afrmmManual = !(afrmmDuimp > 0) && num(exDu.afrmm) > 0 ? num(exDu.afrmm) : 0;
-    if (via === 1 && !(afrmmDuimp > 0)) { if (afrmmManual) A('AFRMM informado pelo despachante (não veio na DUIMP): conferir.'); else P('documentos_importacao.valor_afrmm', 'AFRMM ausente: não veio na DUIMP e é obrigatório no marítimo. Informe o valor do despachante.'); }
+    /* AFRMM, Taxa Siscomex e outras despesas aduaneiras: vêm da DUIMP; o que for digitado na nota vale no lugar,
+       rateado pelos itens pelo valor de cada um. Campo vazio = automático. */
+    const afrmmDuimp = r2(itensD.reduce((s, i) => s + (+i.afrmm || 0), 0)), siscDuimp = r2(itensD.reduce((s, i) => s + (+i.taxaSiscomex || 0), 0));
+    const digitado = k => (exDu[k] !== '' && exDu[k] != null && isFinite(num(exDu[k])) ? r2(num(exDu[k])) : null);
+    const afrmmEd = digitado('afrmm'), siscEd = digitado('siscomex'), outrasEd = digitado('outras');
+    const afrmmManual = afrmmEd != null && Math.abs(afrmmEd - afrmmDuimp) > 0.005 ? afrmmEd : null;
+    const siscManual = siscEd != null && Math.abs(siscEd - siscDuimp) > 0.005 ? siscEd : null;
+    const brl0 = v => 'R$ ' + r2(v).toFixed(2).replace('.', ',');
+    if (afrmmManual != null) A(afrmmDuimp > 0 ? `AFRMM digitado na nota: ${brl0(afrmmManual)} (a DUIMP trazia ${brl0(afrmmDuimp)}). Conferir com o extrato do despachante.` : `AFRMM informado pelo despachante (não veio na DUIMP): ${brl0(afrmmManual)}. Conferir.`);
+    if (siscManual != null) A(`Taxa Siscomex digitada na nota: ${brl0(siscManual)} (a DUIMP trazia ${brl0(siscDuimp)}).`);
+    if (outrasEd) A(`Outras despesas aduaneiras digitadas na nota: ${brl0(outrasEd)}. Conferir com o extrato do despachante.`);
+    if (via === 1 && !(afrmmDuimp > 0) && !(afrmmManual > 0)) P('documentos_importacao.valor_afrmm', 'AFRMM ausente: não veio na DUIMP e é obrigatório no marítimo. Informe o valor do despachante.');
+    const somaBase = itensD.reduce((s, x) => s + r2(cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL), 0) || 1;
+    /* Rateio pelo valor do item; o último leva a sobra dos centavos. */
+    const rateio = (total, V, ult, usado) => (ult ? r2(total - usado) : r2(total * V / somaBase));
 
     /* Intermediação: a DUIMP diz se é conta e ordem, encomenda ou direta. */
     const modsD = [...new Set(itensD.map(i => i.intermedio && i.intermedio.modalidade).filter(Boolean))];
@@ -396,7 +408,7 @@
     // O que, além dos campos da NF-e, entra no total da nota (cenário; padrão da NF 82: PIS, COFINS e AFRMM).
     const somaT = String(cen.a_total_soma == null ? '' : cen.a_total_soma).toLowerCase();
     const somaNoTotal = (pis, cof, afrmm, icms) => r2((/pis/.test(somaT) && !sim(cen.a_outras_pis_cofins) ? pis + cof : 0) + (/afrmm/.test(somaT) && !sim(cen.a_outras_afrmm) ? afrmm : 0) + (/icms/.test(somaT) && !sim(cen.a_outras_icms) ? icms : 0));
-    let afrmmUsado = 0;
+    let afrmmUsado = 0, siscUsado = 0, outrasUsado = 0;
     const lib = db.ncmlib || {};
     const items = itensD.map((d, i) => {
       const n = i + 1, tr = d.tributos || {}, ult = i === itensD.length - 1;
@@ -407,8 +419,10 @@
       if (soDig(d.ncm).length !== 8) P(`items[${n}].codigo_ncm`, `Item ${d.numero} da DUIMP sem NCM de 8 dígitos.`);
       if (!d.fabricante || !d.fabricante.codigo) P(`items[${n}].adicoes.codigo_fabricante_estrangeiro`, `Item ${d.numero} da DUIMP sem fabricante.`);
       if (!tr.ii) A(`Item ${d.numero}: a DUIMP não traz II calculado (regime ou isenção): sai zerado.`);
-      const sisc = r2(d.taxaSiscomex), afrmm = afrmmDuimp > 0 ? r2(d.afrmm) : (afrmmManual ? (ult ? r2(afrmmManual - afrmmUsado) : r2(afrmmManual * V / (itensD.reduce((s, x) => s + r2(cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL), 0) || 1))) : 0);
-      afrmmUsado = r2(afrmmUsado + afrmm);
+      const sisc = siscManual != null ? rateio(siscManual, V, ult, siscUsado) : r2(d.taxaSiscomex);
+      const afrmm = afrmmManual != null ? rateio(afrmmManual, V, ult, afrmmUsado) : r2(d.afrmm);
+      const outrasAd = outrasEd ? rateio(outrasEd, V, ult, outrasUsado) : 0;   // outras despesas aduaneiras, tratadas como a Taxa Siscomex
+      afrmmUsado = r2(afrmmUsado + afrmm); siscUsado = r2(siscUsado + sisc); outrasUsado = r2(outrasUsado + outrasAd);
       const vu = qtd ? +(V / qtd).toFixed(10) : 0, un = txt(d.unidadeComercial, 6) || 'UN';
       // Como no Maino (NF 82): código e descrição do Catálogo de Produtos (denominação + detalhamento);
       // o que passa de 120 caracteres vai nas informações adicionais do item. Sem Catálogo: "ITEM n - <descrição da DUIMP>".
@@ -423,7 +437,7 @@
       if (freteI) x.valor_frete = freteI; if (seguroI) x.valor_seguro = seguroI;
       const II = valorTributo(tr.ii, campoT), IPI = t.ipi ? valorTributo(tr.ipi, campoT) : 0;
       const PIS = t.pisCofinsImp ? valorTributo(tr.pis, campoT) : 0, COF = t.pisCofinsImp ? valorTributo(tr.cofins, campoT) : 0;
-      Object.assign(x, { ii_base_calculo: r2(tr.ii ? tr.ii.base : V), ii_valor: II, ii_despesas_aduaneiras: r2(sisc + afrmm), ii_valor_iof: 0 });
+      Object.assign(x, { ii_base_calculo: r2(tr.ii ? tr.ii.base : V), ii_valor: II, ii_despesas_aduaneiras: r2(sisc + afrmm + outrasAd), ii_valor_iof: 0 });
       if (txt(cen.ipi_cst)) { x.ipi_situacao_tributaria = txt(cen.ipi_cst); x.ipi_codigo_enquadramento_legal = txt(cen.ipi_enquadramento) || '999'; }
       if (CST_IPI_COM_VALOR.includes(txt(cen.ipi_cst)) && tr.ipi) Object.assign(x, { ipi_base_calculo: r2(tr.ipi.base), ipi_aliquota: +tr.ipi.aliquota || 0, ipi_valor: IPI });
       const pisCst = !t.pisCofinsImp ? txt(cen.pis_cst_extinto) || '08' : txt(cen.pis_cst), cofCst = !t.pisCofinsImp ? txt(cen.pis_cst_extinto) || '08' : txt(cen.cofins_cst);
@@ -437,19 +451,19 @@
         Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: 0, icms_aliquota: 0, icms_valor: 0 });
       } else if (CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst)) && aliqIcms != null && aliq < 1) {
         // ICMS "por dentro", sobre a base que o Pedro e a Gil definirem (Siscomex e AFRMM conforme o cenário).
-        const red = num(cen.icms_reducao_base) / 100, desp = sim(cen.a_icms_base_despesas) ? sisc + afrmm : 0;
+        const red = num(cen.icms_reducao_base) / 100, desp = sim(cen.a_icms_base_despesas) ? sisc + afrmm + outrasAd : 0;
         const baseIcms = r2((V + II + IPI + PIS + COF + desp) / (1 - aliq) * (1 - red));
         ICMS = r2(baseIcms * aliq);
         Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: baseIcms, icms_aliquota: num(aliqIcms), icms_valor: ICMS }, red ? { icms_reducao_base_calculo: num(cen.icms_reducao_base) } : {});
       }
-      const outras = r2((sim(cen.a_outras_pis_cofins) ? PIS + COF : 0) + (sim(cen.a_outras_siscomex) ? sisc : 0) + (sim(cen.a_outras_afrmm) ? afrmm : 0) + (sim(cen.a_outras_icms) ? ICMS : 0));
+      const outras = r2((sim(cen.a_outras_pis_cofins) ? PIS + COF : 0) + (sim(cen.a_outras_siscomex) ? sisc : 0) + outrasAd + (sim(cen.a_outras_afrmm) ? afrmm : 0) + (sim(cen.a_outras_icms) ? ICMS : 0));
       x.valor_outras_despesas = outras;
       x.documentos_importacao = [limpar({ numero: g.numero, data_registro: W.soData(g.dataRegistro), local_desembaraco_aduaneiro: txt(local, 60), uf_desembaraco_aduaneiro: uf, data_desembaraco_aduaneiro: dataDesemb,
         via_transporte: via || '', valor_afrmm: afrmm, forma_intermedio: fi, cnpj: terceiro ? terceiro.cnpj : '', uf_terceiro: terceiro ? terceiro.uf : '', codigo_exportador: txt(d.exportador && d.exportador.codigo, 60),
         adicoes: [limpar({ numero: d.numero, numero_sequencial_item: 1, codigo_fabricante_estrangeiro: txt(d.fabricante && d.fabricante.codigo, 60) })] })];
       if (comIbsCbs) {
         // Base: a que a DUIMP traz; sem ela, aduaneiro + II + Siscomex + AFRMM (LC 214/2025, art. 69 — conferir com a NF 88).
-        const baseIbs = r2((tr.cbs && tr.cbs.base) || (tr.ibsUf && tr.ibsUf.base) || (r2(d.valorAduaneiroBRL) + II + sisc + afrmm));
+        const baseIbs = r2((tr.cbs && tr.cbs.base) || (tr.ibsUf && tr.ibsUf.base) || (r2(d.valorAduaneiroBRL) + II + sisc + afrmm + outrasAd));
         const cbsV = tr.cbs ? valorTributo(tr.cbs, campoT) : r2(baseIbs * t.cbs.aliq / 100), ibsV = tr.ibsUf ? valorTributo(tr.ibsUf, campoT) : r2(baseIbs * t.ibs.aliq / 100);
         Object.assign(x, { ibs_cbs_situacao_tributaria: txt(cen.ibs_cbs_cst), ibs_cbs_classificacao_tributaria: txt(cen.ibs_cbs_classificacao), ibs_cbs_base_calculo: baseIbs,
           ibs_uf_aliquota: tr.ibsUf ? +tr.ibsUf.aliquota || 0 : t.ibs.aliq, ibs_uf_valor: ibsV, ibs_mun_aliquota: 0, ibs_mun_valor: 0, ibs_valor_total: ibsV, cbs_aliquota: tr.cbs ? +tr.cbs.aliquota || 0 : t.cbs.aliq, cbs_valor: cbsV });
@@ -460,7 +474,7 @@
       if (!denom) A(`Item ${d.numero}: produto ${d.produtoCodigo || '(sem código)'} não encontrado no Catálogo de Produtos: código e descrição saem da DUIMP.`);
       tot.produtos = r2(tot.produtos + V); tot.ii = r2(tot.ii + II); tot.ipi = r2(tot.ipi + IPI); tot.icms = r2(tot.icms + ICMS); tot.outras = r2(tot.outras + outras);
       tot.frete = r2((tot.frete || 0) + freteI); tot.seguro = r2((tot.seguro || 0) + seguroI);
-      tot.pis = r2(tot.pis + PIS); tot.cofins = r2(tot.cofins + COF); tot.afrmm = r2((tot.afrmm || 0) + afrmm); tot.siscomex = r2((tot.siscomex || 0) + sisc);
+      tot.pis = r2(tot.pis + PIS); tot.cofins = r2(tot.cofins + COF); tot.afrmm = r2((tot.afrmm || 0) + afrmm); tot.siscomex = r2((tot.siscomex || 0) + sisc); tot.outrasAduaneiras = r2((tot.outrasAduaneiras || 0) + outrasAd);
       tot.peso = r2((tot.peso || 0) + num(d.pesoLiquido)); tot.qtd = (tot.qtd || 0) + qtd;
       tot.total = r2(tot.total + V + freteI + seguroI + II + IPI + outras + somaNoTotal(PIS, COF, afrmm, ICMS));
       return x;
@@ -485,7 +499,15 @@
     if (txt(ex.informacoes)) infos.push(txt(ex.informacoes, 2000));
     const pesoBruto = num(ex.duimp && ex.duimp.pesoBruto) || num(ex.pesoBruto) || 0;
     if (!pesoBruto) A('Peso bruto: a DUIMP não informa (só o líquido). Digite na nota se quiser no DANFE.');
-    const volumes = [limpar({ quantidade: Math.round(tot.qtd || 0) || '', especie: txt(cen.a_volume_especie, 60), peso_liquido: tot.peso ? +tot.peso.toFixed(3) : '', peso_bruto: pesoBruto ? +pesoBruto.toFixed(3) : '' })];
+    /* Automático: peso líquido da DUIMP, quantidade de itens e a espécie do cenário. O digitado vale no lugar. */
+    const pesoLiqAuto = tot.peso ? +tot.peso.toFixed(3) : 0, volAuto = Math.round(tot.qtd || 0), especieAuto = txt(cen.a_volume_especie, 60);
+    const pesoLiq = digitado('pesoLiquido') != null ? num(exDu.pesoLiquido) : pesoLiqAuto;
+    const volQtd = exDu.volumes !== '' && exDu.volumes != null && isFinite(num(exDu.volumes)) ? Math.round(num(exDu.volumes)) : volAuto;
+    const especie = txt(exDu.especie, 60) || especieAuto;
+    if (digitado('pesoLiquido') != null && Math.abs(pesoLiq - pesoLiqAuto) > 0.0005) A(`Peso líquido digitado na nota: ${pesoLiq} kg (a DUIMP trazia ${pesoLiqAuto} kg).`);
+    const volumes = [limpar({ quantidade: volQtd || '', especie, peso_liquido: pesoLiq ? +(+pesoLiq).toFixed(3) : '', peso_bruto: pesoBruto ? +pesoBruto.toFixed(3) : '' })];
+    /* O que o sistema calcularia sozinho: a tela mostra para editar a partir daí. */
+    tot.auto = { afrmm: afrmmDuimp, siscomex: siscDuimp, outras: 0, pesoLiquido: pesoLiqAuto, pesoBruto: '', volumes: volAuto, especie: especieAuto };   // peso bruto: a DUIMP não informa
     const payload = limpar({
       natureza_operacao: txt(cen.natureza_operacao, 60) || 'IMPORTACAO', data_emissao: data + 'T12:00:00-03:00', tipo_documento: 0, finalidade_emissao: 1,
       local_destino: 3, consumidor_final: 0, presenca_comprador: +cen.presenca_comprador || 9, modalidade_frete: temNum(cen.modalidade_frete) ? +cen.modalidade_frete : 9, cnpj_emitente: soDig(emit.cnpj),

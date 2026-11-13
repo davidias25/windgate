@@ -115,7 +115,7 @@ module.exports = function registrar(app, ctx) {
   /* Campos da entrada (cenário A) que a pessoa pode corrigir: só o que a API da
      DUIMP não traz ou o cenário permite. Itens, valores, tributos federais,
      exportador e dados da declaração vêm da DUIMP e ficam travados. */
-  const EDITAVEIS_A = { extras: ['informacoes', 'terceiroUf'], duimp: ['data_desembaraco', 'via_transporte', 'afrmm', 'local', 'uf'] };
+  const EDITAVEIS_A = { extras: ['informacoes', 'terceiroUf'], duimp: ['data_desembaraco', 'via_transporte', 'afrmm', 'siscomex', 'outras', 'pesoLiquido', 'pesoBruto', 'volumes', 'especie', 'local', 'uf'] };
   const refDe = (d, m) => W.proximaRef(d, m.empresa, m.cenario === 'A' && m.duimp && m.duimp.numero ? 'duimp-' + m.duimp.numero : m.opId, m.cenario);
   /** Monta (ou remonta) a nota e grava. Remontar zera a conferência. */
   async function gravarMontagem(d, n, entrada, k, acao, msg) {
