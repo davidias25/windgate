@@ -9477,8 +9477,17 @@ const PROPOSTA_BLOCOS=[
 const DADOS_BANCARIOS={
   titular:'SF TRADING LTDA', cnpj:'58762606000144', banco:'Santander',
   agencia:'4279', conta:'130085588', pix:'58762606000144',
-  fone:'+55 85 92000-6271', email:'samir@windgate.com.br'
+  fone:'+55 85 99120-9410', email:'samir@windgate.com.br'
 };
+/* Triangular: quem fatura o cliente é a JeT, então o pagamento é na conta dela, a mesma do contrato
+   (Contratos → Configurar). Sem os dados cadastrados, devolve null e o bloco não sai com conta errada. */
+function contaDaJeT(){
+  try{
+    const j=((((typeof DB!=='undefined'&&DB)||{}).hubPainel||{})._contrato||{}).jt||{};
+    if(!(j.banco&&(j.conta||j.pix))) return null;
+    return {titular:j.razao||'JET IMPORT', cnpj:String(j.cnpj||'').replace(/\D/g,''), banco:j.banco, agencia:j.agencia||'', conta:j.conta||'', pix:j.pix||'', fone:DADOS_BANCARIOS.fone, email:DADOS_BANCARIOS.email};
+  }catch(e){ return null; }
+}
 /* Linhas de custo. Vêm desmarcadas: abrir a composição mostra ao cliente o que
    a WindGate paga em cada etapa. Quem quiser abrir, abre de propósito. O FOB não
    é uma delas: é a remessa ao exterior, e com ele ao lado do total a margem sairia por subtração. */
@@ -9490,12 +9499,14 @@ const PROPOSTA_CUSTOS=[
   {k:'cPorto',     l:'Despesas portuárias e de nacionalização', v:R=>R.comp.portuarias, sub:'capatazia, Siscomex, AFRMM e despesas do processo'},
   {k:'cHonor',     l:'Honorários e despachante',         v:R=>R.comp.honorarios}
 ];
-/* DIFAL na proposta: só para quem não é contribuinte (triangular), pelo valor do motor. O contribuinte recolhe o
-   dele: o bloco não aparece, e o investimento continua sem esse valor, igual à soma das parcelas. */
+/* DIFAL na proposta: não aparece. Triangular: está dentro do preço (a JeT recolhe). Contribuinte: ele recolhe o
+   dele, e o investimento sai sem esse valor, igual à soma das parcelas. Os blocos de DIFAL abaixo ficam desligados. */
 function dadosDaProposta(){
   const triProposta=V('tipoOp')==='triangular'&&!!R.tri;
-  const difalV=triProposta?+(R.tri.difal||0):0;
-  const totalWG=(R.preco||0)-(triProposta?difalV:+(R.st||0));   // o que é da WindGate
+  /* Triangular (não contribuinte): o DIFAL está dentro do preço e quem recolhe é a JeT. A proposta mostra só o preço
+     cheio, tudo incluído, sem falar em DIFAL. Contribuinte: preço sem o DIFAL, que ele recolhe em guia própria. */
+  const difalV=0;
+  const totalWG=triProposta?(R.preco||0):(R.preco||0)-(+(R.st||0));
   const campo=k=>{ try{ return V(k); }catch(e){ return ''; } };
   const descontoV=parseFloat(String(campo('descontoProposta')||'').replace(',','.'))||0;
   const prazoTxt=String(campo('prazoProposta')||'').trim()||'90 a 100';
@@ -9606,7 +9617,7 @@ async function gerarPropostaPDF(){
       const modalTxt = V('modalCntr')==='LCL'
         ? 'LCL (carga consolidada em contêiner compartilhado)'
         : 'FCL (contêiner completo)';
-      const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Embarque em ${modalTxt}. Valores finais ao cliente, nacionalizados, com entrega conforme o Incoterm ${V('incoterm')||'da operação'}${V('destino')?' ('+V('destino')+')':''}.`;
+      const escopo=`Fornecimento de ${nIt} ${nIt>1?'itens importados':'item importado'} ${origemChina?'diretamente da China':'do exterior'} — ${merc}. Embarque em ${modalTxt}. Valores finais ao cliente, com a mercadoria nacionalizada e entregue no destino${V('destino')?' ('+V('destino')+')':''}.`;
       doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
       const escLines=doc.splitTextToSize(escopo,515);
       doc.text(escLines,36,y+16); y+=16+escLines.length*13+6;
@@ -9697,7 +9708,7 @@ async function gerarPropostaPDF(){
     }
     if(B.verde){
       doc.setFont('helvetica','normal'); doc.setFontSize(8.3);
-      const gtxt=doc.splitTextToSize('Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega conforme o Incoterm da operação, nas condições e prazos descritos nesta proposta.',505);
+      const gtxt=doc.splitTextToSize('Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no destino, nas condições e prazos descritos nesta proposta.',505);
       const alturaVerde=25+gtxt.length*9.6+6;
       doc.setFillColor(232,245,238); doc.rect(36,y,523,alturaVerde,'F');
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(30,90,60);
@@ -9709,8 +9720,8 @@ async function gerarPropostaPDF(){
     if(B.amarelo){
       const tc=state.tabelaCambio;
       doc.setFont('helvetica','normal'); doc.setFontSize(8.3);
-      const fDate = V('validadeFrete') ? V('validadeFrete').split('-').reverse().join('/') : '[DATA_VALIDADE_FRETE]';
-      const ytxt=doc.splitTextToSize(`Os valores desta proposta são válidos por ${V('validade')||7} dias. ${tc?'Câmbio: '+tc.referencia+' A tabela por parcela está no cronograma de desembolso.':'Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente.'} Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, válida para embarque até ${fDate}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.`,505);
+      const fDate = V('validadeFrete') ? V('validadeFrete').split('-').reverse().join('/') : '';
+      const ytxt=doc.splitTextToSize(`Os valores desta proposta são válidos por ${V('validade')||7} dias. ${tc?'Câmbio: '+tc.referencia+' A tabela por parcela está no cronograma de desembolso.':'Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente.'} Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta${fDate ? ', válida para embarque até ' + fDate : ''}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.`,505);
       // A altura sai do número de linhas: o texto nunca passa da caixa, e a caixa nunca passa da página.
       const alturaAmarelo=25+ytxt.length*9.6+6;
       if(y+alturaAmarelo>790){ doc.addPage(); pdfHeader(doc,cliente+' · Validade e câmbio · '+mesAno); y=120; }
@@ -9896,15 +9907,17 @@ async function gerarPropostaPDF(){
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(201,212,238);
     doc.text('Dê o OK à nossa equipe — o contrato é produzido em 24h e iniciamos a operação imediatamente.',297.5,cy+52,{align:'center'});
     doc.setDrawColor(58,80,128); doc.setLineWidth(.8); doc.line(120,cy+66,475,cy+66);
-    const cta=[['RESPONSÁVEL','Samir Fernandes',150],['TELEFONE · WHATSAPP','+55 85 92000-6271',297.5],['E-MAIL','samir@windgate.com.br',447]];
+    const cta=[['RESPONSÁVEL','Samir Fernandes',150],['TELEFONE · WHATSAPP','+55 85 99120-9410',297.5],['E-MAIL','samir@windgate.com.br',447]];
     cta.forEach(([l,v,x])=>{
       doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(143,163,204); doc.text(l,x,cy+82,{align:'center'});
       doc.setFontSize(9.5); doc.setTextColor(255,255,255); doc.text(v,x,cy+96,{align:'center'});
     });
     cy+=126;
     }
-    if(B.banco){
-      const D=DADOS_BANCARIOS;
+    const contaPag=triProposta?contaDaJeT():DADOS_BANCARIOS;
+    if(triProposta&&!contaPag) toast('⚠ Dados bancários da JeT não cadastrados (Contratos → Configurar): a proposta saiu sem o bloco de pagamento.');
+    if((B.banco||triProposta)&&contaPag){
+      const D=contaPag;
       // Vai depois do CTA: primeiro o aceite, depois para onde pagar.
       if(cy+108>780){ doc.addPage(); pdfHeader(doc,cliente+' · Dados para pagamento · '+mesAno); cy=120; }
       let yb=bandPDF(doc,cy,'DADOS PARA PAGAMENTO',PDF_NAVY);
@@ -9914,7 +9927,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_GRAY);
       doc.text('CNPJ '+cnpjFmt(D.cnpj),44,yb+33);
       doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_INK);
-      doc.text('Banco '+D.banco+'  ·  Agência '+D.agencia+'  ·  Conta '+D.conta,44,yb+50);
+      doc.text((/^banco/i.test(D.banco)?'':'Banco ')+D.banco+'  ·  Agência '+D.agencia+'  ·  Conta '+D.conta,44,yb+50);
       doc.setFont('helvetica','bold'); doc.setTextColor(...PDF_MAG);
       doc.text('PIX  '+cnpjFmt(D.pix),44,yb+65);
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...PDF_GRAY);
@@ -9949,7 +9962,8 @@ async function gerarPropostaPDF(){
 
 /* fallback: janela de impressão no mesmo padrão */
 function gerarPropostaPrint(){
-  const {difalV,totalWG,descontoV}=dadosDaProposta();
+  const {difalV,totalWG,descontoV,triProposta}=dadosDaProposta();
+  const DP=(triProposta?contaDaJeT():DADOS_BANCARIOS)||DADOS_BANCARIOS;
   const itens=propostaItens(totalWG+descontoV); const hj=new Date(); const B=propostaBlocos();
   const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   $('printProposal').innerHTML=`
@@ -9960,7 +9974,7 @@ function gerarPropostaPrint(){
     <div style="padding:24px 32px">
       <div style="display:flex;gap:10px;margin-bottom:18px">${[['CLIENTE',V('cliente')],['OPERAÇÃO','Turn-Key'],['VALIDADE',(V('validade')||7)+' dias'],['DATA',hj.toLocaleDateString('pt-BR')]].map(b=>`<div style="flex:1;border:1px solid #DDE4EA;padding:8px 10px"><div style="font-size:8px;color:#64707D;font-weight:700">${b[0]}</div><div style="font-size:13px;font-weight:800;color:#1B2A5B">${esc(b[1]||'—')}</div></div>`).join('')}</div>
       ${B.escopo?`<div style="background:#B5106B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin-bottom:8px">ESCOPO DA OPERAÇÃO</div>
-      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Embarque em ${V('modalCntr')==='LCL'?'LCL (carga consolidada em contêiner compartilhado)':'FCL (contêiner completo)'}. Valores finais ao cliente, nacionalizados, com entrega conforme o Incoterm ${esc(V('incoterm')||'da operação')}.</p>`:''}
+      <p style="font-size:11px;line-height:1.6">Fornecimento de ${itens.length} item(ns) — ${esc(V('mercadoria'))}. Embarque em ${V('modalCntr')==='LCL'?'LCL (carga consolidada em contêiner compartilhado)':'FCL (contêiner completo)'}. Valores finais ao cliente, com a mercadoria nacionalizada e entregue no destino.</p>`:''}
       ${B.itens?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 0">RELAÇÃO DE ITENS · PREÇOS FINAIS</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px">${itens.map(it=>`<tr><td style="padding:8px;border-bottom:1px solid #EDF1F5;color:#1B2A5B;font-weight:700">${esc(it.d)}<br><span style="font-size:8.5px;color:#64707D;font-weight:400">${it.ncm?'NCM '+esc(it.ncm):''}</span></td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${it.q}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5">${fmt(it.unit)}</td><td style="text-align:right;border-bottom:1px solid #EDF1F5;color:#B5106B;font-weight:800">${fmt(it.total)}</td></tr>`).join('')}</table>
       ${descontoV>0?`<div style="display:flex;justify-content:space-between;padding:8px;font-size:11px;font-weight:700;color:#1B2A5B"><span>Desconto comercial</span><span style="color:#B5106B">− ${fmt(descontoV)}</span></div>`:''}<div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(totalWG)}</span></div>
@@ -9970,15 +9984,15 @@ function gerarPropostaPrint(){
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:10px 16px;margin-top:6px;font-weight:800"><span style="font-size:10px">TOTAL ESTIMADO DA OPERAÇÃO</span><span style="font-size:14px">${fmt(R.preco||0)}</span></div>`:''}`:''}
       ${(B.fotos&&(state.fotos||[]).length)?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
       <div style="display:grid;grid-template-columns:repeat(${(state.fotos||[]).length<=2?1:2},1fr);gap:10px">${(state.fotos||[]).map(f=>`<img src="${esc(f.url)}" style="width:100%;border:1px solid #DDE4EA;object-fit:contain;background:#F5F7FA">`).join('')}</div>`:''}
-      ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega conforme o Incoterm da operação, nas condições e prazos descritos nesta proposta.</div>`:''}
-      ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Os valores desta proposta são válidos por ${V('validade')||7} dias. ${state.tabelaCambio?'Câmbio: '+esc(state.tabelaCambio.referencia)+' '+esc(state.tabelaCambio.regra):'Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente.'} Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, válida para embarque até ${(V('validadeFrete')?V('validadeFrete').split('-').reverse().join('/'):'[DATA_VALIDADE_FRETE]')}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.</div>`:''}
-      ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 92000-6271 · samir@windgate.com.br</div></div>`:''}
-      ${B.banco?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
-        <div style="font-weight:800;color:#1B2A5B;font-size:13px">${esc(DADOS_BANCARIOS.titular)}</div>
-        <div style="font-size:9px;color:#64707D">CNPJ ${esc(cnpjFmt(DADOS_BANCARIOS.cnpj))}</div>
-        <div style="margin-top:6px">Banco ${esc(DADOS_BANCARIOS.banco)} · Agência ${esc(DADOS_BANCARIOS.agencia)} · Conta ${esc(DADOS_BANCARIOS.conta)}</div>
-        <div style="font-weight:800;color:#B5106B;margin-top:4px">PIX ${esc(cnpjFmt(DADOS_BANCARIOS.pix))}</div>
-        <div style="font-size:9px;color:#64707D;margin-top:6px">${esc(DADOS_BANCARIOS.fone)} · ${esc(DADOS_BANCARIOS.email)} — confirme estes dados por telefone antes de qualquer transferência.</div>
+      ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no destino, nas condições e prazos descritos nesta proposta.</div>`:''}
+      ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Os valores desta proposta são válidos por ${V('validade')||7} dias. ${state.tabelaCambio?'Câmbio: '+esc(state.tabelaCambio.referencia)+' '+esc(state.tabelaCambio.regra):'Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente.'} Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, ${V('validadeFrete')?'válida para embarque até '+V('validadeFrete').split('-').reverse().join('/'):'válida na data desta proposta'}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.</div>`:''}
+      ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 99120-9410 · samir@windgate.com.br</div></div>`:''}
+      ${B.banco||triProposta?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
+        <div style="font-weight:800;color:#1B2A5B;font-size:13px">${esc(DP.titular)}</div>
+        <div style="font-size:9px;color:#64707D">CNPJ ${esc(cnpjFmt(DP.cnpj))}</div>
+        <div style="margin-top:6px">${/^banco/i.test(DP.banco)?'':'Banco '}${esc(DP.banco)} · Agência ${esc(DP.agencia)} · Conta ${esc(DP.conta)}</div>
+        <div style="font-weight:800;color:#B5106B;margin-top:4px">PIX ${esc(cnpjFmt(DP.pix))}</div>
+        <div style="font-size:9px;color:#64707D;margin-top:6px">${esc(DP.fone)} · ${esc(DP.email)} — confirme estes dados por telefone antes de qualquer transferência.</div>
       </div>`:''}
       <div style="font-size:8.5px;color:#64707D;margin-top:14px;border-top:1px solid #DDE4EA;padding-top:8px">WINDGATE · IMPORTAÇÃO E TRADING · Good winds open doors.</div>
     </div>

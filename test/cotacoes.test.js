@@ -167,9 +167,10 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     ok(dir.R.st > 0 && !dir.txt.includes('ICMS-DIFAL'), 'cliente contribuinte: sem o bloco de DIFAL, mesmo com valor');
     const zero = await gerar(nova({ tipoOp: 'triangular', ufDestino: 'ES', icmsDest: '17' }));
     const tri = await gerar(nova({ tipoOp: 'triangular' }));
-    ok(tri.txt.includes('ICMS-DIFAL') && tri.R.tri.difal > 0, 'cliente não contribuinte: bloco de DIFAL com o valor do motor');
+    ok(!tri.txt.includes('DIFAL') && tri.R.tri.difal > 0, 'cliente não contribuinte: sem falar em DIFAL (está dentro do preço e a JeT recolhe)');
     ok(!zero.R.tri.difal ? !zero.txt.includes('ICMS-DIFAL') : true, 'DIFAL zero: sem o bloco');
-    ok(!tri.txt.includes('exclusivo') && tri.txt.includes('Incoterm'), 'sem "exclusivo desta carga", e a entrega segue o Incoterm');
+    ok(!tri.txt.includes('exclusivo') && !tri.txt.includes('Incoterm') && tri.txt.includes('entregue no destino'), 'sem "exclusivo desta carga"; a mercadoria é entregue nacionalizada no destino, sem citar o Incoterm');
+    ok(!tri.txt.includes('DATA_VALIDADE') && tri.txt.includes('99120-9410') && !tri.txt.includes('92000-6271'), 'sem [DATA_VALIDADE_FRETE] e com o WhatsApp +55 85 99120-9410');
     ok(!/spread|remessa|contrato de c[aâ]mbio|margem/i.test(tri.txt + dir.txt) && !C.PROPOSTA_CUSTOS.some(x => x.k === 'cFob'), 'sem remessa, contrato de câmbio, spread, margem ou FOB');
     ok(tri.txt.includes('90 a 100') && !tri.txt.includes('110 a 120'), 'prazo padrão: 90 a 100 dias');
     ok((await gerar(nova({ tipoOp: 'triangular', prazoProposta: '75 a 85' }))).txt.includes('75 a 85'), 'prazo configurável por proposta');

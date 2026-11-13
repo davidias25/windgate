@@ -86,6 +86,9 @@ console.log('\nFollow-up e texto no negócio:');
   const valoresInternos = [cq.total, cq.valores.impostos, R.margem].map(v => (+v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })).filter(x => html.includes(x));
   ok(vazou.filter(x => x !== 'FOB' || !html.includes('Incoterm FOB')).length === 0 && !valoresInternos.length, 'sem custo, margem, dólar de custo nem spread' + (vazou.length ? ': ' + vazou.join() : ''));
 
+  const precoCheio = (+R.preco).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ok(R.tri && R.tri.difal > 0 && !html.includes('DIFAL') && html.includes(precoCheio), `triangular: a página mostra o preço cheio (R$ ${precoCheio}), sem falar em DIFAL`);
+
   console.log('\nAberturas:');
   const dbAgora = async () => { const j = await (await fetch(base + '/api/db')).json(); return j.db || j.data || j; };
   ok(W.aberturasDaProposta(await dbAgora(), 'q1').vezes === 0, 'só carregar a página não conta: prévia de WhatsApp e robô não rodam o script');
