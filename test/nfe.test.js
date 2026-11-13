@@ -133,6 +133,17 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(R.montarNFe(baseF(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { frete: '' } } }).totais.frete === 400, 'vazio: frete da DUIMP');
     const torto = baseF(); torto.ops[0].duimpDados.itens[0].freteBRL = 999;
     ok(R.montarNFe(torto, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.some(p => p.campo === 'total.produtos'), 'diferença que não veio de frete digitado continua bloqueando');
+    /* Frete com várias casas por item: a soma da nota fecha com o total da DUIMP, sem escorregar centavos. */
+    {
+      const n = 28, porItem = 5218.49 / n, d = banco();
+      d.ops[0].duimpDados = retrato({ itens: Array.from({ length: n }, (_, k) => itemDuimp(k + 1, 1000, 1.23456, 7.77777, { frete: porItem, seguro: 0.123456 })) });
+      const ingenuo = r2(Array.from({ length: n }).reduce(s => s + r2(porItem), 0));
+      const m = R.montarNFe(d, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }), its = m.payload.items;
+      const soma = k => r2(its.reduce((s, x) => s + (x[k] || 0), 0));
+      ok(ingenuo !== 5218.49 && soma('valor_frete') === 5218.49 && m.totais.frete === 5218.49, `frete: soma da nota = 5.218,49, igual à DUIMP (arredondando item a item daria ${ingenuo.toFixed(2).replace('.', ',')})`);
+      ok(its.every(x => Math.abs(x.valor_frete - porItem) < 0.01), 'nenhum item fica mais de 1 centavo longe do frete dele na DUIMP');
+      ok(m.totais.siscomex === r2(1.23456 * n) && m.totais.afrmm === r2(7.77777 * n) && soma('valor_seguro') === r2(0.123456 * n), 'Taxa Siscomex, AFRMM e seguro também fecham com a soma da DUIMP');
+    }
     /* Informações complementares: o texto inteiro editável. */
     const infA = mAuto.totais.auto.informacoes;
     ok(/^DUIMP 26BR/.test(infA) && /AFRMM R\$/.test(infA) && mAuto.payload.informacoes_adicionais_contribuinte === infA, 'o texto automático das informações complementares fica guardado e é o que sai na nota');

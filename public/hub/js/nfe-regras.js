@@ -358,7 +358,22 @@
     if (!ehData(W.soData(g.dataRegistro))) P('documentos_importacao.data_registro', 'A DUIMP importada não tem data de registro.');
     /* AFRMM, Taxa Siscomex e outras despesas aduaneiras: vêm da DUIMP; o que for digitado na nota vale no lugar,
        rateado pelos itens pelo valor de cada um. Campo vazio = automático. */
-    const afrmmDuimp = r2(itensD.reduce((s, i) => s + (+i.afrmm || 0), 0)), siscDuimp = r2(itensD.reduce((s, i) => s + (+i.taxaSiscomex || 0), 0));
+    /* O Portal manda frete, seguro, AFRMM e Taxa Siscomex por item com mais de 2 casas. Arredondar item a item e
+       somar faz o total escorregar (ex.: frete 5.218,63 contra 5.218,49 da DUIMP). Aqui o total é a soma sem
+       arredondar, arredondada uma vez, e os centavos vão para os itens de maior fração: a soma fecha com a DUIMP
+       e nenhum item fica mais de 1 centavo longe do seu valor. */
+    const fecharCentavos = vals => {
+      const raw = vals.map(v => (+v || 0) * 100), alvo = Math.round(raw.reduce((s, v) => s + v, 0) + 1e-6);
+      const base = raw.map(v => Math.floor(v + 1e-6)); let falta = alvo - base.reduce((s, v) => s + v, 0);
+      const ordem = raw.map((v, i) => [v - base[i], i]).sort((a, b) => b[0] - a[0]);
+      for (let k = 0; falta > 0 && k < ordem.length; k++, falta--) base[ordem[k][1]]++;
+      return base.map(v => v / 100);
+    };
+    const freteAuto = fecharCentavos(itensD.map(i => i.freteBRL)), seguroAuto = fecharCentavos(itensD.map(i => i.seguroBRL));
+    const afrmmAuto = fecharCentavos(itensD.map(i => i.afrmm)), siscAuto = fecharCentavos(itensD.map(i => i.taxaSiscomex));
+    const somaC = a => r2(a.reduce((s, v) => s + v, 0));
+    const vAuto = fecharCentavos(itensD.map(x => (cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL)));
+    const afrmmDuimp = somaC(afrmmAuto), siscDuimp = somaC(siscAuto);
     const digitado = k => (exDu[k] !== '' && exDu[k] != null && isFinite(num(exDu[k])) ? r2(num(exDu[k])) : null);
     const afrmmEd = digitado('afrmm'), siscEd = digitado('siscomex'), outrasEd = digitado('outras');
     const afrmmManual = afrmmEd != null && Math.abs(afrmmEd - afrmmDuimp) > 0.005 ? afrmmEd : null;
@@ -371,7 +386,7 @@
     const somaBase = itensD.reduce((s, x) => s + r2(cen.a_vprod === 'mercadoria' ? x.valorMercadoriaBRL : x.valorAduaneiroBRL), 0) || 1;
     /* Frete internacional: o da DUIMP, item a item; digitado na nota, vale no lugar, na mesma proporção da DUIMP.
        Só no cenário em que o produto é o valor da mercadoria (no aduaneiro o frete já está dentro do produto). */
-    const freteDuimp = r2(itensD.reduce((s, i) => s + (+i.freteBRL || 0), 0)), freteEd = digitado('frete'), freteNoItem = cen.a_vprod === 'mercadoria';
+    const freteDuimp = somaC(freteAuto), freteEd = digitado('frete'), freteNoItem = cen.a_vprod === 'mercadoria';
     const freteManual = freteNoItem && freteEd != null && Math.abs(freteEd - freteDuimp) > 0.005 ? freteEd : null;
     if (freteManual != null) A(`Frete digitado na nota: ${brl0(freteManual)} (a DUIMP trazia ${brl0(freteDuimp)}). Conferir com o contador: o frete compõe o valor aduaneiro.`);
     if (!freteNoItem && freteEd != null && Math.abs(freteEd - freteDuimp) > 0.005) A('Frete digitado não usado: neste cenário o valor do produto é o aduaneiro, que já inclui o frete.');
@@ -419,15 +434,15 @@
     const lib = db.ncmlib || {};
     const items = itensD.map((d, i) => {
       const n = i + 1, tr = d.tributos || {}, ult = i === itensD.length - 1;
-      const V = r2(cen.a_vprod === 'mercadoria' ? d.valorMercadoriaBRL : d.valorAduaneiroBRL);
+      const V = vAuto[i];
       const qtd = +d.quantidade || 0;
       if (!(V > 0)) P(`items[${n}].valor_bruto`, `Item ${d.numero} da DUIMP sem ${cen.a_vprod === 'mercadoria' ? 'valor da mercadoria' : 'valor aduaneiro'}.`);
       if (!(qtd > 0)) P(`items[${n}].quantidade_comercial`, `Item ${d.numero} da DUIMP sem quantidade.`);
       if (soDig(d.ncm).length !== 8) P(`items[${n}].codigo_ncm`, `Item ${d.numero} da DUIMP sem NCM de 8 dígitos.`);
       if (!d.fabricante || !d.fabricante.codigo) P(`items[${n}].adicoes.codigo_fabricante_estrangeiro`, `Item ${d.numero} da DUIMP sem fabricante.`);
       if (!tr.ii) A(`Item ${d.numero}: a DUIMP não traz II calculado (regime ou isenção): sai zerado.`);
-      const sisc = siscManual != null ? rateio(siscManual, V, ult, siscUsado) : r2(d.taxaSiscomex);
-      const afrmm = afrmmManual != null ? rateio(afrmmManual, V, ult, afrmmUsado) : r2(d.afrmm);
+      const sisc = siscManual != null ? rateio(siscManual, V, ult, siscUsado) : siscAuto[i];
+      const afrmm = afrmmManual != null ? rateio(afrmmManual, V, ult, afrmmUsado) : afrmmAuto[i];
       const outrasAd = outrasEd ? rateio(outrasEd, V, ult, outrasUsado) : 0;   // outras despesas aduaneiras, tratadas como a Taxa Siscomex
       afrmmUsado = r2(afrmmUsado + afrmm); siscUsado = r2(siscUsado + sisc); outrasUsado = r2(outrasUsado + outrasAd);
       const vu = qtd ? +(V / qtd).toFixed(10) : 0, un = txt(d.unidadeComercial, 6) || 'UN';
@@ -440,10 +455,10 @@
         unidade_comercial: un, quantidade_comercial: qtd, valor_unitario_comercial: vu, unidade_tributavel: un, quantidade_tributavel: qtd, valor_unitario_tributavel: vu, valor_bruto: V, inclui_no_total: 1,
         icms_origem: txt(cen.icms_origem), icms_situacao_tributaria: txt(cen.icms_cst) };
       // Produto = mercadoria: frete e seguro do item vão nos campos próprios (no aduaneiro já estão dentro).
-      const freteI = !freteNoItem ? 0 : freteManual == null ? r2(d.freteBRL)
-        : ult ? r2(freteManual - freteUsado) : r2(freteManual * (freteDuimp > 0 ? r2(d.freteBRL) / freteDuimp : V / somaBase));
+      const freteI = !freteNoItem ? 0 : freteManual == null ? freteAuto[i]
+        : ult ? r2(freteManual - freteUsado) : r2(freteManual * (freteDuimp > 0 ? freteAuto[i] / freteDuimp : V / somaBase));
       freteUsado = r2(freteUsado + freteI);
-      const seguroI = cen.a_vprod === 'mercadoria' ? r2(d.seguroBRL) : 0;
+      const seguroI = cen.a_vprod === 'mercadoria' ? seguroAuto[i] : 0;
       if (freteI) x.valor_frete = freteI; if (seguroI) x.valor_seguro = seguroI;
       const II = valorTributo(tr.ii, campoT), IPI = t.ipi ? valorTributo(tr.ipi, campoT) : 0;
       const PIS = t.pisCofinsImp ? valorTributo(tr.pis, campoT) : 0, COF = t.pisCofinsImp ? valorTributo(tr.cofins, campoT) : 0;
