@@ -591,7 +591,8 @@ function triCalcular(e){
     return out;
   }
   const espelhoDesR = ps => { const v = ps.map(p => p.valor); return [v[0] || 0, v[1] || 0, v.slice(2).reduce((a, b) => a + b, 0)].map(x => x.toFixed(2)); };
-  const temListaPropria = q => !!(q && !q.clienteId && Array.isArray(q.parcelas) && q.parcelas.length);
+  /* Cliente de cotação compartilhada: cotacaoDoCliente já põe aqui só a lista DELE (ou nenhuma). */
+  const temListaPropria = q => !!(q && Array.isArray(q.parcelas) && q.parcelas.length);
   /** As parcelas da cotação, sempre como lista. */
   function parcelasDe(q) {
     const f = camposDe(q), desR = [f.desR1, f.desR2, f.desR3];
@@ -602,6 +603,13 @@ function triCalcular(e){
       return lista;
     }
     return ETAPAS_PADRAO.map((e, i) => normalizarParcela(Object.assign({ id: 'p' + (i + 1), valor: desR[i] }, e), i));
+  }
+  /** Lista de parcelas de um cliente da cotação compartilhada; espelha desR1..desR3 do cliente. */
+  function definirParcelasCliente(c, lista) {
+    const ps = (lista || []).slice(0, MAX_PARCELAS).map(normalizarParcela);
+    if (!ps.length) ps.push(normalizarParcela({ nome: 'Sinal', vinculo: 'sinal' }, 0));
+    c.parcelas = ps; const esp = espelhoDesR(ps); c.desR1 = esp[0]; c.desR2 = esp[1]; c.desR3 = esp[2];
+    return ps;
   }
   /** Grava a lista (1 a 8) e espelha desR1..desR3. Devolve a lista gravada. */
   function definirParcelas(q, lista) {
@@ -658,7 +666,7 @@ function triCalcular(e){
   function desemErros(q, R) {
     const c = coberturaDesembolso(q, R), errs = [];
     if (!c.linhas.some(l => l.parcela.valor)) { errs.push('preencha o cronograma de desembolso (use Sugerir).'); return errs; }
-    if (Math.round(Math.abs(c.base - precoDesem(R)) * 100) > 1) errs.push('A soma das parcelas (' + fmt(c.base) + ') difere do valor a receber (' + fmt(precoDesem(R)) + (R.aReceber != null ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.difalCliente || 0) : R.st > 0 ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.st || 0) : '') + ').');
+    if (Math.round(Math.abs(c.base - precoDesem(R)) * 100) > 1) errs.push('A soma das parcelas (' + fmt(c.base) + ') difere do valor a receber (' + fmt(precoDesem(R)) + (R.aReceber != null ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.difalCliente || 0) : R.tri && q && q.clienteId ? ' = preço cheio: o DIFAL está dentro e a JeT recolhe em GNRE' : R.st > 0 ? ' = preço aprovado ' + fmt(R.preco || 0) + ' − DIFAL ' + fmt(R.st || 0) : '') + ').');
     return errs;
   }
   /** Avisos de cobertura: a parcela que não cobre a saída, com a diferença, e a saída sem parcela ligada. Não bloqueiam. */
@@ -828,7 +836,7 @@ function triCalcular(e){
       desR1: c.desR1 != null ? String(c.desR1) : '', desR2: c.desR2 != null ? String(c.desR2) : '', desR3: c.desR3 != null ? String(c.desR3) : '',
       mkSF: String(c.mkSF != null && c.mkSF !== '' ? c.mkSF : 0), mkJT: String(c.mkJT != null && c.mkJT !== '' ? c.mkJT : 0), icmsEnt: String(c.icmsEnt != null && c.icmsEnt !== '' ? c.icmsEnt : f.icmsEnt), freteUSD: fatia('freteUSD', fob), seguro: fatia('seguro', fob), capatazia: fatia('capatazia', fob), transporte: fatia('transporte', fob), siscomex: fatia('siscomex', fob), honorarios: fatia('honorarios', fob), outrasAdu: fatia('outrasAdu', fob), afrmm: fatia('afrmm', peso) });
     return Object.assign({}, q, { fields, items: itensDoCliente(q, c.id), exps: (q.exps || []).map(e => Object.assign({}, e, { v: (+e.v || 0) * fob })), fotos: (q.fotos || []).filter(ft => ft && (!ft.clienteId || ft.clienteId === c.id)),
-      status: c.status || 'draft', aprovadoPor: c.aprovadoPor || null, clienteId: c.id, clientes: undefined, regraRateio: undefined, parcelas: undefined, preco: 0 });
+      status: c.status || 'draft', aprovadoPor: c.aprovadoPor || null, clienteId: c.id, clientes: undefined, regraRateio: undefined, parcelas: Array.isArray(c.parcelas) && c.parcelas.length ? c.parcelas : undefined, preco: 0 });
   }
   /**
    * Cálculo da cotação inteira. { multi, clientes: [{ id, nome, R, q }], total, travas, avisos, erros }.
@@ -860,7 +868,9 @@ function triCalcular(e){
       R.comp = { fob: R.fob, freteInt: custoPor.frete, terrestre: custoPor.terrestre, seguro: custoPor.seguro, portuarias: custoPor.capatazia + custoPor.siscomex + custoPor.afrmm + custoPor.demais, honorarios: custoPor.honorarios };
       R.margem = m; R.margemBRLCampo = +m.toFixed(2); R.margemPctCampo = brl ? (custo > 0 ? +((m / custo) * 100).toFixed(1) : 0) : N(qc.fields, 'margemPct');
       R.warnMargem = R.margemPctCampo < 10 && custo > 0;
-      if (R.tri) { R.tri.custoGrupo = custo; R.tri.P = custo + m; R.preco = custo + m; separarDifal(R); }
+      /* Triangular: o DIFAL está dentro do preço e a JeT recolhe em GNRE. O cliente paga o preço cheio e as parcelas
+         somam o preço cheio, igual à cotação de um cliente só. Cliente direto: preço − DIFAL, como sempre. */
+      if (R.tri) { R.tri.custoGrupo = custo; R.tri.P = custo + m; R.preco = custo + m; }
       else R.preco = custo + (R.st || 0) + m;
       R.margemSobrePreco = R.preco > 0 ? (m / R.preco) * 100 : null;
       R.ajusteRateio = ajuste; R.custoPor = custoPor;
@@ -1079,23 +1089,28 @@ function triCalcular(e){
   function linhasDoCliente(cc) {
     const R = cc.R, f = camposDe(cc.q), o = desemOuts(cc.q, R), out = [];
     const add = (k, tipo, desc, valor, custo) => { if (valor > 0.004) out.push({ k, tipo, desc, valor: +(+valor).toFixed(2), custo: custo || '' }); };
-    const rec = [N(f, 'desR1'), N(f, 'desR2'), N(f, 'desR3')];
-    if (rec.reduce((a, b) => a + b, 0) <= 0) { rec[0] = precoDesem(R); rec[1] = 0; rec[2] = 0; }
-    /* Parcelas abaixo do preço: a diferença entra em linha própria. Acima: sai da 3ª. A receita sempre fecha com o preço. */
+    const ps = parcelasDe(cc.q), propria = temListaPropria(cc.q), rec = ps.map(p => p.valor), ult = rec.length - 1;
+    if (rec.reduce((a, b) => a + b, 0) <= 0) rec.forEach((v, i) => { rec[i] = i === 0 ? precoDesem(R) : 0; });
+    /* Parcelas abaixo do preço: a diferença entra em linha própria. Acima: sai da última. A receita sempre fecha com o preço. */
     const difPreco = +(precoDesem(R) - rec.reduce((a, b) => a + b, 0)).toFixed(2);
-    if (difPreco < 0) rec[2] = Math.max(0, rec[2] + difPreco);
-    rec.forEach((v, i) => add(i, 'Receita', CRONO_OP[i].rot + ' recebimento do cliente — parcela ' + (i + 1), v));
-    if (difPreco > 0) add(2, 'Receita', 'Ajuste de valor — junto à 3ª parcela', difPreco);
-    add(0, 'Despesa', '1º pagamento — Sinal da fábrica (' + (N(f, 'fabSinal') || 30) + '% do FOB)', o.o1, 'fob');
-    add(1, 'Despesa', '2º pagamento — Saldo da fábrica · pré-embarque', o.o2, 'fob');
+    if (difPreco < 0) rec[ult] = Math.max(0, rec[ult] + difPreco);
+    rec.forEach((v, i) => add(i, 'Receita', (i + 1) + 'º recebimento do cliente — parcela ' + (i + 1) + (propria ? ' · ' + ps[i].nome : ''), v + ps[i].reajuste));
+    if (difPreco > 0) add(ult, 'Receita', 'Ajuste de valor — junto à ' + (ult + 1) + 'ª parcela', difPreco);
+    const naParcela = (vinc, k) => { const i = ps.findIndex(p => p.vinculo === vinc); return i >= 0 ? i : Math.min(k, ult); };
+    add(naParcela('sinal', 0), 'Despesa', '1º pagamento — Sinal da fábrica (' + (N(f, 'fabSinal') || 30) + '% do FOB)', o.o1, 'fob');
+    add(naParcela('saldo', 1), 'Despesa', '2º pagamento — Saldo da fábrica · pré-embarque', o.o2, 'fob');
     const p = R.custoPor, parc = R.tri ? R.tri.apuracao.bloco6.parcelas : null, de = re => parc.filter(([n]) => re.test(n)).reduce((a, [, x]) => a + x, 0);
     const v = { frete: p.frete, seguro: p.seguro, impostos: parc ? de(/^Impostos de importa/) : R.impostos || 0, porto: p.capatazia + p.siscomex + p.afrmm + p.honorarios + p.demais, nacional: p.terrestre, impVenda: parc ? de(/^Resultante|^ICMS l[ií]quido/) : R.resultante || 0 };
     if (v.impVenda < 0) { v.impostos += v.impVenda; v.impVenda = 0; }
     const linhas = Object.keys(ROTULO_CHEGADA).map(k => [k, +Math.max(v[k] || 0, 0).toFixed(2)]).filter(x => x[1] > 0);
-    if (linhas.length) { const m = linhas.reduce((a, b) => (b[1] > a[1] ? b : a)); m[1] = +(m[1] + (+o.o3.toFixed(2) - linhas.reduce((a, x) => a + x[1], 0))).toFixed(2); }
-    linhas.forEach(([k, val]) => add(2, 'Despesa', '3º pagamento — ' + (k === 'impVenda' ? 'Imposto de venda (resultante)' : ROTULO_CHEGADA[k]), val, k));
-    /* Não contribuinte: o DIFAL entra e sai pelo mesmo valor e na mesma data. O resultado da filha não muda. */
-    if (R.difalCliente > 0.004) { add(2, 'Receita', 'Reembolso do DIFAL — junto à 3ª parcela', R.difalCliente); add(2, 'Despesa', '3º pagamento — DIFAL (guia da JeT)', R.difalCliente, 'impVenda'); }
+    /* Triangular: o DIFAL está no custo (e no preço) e é pago pela JeT em GNRE na chegada: linha de despesa própria. */
+    const difal = R.tri ? +(R.tri.apuracao.bloco5.difalNoCusto || 0) : 0;
+    if (linhas.length) { const m = linhas.reduce((a, b) => (b[1] > a[1] ? b : a)); m[1] = +(m[1] + (+(o.o3 - difal).toFixed(2) - linhas.reduce((a, x) => a + x[1], 0))).toFixed(2); }
+    const comEntrega = ps.some(p => p.vinculo === 'entrega');
+    linhas.forEach(([k, val]) => add(k === 'nacional' && comEntrega ? naParcela('entrega', 2) : naParcela('chegada', 2), 'Despesa', '3º pagamento — ' + (k === 'impVenda' ? 'Imposto de venda (resultante)' : ROTULO_CHEGADA[k]), val, k));
+    if (difal > 0.004) add(naParcela('chegada', 2), 'Despesa', '3º pagamento — DIFAL (guia da JeT)', difal, 'impVenda');
+    const venc = vencimentosDasParcelas(ps, W.hojeISO());
+    out.forEach(x => { if (venc[x.k]) x.dias = Math.max(0, W.diasEntre(W.hojeISO(), venc[x.k]) || 0); });
     return out;
   }
   /** Deixa os previstos iguais às linhas: realizado não é tocado, e nada duplica. */
@@ -1159,7 +1174,9 @@ function triCalcular(e){
   const fixarMarkups = q => { clientesDe(q).forEach(c => { if (c.mkSF == null || c.mkSF === '') c.mkSF = '0'; if (c.mkJT == null || c.mkJT === '') c.mkJT = '0'; }); return q; };
   /** O que o cliente paga hoje, sem o DIFAL dele: é o preço que fica fixo. */
   const precoFixo = (R) => precoDesem(R);
-  const custoSemDifal = R => (R.tri ? R.tri.custoGrupo - (R.tri.apuracao.bloco5.difalNoCusto || 0) : R.custoReal || 0);
+  /* Custo que o preço cobre: no triangular, o custo do grupo com o DIFAL (recolhido pela JeT); no direto, o custo real.
+     Mesma régua do preço (precoDesem): triangular, preço cheio; direto, preço − DIFAL. */
+  const custoCheio = R => (R.tri ? R.tri.custoGrupo : R.custoReal || 0);
   /** Só este cliente na cotação, com todos os custos do contêiner. */
   function cotacaoSozinho(q, id) {
     const c = fixarMarkups(clonar(q));
@@ -1169,7 +1186,7 @@ function triCalcular(e){
   /** Custo e margem se o cliente ficasse sozinho no contêiner, com o preço de hoje. */
   function sozinhoNoConteiner(q, id, precoAtual) {
     if (!ehMultiCliente(q)) return null;
-    const R = calcular(cotacaoSozinho(q, id)), custo = custoSemDifal(R);
+    const R = calcular(cotacaoSozinho(q, id)), custo = custoCheio(R);
     return { custo, margem: precoAtual != null ? precoAtual - custo : null };
   }
   /** Impacto de um cliente sair, sem gravar nada: cada um que fica, com o preço fixo. */
@@ -1178,8 +1195,8 @@ function triCalcular(e){
     const depois = fixarMarkups(clonar(q)); removerCliente(depois, id);
     const multi = ehMultiCliente(depois), rd = multi ? calcularPorCliente(depois) : null;
     const fica = rm.clientes.filter(c => c.id !== id).map(c => {
-      const preco = precoFixo(c.R), Rn = multi ? rd.clientes.find(x => x.id === c.id).R : calcular(depois), custo = custoSemDifal(Rn);
-      return { id: c.id, nome: c.nome, preco, custoAntes: custoSemDifal(c.R), margemAntes: preco - custoSemDifal(c.R), custo, margem: preco - custo };
+      const preco = precoFixo(c.R), Rn = multi ? rd.clientes.find(x => x.id === c.id).R : calcular(depois), custo = custoCheio(Rn);
+      return { id: c.id, nome: c.nome, preco, custoAntes: custoCheio(c.R), margemAntes: preco - custoCheio(c.R), custo, margem: preco - custo };
     });
     return { dedicado: !multi, fica };
   }
@@ -1207,15 +1224,15 @@ function triCalcular(e){
     fixarMarkups(q); removerCliente(q, id);
     /* Preço fixo: a margem de quem fica absorve a diferença de custo. */
     if (ehMultiCliente(q)) {
-      calcularPorCliente(q).clientes.forEach(c => { const m = fixo[c.id] - (custoSemDifal(c.R) + (c.R.tri ? 0 : 0)), base = c.R.tri ? c.R.tri.custoGrupo : c.R.custoReal; c.cliente.margemModo = 'pct'; c.cliente.margemPct = String(base > 0 ? m / base * 100 : 0); c.cliente.margemRS = m.toFixed(2); c.cliente.precoAprovado = c.cliente.status === 'ok' ? null : c.cliente.precoAprovado; });
+      calcularPorCliente(q).clientes.forEach(c => { const m = fixo[c.id] - custoCheio(c.R), base = c.R.tri ? c.R.tri.custoGrupo : c.R.custoReal; c.cliente.margemModo = 'pct'; c.cliente.margemPct = String(base > 0 ? m / base * 100 : 0); c.cliente.margemRS = m.toFixed(2); c.cliente.precoAprovado = c.cliente.status === 'ok' ? null : c.cliente.precoAprovado; });
       calcularPorCliente(q).clientes.forEach(c => { if (c.cliente.status === 'ok') { c.cliente.precoAprovado = +c.R.preco.toFixed(2); if (filhaDe(c.id)) sincronizarLancamentos(db, filhaDe(c.id).id, 'cotacao:' + q.id + ':' + c.id, linhasDoCliente(c), por, o.hoje); } });
       return { ok: true, dedicado: false, filhaSaiu };
     }
     const fica = clientesAntes(antes, id)[0];
     q.status = fica.cliente.status === 'ok' ? 'ok' : fica.cliente.status === 'wait' ? 'wait' : 'draft'; q.aprovadoPor = fica.cliente.status === 'ok' ? fica.cliente.aprovadoPor || null : null;
-    const R0 = calcular(q), base = R0.tri ? R0.tri.custoGrupo : R0.custoReal, m = fixo[fica.id] - custoSemDifal(R0);
-    const dif = R0.tri ? R0.tri.apuracao.bloco5.difalNoCusto || 0 : 0;
-    Object.assign(q.fields, { margemPct: String(base > 0 ? m / base * 100 : 0), margemBRL: m.toFixed(2), desR1: String(N(q.fields, 'desR1')), desR2: String(N(q.fields, 'desR2')), desR3: String(+(N(q.fields, 'desR3') + dif).toFixed(2)) });
+    /* As parcelas do triangular já têm o DIFAL dentro: passam como estão. */
+    const R0 = calcular(q), base = R0.tri ? R0.tri.custoGrupo : R0.custoReal, m = fixo[fica.id] - custoCheio(R0);
+    Object.assign(q.fields, { margemPct: String(base > 0 ? m / base * 100 : 0), margemBRL: m.toFixed(2), desR1: String(N(q.fields, 'desR1')), desR2: String(N(q.fields, 'desR2')), desR3: String(N(q.fields, 'desR3')) });
     const R = calcular(q); q.preco = R.preco;
     const filha = filhaDe(fica.id); let maeResolvida = '';
     if (filha) {
@@ -1390,6 +1407,6 @@ function triCalcular(e){
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
-    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
+    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, definirParcelasCliente, cotacaoSozinho, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
     separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

@@ -120,7 +120,44 @@ console.log('\nTriangular, sem mark-up fixo (NF de saída = NF de entrada ÷ 0,9
   ok(perto(rs.total.custo, ints.tri.custoGrupo), 'sem IPI nos itens, a soma é igual à da triangular inteira');
   ok(perto(b.R.preco, b.custo * 1.25), 'preço da triangular = custo dele + margem');
   const qs = C.desemOuts(b.q, b.R);
-  ok(perto(qs.base, b.custo - b.R.difalCliente), 'o desembolso da triangular usa o custo já com o rateio, sem o DIFAL, que é reembolsado à parte');
+  ok(perto(qs.base, b.custo), 'o desembolso da triangular usa o custo com o rateio e o DIFAL dentro, como na cotação de um cliente');
+  ok(perto(C.precoDesem(b.R), b.R.preco), 'triangular na compartilhada: valor a receber = preço cheio (o DIFAL está dentro e a JeT recolhe)');
+  const lb = C.linhasDoCliente(b), rec = lb.filter(x => x.tipo === 'Receita');
+  ok(!lb.some(x => /Reembolso do DIFAL/.test(x.desc)) && lb.some(x => x.tipo === 'Despesa' && /DIFAL \(guia da JeT\)/.test(x.desc)), 'sem linha de reembolso; o DIFAL fica como despesa (guia da JeT)');
+  ok(perto(rec.reduce((s, x) => s + x.valor, 0), b.R.preco), 'as receitas do cliente somam o preço cheio');
+  const desp = lb.filter(x => x.tipo === 'Despesa').reduce((s, x) => s + x.valor, 0);
+  ok(Math.abs(desp - b.custo) < 0.05, `as despesas do cliente somam o custo dele, com o DIFAL (${desp.toFixed(2)} × ${b.custo.toFixed(2)})`);
+
+  /* Caso OP228.2: parcelas somando o preço cheio passam; preço − DIFAL agora é que está errado. */
+  const cB = q.clientes.find(c => c.id === b.id), preco = +b.R.preco.toFixed(2), dif = +(b.R.tri.apuracao.bloco5.difalNoCusto || 0).toFixed(2);
+  const p1 = +(preco * 0.19).toFixed(2), p2 = +(preco * 0.32).toFixed(2);
+  Object.assign(cB, { desR1: String(p1), desR2: String(p2), desR3: String(+(preco - p1 - p2).toFixed(2)) });
+  const bOk = C.calcularPorCliente(q).clientes.find(c => c.id === b.id);
+  ok(dif > 0 && !C.desemErros(bOk.q, bOk.R).some(e => /difere do valor a receber/.test(e)), `triangular: parcelas = preço cheio (${reais(preco)}, DIFAL ${reais(dif)} dentro) passam sem erro`);
+  Object.assign(cB, { desR3: String(+(preco - p1 - p2 - dif).toFixed(2)) });
+  const bVelho = C.calcularPorCliente(q).clientes.find(c => c.id === b.id);
+  const aReceber = (C.desemErros(bVelho.q, bVelho.R).map(e => (/difere do valor a receber \(R\$\s?([\d.,]+)/.exec(e) || [])[1]).find(Boolean)) || '';
+  ok(aReceber === preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 }), `parcelas = preço − DIFAL: erro, e o valor a receber mostrado é o preço cheio (R$ ${aReceber})`);
+
+  /* 4ª etapa no cronograma compartilhado: Entrega na obra. */
+  const quatro = [p1, p2, +((preco - p1 - p2) / 2).toFixed(2)]; quatro.push(+(preco - quatro.reduce((s, x) => s + x, 0)).toFixed(2));
+  C.definirParcelasCliente(cB, C.parcelasDe(bOk.q).concat([{ nome: 'Entrega na obra', vinculo: 'nenhuma', diasAposAnterior: 20 }]).map((p, i) => Object.assign({}, p, { valor: quatro[i] })));
+  const b4 = C.calcularPorCliente(q).clientes.find(c => c.id === b.id), l4 = C.linhasDoCliente(b4).filter(x => x.tipo === 'Receita');
+  ok(C.parcelasDe(b4.q).length === 4 && l4.length === 4 && /4º recebimento do cliente — parcela 4 · Entrega na obra/.test(l4[3].desc) && !C.desemErros(b4.q, b4.R).length, 'cliente da compartilhada com 4 parcelas: 4 recebíveis, o 4º "Entrega na obra", sem erro');
+  ok(cB.desR1 === p1.toFixed(2) && +cB.desR3 === +(quatro[2] + quatro[3]).toFixed(2), 'desR1..desR3 do cliente continuam espelhados (3ª + 4ª na 3ª) para o sistema antigo');
+  const outro = q.clientes.find(c => c.id === a.id), aR = C.calcularPorCliente(q).clientes.find(c => c.id === a.id);
+  ok(C.parcelasDe(aR.q).length === 3 && !outro.parcelas, 'o outro cliente continua com as 3 etapas de sempre');
+
+  /* Se ficasse sozinho: DIFAL recalculado com o cliente sozinho. */
+  const so = C.sozinhoNoConteiner(q, b.id, C.precoDesem(b4.R)), Rsoz = C.calcular(C.cotacaoSozinho ? C.cotacaoSozinho(q, b.id) : q);
+  ok(so && perto(so.custo, Rsoz.tri.custoGrupo) && perto(so.margem, b4.R.preco - Rsoz.tri.custoGrupo), 'sozinho: custo com o DIFAL recalculado como se estivesse só, margem = preço − esse custo');
+}
+
+console.log('\nCliente direto (contribuinte) continua preço − DIFAL:');
+{
+  const q = cotacao({ clientes: [cliente('A', 'Direto', 'RN'), cliente('B', 'Outro', 'CE')] });
+  const d = C.calcularPorCliente(q).clientes[0];
+  ok(!d.R.tri && d.R.st > 0 && perto(C.precoDesem(d.R), d.R.preco - d.R.st), 'direto: valor a receber = preço − DIFAL (o cliente recolhe o dele)');
 }
 
 console.log('\nCliente direto e triangular no mesmo contêiner:');

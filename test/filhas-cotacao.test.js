@@ -26,15 +26,15 @@ const aprova = (d, q, id) => { const a = W.aprovarCliente(q, id, 'Samir', T); if
 const de = (d, op, tipo) => d.fin.filter(l => l.op === op && (!tipo || l.tipo === tipo));
 const soma = xs => xs.reduce((a, l) => a + l.valor, 0);
 
-console.log('\nItem 1: validação com o DIFAL do próprio cliente:');
+console.log('\nItem 1: cliente triangular na compartilhada paga o preço cheio (DIFAL dentro, recolhido pela JeT):');
 {
-  const q = cotacao(), rm = W.calcularPorCliente(q), az = rm.clientes[1];
-  ok(az.R.tri && az.R.difalCliente > 0 && az.R.difalCliente !== az.R.st, 'o DIFAL do cliente triangular não é o R.st');
-  ok(perto(W.precoDesem(az.R), az.R.preco - az.R.difalCliente), 'a receber = preço − DIFAL do próprio cliente');
-  ok(W.desemErros(az.q, az.R).length === 0, 'parcelas sugeridas passam na validação');
+  const q = cotacao(), rm = W.calcularPorCliente(q), az = rm.clientes[1], dif = az.R.tri.apuracao.bloco5.difalNoCusto || 0;
+  ok(az.R.tri && dif > 0 && perto(W.precoDesem(az.R), az.R.preco), 'a receber = preço cheio, igual à cotação de um cliente só');
+  const sug = W.desemSugerir(az.q, az.R);
+  ok(perto(+sug.desR1 + +sug.desR2 + +sug.desR3, az.R.preco), 'a sugestão distribui o preço cheio');
   const qq = cotacao(); qq.clientes[1].desR1 = String(+qq.clientes[1].desR1 + 100);
   const c2 = W.calcularPorCliente(qq).clientes[1], e = W.desemErros(c2.q, c2.R).join(' ');
-  ok(/difere/.test(e) && e.includes(c2.R.difalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })), 'a mensagem mostra o DIFAL do cliente');
+  ok(/difere/.test(e) && e.includes(c2.R.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) && /preço cheio/.test(e), 'a mensagem mostra o preço cheio e diz que o DIFAL está dentro');
 }
 
 console.log('\nItem 2: mark-up e ICMS de entrada por cliente:');
@@ -71,7 +71,9 @@ console.log('\nItens 3 e 4: aprovação por cliente cria a filha dele:');
   ok(perto(soma(de(d, 'OP300.1', 'Receita')), W.precoDesem(mq.R), 0.05), 'contribuinte: receitas = o que ele paga');
   ok(perto(soma(de(d, 'OP300.1', 'Despesa')), mq.custo, 0.05), 'contribuinte: custos = o custo dele');
   const dif = de(d, 'OP300.2').filter(l => /DIFAL/.test(l.desc));
-  ok(dif.length === 2 && dif[0].valor === dif[1].valor && dif[0].vencimento === dif[1].vencimento && perto(dif[0].valor, az.R.difalCliente) && dif.some(l => l.tipo === 'Receita') && dif.some(l => l.tipo === 'Despesa'), 'não contribuinte: DIFAL como receita e custo, mesmo valor e data');
+  const difAz = az.R.tri.apuracao.bloco5.difalNoCusto || 0;
+  ok(dif.length === 1 && dif[0].tipo === 'Despesa' && /guia da JeT/.test(dif[0].desc) && perto(dif[0].valor, difAz), 'não contribuinte: o DIFAL é só despesa (guia da JeT); está dentro das parcelas, sem receita de reembolso');
+  ok(perto(soma(de(d, 'OP300.2', 'Receita')), az.R.preco, 0.05), 'não contribuinte: receitas = preço cheio');
   const res = W.resultadoPorOp(d, 'todas').find(x => x.op === 'OP300.2');
   ok(perto(res.resultado, az.R.margem, 0.05), 'o resultado da filha não conta o DIFAL: é a margem do cliente');
   ok(de(d, 'OP300.1').every(l => l.origem === 'cotacao:q300:c1') && de(d, 'OP300.2').every(l => l.origem === 'cotacao:q300:c2'), 'origem com a cotação e o cliente');
@@ -174,10 +176,10 @@ console.log('\nItem 10: proposta e contrato por cliente:');
   aprova(d, q, 'c1'); aprova(d, q, 'c2');
   const cc = W.calcularPorCliente(q).clientes[1], res = W.resumoProposta(cc.q, cc.R);
   ok(res.itens.length === 1 && res.itens[0].d === 'Empilhadeira menor' && res.cliente === 'Empresa Azul', 'a proposta tem só os itens e o nome do cliente');
-  ok(perto(res.investimento, W.precoDesem(cc.R)) && perto(res.parcelas.reduce((a, p) => a + p.valor, 0), res.investimento, 0.05), 'o investimento é a soma das parcelas dele, sem o DIFAL');
+  ok(perto(res.investimento, cc.R.preco - res.difal) && perto(res.parcelas.reduce((a, p) => a + p.valor, 0), res.total, 0.05), 'proposta: investimento sem o DIFAL; as parcelas somam o total (com o DIFAL), igual à cotação de um cliente');
   ok(W.calcularPorCliente(q).clientes[0].q.items.length === 1, 'o outro cliente não aparece');
   const dc = W.dadosDoContrato(d, 'OP300.2');
-  ok(dc.estrutura === 'jt' && dc.itens.length === 1 && perto(dc.parcelas.reduce((a, p) => a + p.valor, 0), res.investimento, 0.05) && perto(dc.difalNaTerceira, cc.R.difalCliente), 'contrato da filha: J&T, itens dela, parcelas sem o DIFAL e o DIFAL em linha própria');
+  ok(dc.estrutura === 'jt' && dc.itens.length === 1 && perto(dc.parcelas.reduce((a, p) => a + p.valor, 0), res.investimento, 0.05) && perto(dc.difalNaTerceira, res.difal), 'contrato da filha: J&T, itens dela, parcelas sem o DIFAL e o DIFAL em linha própria (igual à cotação de um cliente)');
   const qs = cotacao([cliente('c1', 'U', 'direta', { aliqST: '0' }), cliente('c2', 'V', 'direta', { aliqST: '0' })]);
   ok(W.dadosDoContrato(banco(qs), 'x') === null, 'operação inexistente não gera dados');
 }

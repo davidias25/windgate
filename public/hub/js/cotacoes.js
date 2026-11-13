@@ -283,12 +283,23 @@
       ${manual ? `<div class="box-b fields"><p class="lbl w4">Percentual manual por cliente (soma 100%)</p>${ed.clientes.map((c, k) => `<div class="f"><label class="lbl" for="cpc_${esc(c.id)}">${esc(c.nome || 'Cliente ' + (k + 1))}</label><input class="inp" id="cpc_${esc(c.id)}" data-pc="${esc(c.id)}" value="${esc(((rg.percentuais || {})[c.id]) == null ? '' : rg.percentuais[c.id])}" inputmode="decimal"></div>`).join('')}</div>` : ''}
       <div class="box-b" id="cravisos"></div></div>`;
   }
+  /* Parcelas do cliente: as 3 etapas de sempre (desR1..desR3) ou, depois de "+ Parcela", a lista dele (até 8). */
+  function linhasParcelasCliente(c, bloq) {
+    const id = esc(c.id);
+    if (!(Array.isArray(c.parcelas) && c.parcelas.length))
+      return [[1, '1 · Assinatura'], [2, '2 · Produto pronto'], [3, '3 · Chegada ao porto']].map(([n, t]) => `<tr><td><b>${t}</b></td><td class="num" id="cmo_${id}_${n}">—</td><td class="num">${inpCli(c, 'desR' + n, 130, { num: true })}</td><td class="num" id="cma_${id}_${n}">—</td><td id="cms_${id}_${n}"></td><td></td></tr>`).join('');
+    return c.parcelas.map((p, i) => `<tr><td><span class="mono">${i + 1}</span> <input class="inp" data-cpl="${id}" data-cpi="${i}" data-cpk="nome" value="${esc(p.nome || '')}" list="cpnomes" style="width:150px"></td>
+      <td class="num" id="cmo_${id}_${i + 1}">—</td><td class="num"><input class="inp" data-cpl="${id}" data-cpi="${i}" data-cpk="valor" value="${esc(p.valor || '')}" inputmode="decimal" style="width:130px;text-align:right"></td>
+      <td class="num" id="cma_${id}_${i + 1}">—</td><td id="cms_${id}_${i + 1}"></td><td>${bloq || i < 3 ? '' : `<button class="btn ghost sm" type="button" data-cprm="${id}:${i}" title="Remover parcela">✕</button>`}</td></tr>`).join('')
+      + `<datalist id="cpnomes">${W.NOMES_ETAPA.map(n => `<option value="${esc(n)}">`).join('')}</datalist>`;
+  }
   function blocoDesembolso(bloq) {
     return `<div class="box"><div class="box-h"><h2>Cronograma de desembolso por cliente</h2></div><div class="box-b">
       <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}<p class="note w3">A fábrica é paga uma vez; a saída de cada cliente é proporcional ao FOB dele. O recebimento de cada cliente em cada etapa cobre a saída dele.</p></div>
       ${ed.clientes.map((c, k) => `<div style="margin-top:14px"><div class="row"><h3 class="h3">${esc(c.nome || 'Cliente ' + (k + 1))}</h3>${bloq ? '' : `<button class="btn blue sm" data-sugc="${esc(c.id)}">Sugerir distribuição</button>`}</div>
-        <div class="tw"><table><thead><tr><th>Etapa</th><th class="num">Saída dele</th><th class="num">Recebimento (R$)</th><th>Situação</th></tr></thead><tbody>
-        ${[[1, '1 · Assinatura'], [2, '2 · Produto pronto'], [3, '3 · Chegada ao porto']].map(([n, t]) => `<tr><td><b>${t}</b></td><td class="num" id="cmo_${esc(c.id)}_${n}">—</td><td class="num">${inpCli(c, 'desR' + n, 130, { num: true })}</td><td id="cms_${esc(c.id)}_${n}"></td></tr>`).join('')}</tbody></table></div>
+        <div class="tw"><table><thead><tr><th>Etapa</th><th class="num">Saída dele</th><th class="num">Recebimento (R$)</th><th class="num">Saldo acumulado</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${linhasParcelasCliente(c, bloq)}</tbody></table></div>
+        ${bloq || (Array.isArray(c.parcelas) && c.parcelas.length >= W.MAX_PARCELAS) ? '' : `<button class="btn sm" type="button" data-cpadd="${esc(c.id)}" style="margin-top:6px">+ Parcela</button>`}
         <div id="cme_${esc(c.id)}"></div></div>`).join('')}</div></div>`;
   }
   /* ================= CÂMBIO DA PROPOSTA: painel interno, nunca vai para o cliente ================= */
@@ -351,9 +362,10 @@
       // A margem que não está sendo digitada acompanha a outra, como na cotação de um cliente.
       if (c.margemModo === 'brl') c.margemPct = String(cc.R.margemPctCampo); else c.margemRS = cc.R.margemBRLCampo.toFixed(2);
       if (cm && document.activeElement !== cm) cm.value = c.margemModo === 'brl' ? c.margemPct : c.margemRS;
-      const o = W.desemOuts(cc.q, cc.R), os = [o.o1, o.o2, o.o3], rs = [1, 2, 3].map(n => parseFloat(c['desR' + n]) || 0);
-      [1, 2, 3].forEach((n, i) => { const s = el.querySelector(`#cmo_${id}_${n}`); if (s) s.textContent = fmt(os[i]);
-        const t = el.querySelector(`#cms_${id}_${n}`); if (t) t.innerHTML = !rs[i] ? pill('—') : rs[i] >= os[i] - 0.01 ? pill('cobre (+' + fmt(rs[i] - os[i]) + ')', 'ok') : pill('NÃO cobre', 'crit'); });
+      const cob = W.coberturaDesembolso(cc.q, cc.R), rs = cob.linhas.map(l => l.parcela.valor);
+      cob.linhas.forEach(l => { const n = l.n, s = el.querySelector(`#cmo_${id}_${n}`); if (s) s.textContent = fmt(l.saida);
+        const a = el.querySelector(`#cma_${id}_${n}`); if (a) a.innerHTML = `<span style="${l.saldoAcum < -0.005 ? 'color:var(--crit);font-weight:700' : ''}">${fmt(l.saldoAcum)}</span>`;
+        const t = el.querySelector(`#cms_${id}_${n}`); if (t) t.innerHTML = !l.recebe && !l.saida ? pill('—') : !l.recebe ? pill('—') : l.cobre ? pill('cobre (+' + fmt(l.recebe - l.saida) + ')', 'ok') : pill('NÃO cobre', 'crit'); });
       const errs = W.desemErros(cc.q, cc.R), box = el.querySelector('#cme_' + id);
       const av = W.desemAvisos(cc.q, cc.R);
       if (box) box.innerHTML = errs.length && rs.some(Boolean) ? `<div class="banner crit" style="margin-top:8px">⛔ ${errs.map(esc).join('<br>⛔ ')}</div>` : av.length ? `<div class="banner" style="margin-top:8px">⚠ <b>Não bloqueia:</b> ${av.map(esc).join('<br>⚠ ')}</div>` : !errs.length ? `<div class="banner ok" style="margin-top:8px">Recebimento cobre a saída em todas as etapas. A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</div>` : `<p class="note" style="margin-top:6px">A receber: <b>${fmt(W.precoDesem(cc.R))}</b>.</p>`;
@@ -370,15 +382,33 @@
     el.querySelectorAll('[data-sugc]').forEach(b => b.onclick = () => {
       const c = clienteEd(b.dataset.sugc), cc = W.calcularPorCliente(ed, { usuario: eu() }).clientes.find(x => x.id === c.id);
       if (!cc || !(cc.R.preco > 0)) return H.toast('Complete a cotação primeiro.');
+      if (Array.isArray(c.parcelas) && c.parcelas.length) { W.definirParcelasCliente(c, W.sugerirParcelas(cc.q, cc.R)); return editor(el); }
       Object.assign(c, W.desemSugerir(cc.q, cc.R));
       [1, 2, 3].forEach(n => { const i = el.querySelector(`#ccl_${c.id}_desR${n}`); if (i) i.value = c['desR' + n]; });
       atualizarMulti(el);
+    });
+    /* "+ Parcela": o cliente passa a ter a lista dele, começando pelas 3 etapas que já tinha. */
+    el.querySelectorAll('[data-cpadd]').forEach(b => b.onclick = () => {
+      const c = clienteEd(b.dataset.cpadd); if (!c) return;
+      const ps = Array.isArray(c.parcelas) && c.parcelas.length ? c.parcelas.slice() : W.parcelasDe(W.cotacaoDoCliente(ed, c.id));
+      if (ps.length >= W.MAX_PARCELAS) return;
+      ps.push({ id: 'p' + Date.now(), nome: ps.length === 3 ? 'Entrega na obra' : 'Outra', vinculo: 'nenhuma', valor: 0, diasAposAnterior: 20 });
+      W.definirParcelasCliente(c, ps); editor(el);
+    });
+    el.querySelectorAll('[data-cprm]').forEach(b => b.onclick = () => {
+      const [cid, i] = b.dataset.cprm.split(':'), c = clienteEd(cid); if (!c || !Array.isArray(c.parcelas)) return;
+      const ps = c.parcelas.slice(); ps.splice(+i, 1); W.definirParcelasCliente(c, ps); editor(el);
     });
     el.querySelectorAll('[data-rg]').forEach(s => s.onchange = () => { ed.regraRateio = Object.assign({}, ed.regraRateio, { [s.dataset.rg]: s.value }); editor(el); });
   }
   /* Digitação nos campos de cliente. Devolve true se o campo era deste bloco. */
   function digitouMulti(t, el) {
     if (t.dataset.pc) { const r = ed.regraRateio = Object.assign({}, ed.regraRateio); r.percentuais = Object.assign({}, r.percentuais, { [t.dataset.pc]: parseFloat(t.value) || 0 }); atualizar(el); return true; }
+    if (t.dataset.cpl != null) {
+      const c = clienteEd(t.dataset.cpl); if (!c || !Array.isArray(c.parcelas)) return true;
+      const ps = c.parcelas.map(p => Object.assign({}, p)), p = ps[+t.dataset.cpi]; if (!p) return true;
+      p[t.dataset.cpk] = t.value; W.definirParcelasCliente(c, ps); atualizar(el); return true;
+    }
     if (!t.dataset.cli) return false;
     const c = clienteEd(t.dataset.cli), k = t.dataset.cc; if (!c) return true;
     c[k] = t.value;

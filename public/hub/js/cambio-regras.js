@@ -199,7 +199,7 @@
     return Object.assign({}, q, { fields: Object.assign({}, f, { txDesp: String((parseFloat(f.txDesp) || 0) + delta), txFrete: String((parseFloat(f.txFrete) || 0) + delta) }) });
   }
   /* Uma saída por parcela, na ordem do cronograma (3 nas cotações antigas). */
-  const saidas = q => { const R = W.calcular(q); if (q.clienteId) W.separarDifal(R); return W.saidasPorParcela(q, R).saidas; };
+  const saidas = q => { const R = W.calcular(q); return W.saidasPorParcela(q, R).saidas; };
   /** Quanto muda o custo de cada parcela quando o dólar sobe R$ 0,10. A 1ª é fixa para o cliente: valor 0 na tabela. */
   function valoresPor010(q) {
     const a = saidas(q), b = saidas(comCambio(q, PASSO)), custo = b.map((v, i) => r2(v - a[i]));
