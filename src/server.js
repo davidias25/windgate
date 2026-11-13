@@ -58,6 +58,14 @@ if (!fs.existsSync(path.dirname(DB_FILE_PATH))) {
 const { buscarNCM, pesquisarNCMs } = require('./services/ncm.service');
 const { mesclarDB } = require('./services/db-merge.service');
 const { normalizarStatus } = require('./services/op-status.service');
+const tarefasAuto = require('../public/hub/js/tarefas-auto.js');
+/* Tarefas automáticas por etapa: compara o banco antes e depois de cada gravação. Nunca derruba a gravação. */
+function dispararTarefas(antes, depois, origem) {
+  try {
+    const r = tarefasAuto.aoGravar(antes, depois, { agora: new Date().toISOString() });
+    if (r.criadas.length || r.g4.length || r.concluidas) console.log(`🗓  Tarefas automáticas (${origem}): ${r.criadas.length} criada(s), ${r.g4.length} ajuste(s) de ETA, ${r.concluidas || 0} concluída(s) pelo marco.`);
+  } catch (e) { console.warn('⚠️ Tarefas automáticas:', e.message); }
+}
 const { consultarTratamento } = require('./integrations/siscomex.service');
 const aliquotas = require('./services/aliquotas.service');
 const dbStore = require('./services/db-store.service');
@@ -132,7 +140,9 @@ app.post('/api/db', auth.exigirTokenSeAtiva, async (req, res) => {
 
     // Mescla em vez de substituir: sem isso, quem salva por último apaga os
     // registros que os outros usuários criaram desde a última sincronização.
+    const antesDaGravacao = memoryDB;
     memoryDB = mesclarDB(memoryDB, newDB);
+    if (antesDaGravacao) dispararTarefas(antesDaGravacao, memoryDB, 'gravação');
     // A fotografia de rotina acontece dentro do `salvar`: assim ela cobre todo
     // caminho de gravação, e não só esta rota.
     const persistencia = await dbStore.salvar(memoryDB, DB_FILE_PATH);
@@ -688,10 +698,44 @@ app.post('/api/ia/pedido', auth.exigirTokenSeAtiva, async (req, res) => {
 async function gravarParcial(parcial) {
   await bancoPronto;
   if (!memoryDB) throw new Error('Banco central indisponível.');
+  const antes = memoryDB;
   memoryDB = mesclarDB(memoryDB, parcial);
+  if (Array.isArray(parcial.ops)) dispararTarefas(antes, memoryDB, 'integração');
   return dbStore.salvar(memoryDB, DB_FILE_PATH);
 }
 const podeOperar = req => { const k = req.usuario && req.usuario.k; return k === '(sem-auth)' || ['diretoria', 'operacoes'].includes(acesso.perfil(memoryDB, k)); };
+
+/* ---------- Tarefas automáticas: rodada diária, prévia das operações em andamento ---------- */
+const gestorTarefas = req => { const k = req.usuario && req.usuario.k; return k === '(sem-auth)' || tarefasAuto.podeGerir(k); };
+async function rodarTarefas(forcar) {
+  await bancoPronto;
+  if (!memoryDB) throw new Error('Banco central indisponível.');
+  const r = tarefasAuto.rodadaDiaria(memoryDB, new Date().toISOString(), forcar);
+  if (r.iniciou || r.rodou) {
+    await dbStore.salvar(memoryDB, DB_FILE_PATH);
+    console.log(r.iniciou ? `🗓  Tarefas automáticas no ar desde ${r.inicio}.` : `🗓  Rodada das tarefas: ${r.g4.length} ETA, ${r.concluidas} concluída(s), ${r.escalonadas.length} escalonamento(s).`);
+  }
+  return r;
+}
+app.post('/api/tarefas-auto/rodar', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!gestorTarefas(req)) return res.status(403).json({ success: false, message: 'Só Samir e Davi.' });
+  try { res.json(Object.assign({ success: true }, await rodarTarefas(true))); } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+app.get('/api/tarefas-auto/previa', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!gestorTarefas(req)) return res.status(403).json({ success: false, message: 'Só Samir e Davi.' });
+  await bancoPronto;
+  res.json({ success: true, itens: memoryDB ? tarefasAuto.previaBackfill(memoryDB, new Date().toISOString()) : [] });
+});
+app.post('/api/tarefas-auto/aplicar', auth.exigirTokenSeAtiva, async (req, res) => {
+  if (!gestorTarefas(req)) return res.status(403).json({ success: false, message: 'Só Samir e Davi aprovam a prévia.' });
+  try {
+    await bancoPronto; if (!memoryDB) throw new Error('Banco central indisponível.');
+    const quem = (req.usuario && req.usuario.k !== '(sem-auth)') ? req.usuario.k : String((req.body || {}).por || '');
+    const criadas = tarefasAuto.aplicarBackfill(memoryDB, (req.body || {}).chaves || [], quem, new Date().toISOString());
+    await dbStore.salvar(memoryDB, DB_FILE_PATH);
+    res.json({ success: true, criadas });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
 
 /* ---------- Chat WindGate ---------- */
 const chat = require('./services/chat-store.service');
@@ -958,6 +1002,11 @@ if (require.main === module) {
   const conferirComAviso = () => conferirArquivos().catch(e => console.warn('⚠️ Conferência de arquivos:', e.message))
     .then(() => lixeiraVencida() ? limparLixeira() : null).catch(e => console.warn('⚠️ Lixeira de arquivos:', e.message));
   setTimeout(conferirComAviso, 5 * 60 * 1000);
+  // Tarefas automáticas: o Render dorme sem uso, então não dá para marcar "às 7h". Confere de hora em hora
+  // (e ao acordar) e roda uma vez por dia, depois da hora configurada, em São Paulo.
+  const tarefasComAviso = () => rodarTarefas(false).catch(e => console.warn('⚠️ Rodada das tarefas:', e.message));
+  setTimeout(tarefasComAviso, 60 * 1000);
+  setInterval(tarefasComAviso, 60 * 60 * 1000);
   setInterval(conferirComAviso, 24 * 60 * 60 * 1000);
   app.listen(PORT, () => {
     console.log(`===================================================`);

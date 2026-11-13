@@ -75,6 +75,12 @@
 
   /* ---------- Painéis ---------- */
   const vazio = t => `<p class="empty">${t}</p>`;
+  /* Tarefas automáticas em que a pessoa está em cópia (Davi): "acompanhando", sem pontuar no ranking. */
+  const acompanhando = c => {
+    const ts = W.tarefasNaTorre ? W.tarefasNaTorre(c.db, c.k, c.hoje).acompanhando : [];
+    if (!ts.length) return '';
+    return `<div class="box-b list" style="border-top:1px solid var(--line)"><p class="lbl">Acompanhando (você em cópia)</p>${ts.slice(0, 8).map(t => `<div class="row"><div><b>${esc(t.t)}</b><br><small class="note">${esc(t.resp)} · ${t.prazo ? (t.prazo < c.hoje ? '<span style="color:var(--crit)">venceu ' + W.dataBR(t.prazo) + '</span>' : 'até ' + W.dataBR(t.prazo)) : 'sem prazo'}</small></div>${t.auto && t.auto.op ? `<button class="btn sm ghost" data-op="${esc(t.auto.op)}">${esc(t.auto.op)}</button>` : ''}</div>`).join('')}</div>`;
+  };
   const linhaOp = o => `<b class="mono">${esc(o.id)}</b> <span class="note">${esc(o.cliente || '')}</span>`;
   const mais = (n, lim) => n > lim ? `<p class="note" style="padding:6px 14px">+ ${n - lim} item(ns)</p>` : '';
 
@@ -137,7 +143,7 @@
       return { acoes: `<a class="btn sm" href="#agenda" onclick="HUB.ir('agenda');return false">Agenda</a>`,
         corpo: `<div class="box-b list">${c.tarefas.length ? c.tarefas.slice(0, 8).map(t => { const atr = t.prazo && t.prazo < c.hoje;
           return `<div class="row"><div><b>${esc(t.t || '')}</b><br><small class="note">${t.prazo ? (atr ? '<span style="color:var(--crit)">venceu ' + W.dataBR(t.prazo) + '</span>' : 'até ' + W.dataBR(t.prazo)) : 'sem prazo'}${t.prio ? ' · ' + esc(t.prio) : ''}${t.por && t.por !== c.nome ? ' · de ' + esc(t.por) : ''}</small></div><button class="btn sm" data-tarefa="${esc(t._id)}">Concluir</button></div>`; }).join('') + mais(c.tarefas.length, 8)
-          : vazio('Nenhuma tarefa aberta para você.')}</div>` };
+          : vazio('Nenhuma tarefa aberta para você.')}</div>${acompanhando(c)}` };
     },
 
     coletar(c) {

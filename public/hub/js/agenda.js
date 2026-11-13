@@ -20,6 +20,43 @@
   const novasDaVisita = { tarefas: new Set(), subs: new Set() };
   let focoSub = null;
 
+  /* ---------- Tarefas automáticas: prazos editáveis, prévia das operações em andamento e log ---------- */
+  function telaAutomaticas() {
+    const cfg = W.configTarefas(H.db), log = (H.db.hubTarefasLog || []).slice(0, 30);
+    const m = H.modal('Tarefas automáticas', `<p class="note">Criadas quando a operação muda de etapa: Fechar frete (Preparando embarque), Documentação pré-embarque (Frete fechado), Revisão pós-embarque (Em trânsito) e Documentos com o despachante (ETA − 30). Uma por contêiner. Atrasada: vai para a Torre do Davi; depois de alguns dias, para a do Samir.${cfg.inicio ? ` No ar desde ${W.dataBR(cfg.inicio)}.` : ' Entra no ar na primeira rodada do servidor.'}</p>
+      <h3 class="h3" style="margin-top:12px">Prazos (dias corridos)</h3>
+      <div class="fields">${W.ROTULOS_PRAZO.map(([k, l]) => `<div class="f w2"><label class="lbl" for="tp_${k}">${esc(l)}</label><input id="tp_${k}" data-tp="${k}" inputmode="numeric" value="${cfg.prazos[k]}"></div>`).join('')}</div>
+      <div class="btns" style="margin-top:8px"><button class="btn blue" id="tpok">Salvar prazos</button></div>
+      <h3 class="h3" style="margin-top:14px">Operações já em andamento</h3>
+      <p class="note">Nada é criado sozinho para quem já estava no meio do caminho. Marque o que deve virar tarefa e aprove.</p>
+      <div id="tprev"><p class="note">Carregando a prévia…</p></div>
+      <h3 class="h3" style="margin-top:14px">Últimos registros</h3>
+      <div class="list">${log.length ? log.map(l => `<div class="row"><span><b>${esc(l.acao)}</b> · ${esc(l.gatilho || '')} · <span class="mono">${esc(l.op || '')}</span>${l.retroativo ? ' · retroativa' : ''}${l.motivo ? ' · ' + esc(l.motivo) : ''}${l.por ? ' · ' + esc(l.por) : ''}</span><span class="note">${W.dataBR(String(l.em || '').slice(0, 10))}</span></div>`).join('') : '<p class="note">Nada ainda.</p>'}</div>`,
+      '<button class="btn" data-x>Fechar</button>');
+    m.querySelector('.modal') && m.querySelector('.modal').classList.add('larga');
+    m.querySelector('#tpok').onclick = () => {
+      const prazos = {}; m.querySelectorAll('[data-tp]').forEach(i => { if (i.value.trim() !== '') prazos[i.dataset.tp] = Math.max(0, Math.round(+i.value.replace(',', '.') || 0)); });
+      H.db.hubPainel = H.db.hubPainel || {}; H.db.hubPainel._tarefasAuto = Object.assign({}, H.db.hubPainel._tarefasAuto, { prazos, editadoPor: H.userKey, editadoEm: new Date().toISOString() });
+      H.salvar(); H.toast('Prazos salvos. Valem para as próximas tarefas.');
+    };
+    const box = m.querySelector('#tprev');
+    H.api('/api/tarefas-auto/previa').then(r => r.json()).then(j => {
+      if (!j.success) { box.innerHTML = `<p class="note">${esc(j.message || 'Sem acesso.')}</p>`; return; }
+      if (!j.itens.length) { box.innerHTML = '<p class="note">Nenhuma tarefa a criar para as operações em andamento.</p>'; return; }
+      box.innerHTML = `<div class="tw"><table><thead><tr><th></th><th>Operação</th><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th>Por quê</th></tr></thead><tbody>${j.itens.map((x, i) => `<tr><td><input type="checkbox" data-pv="${i}" checked style="width:auto"></td><td class="mono">${esc(x.op)}${x.filhas.length ? '<br><small class="note">' + esc(x.filhas.join(', ')) + '</small>' : ''}</td><td>${esc(x.titulo)}</td><td>${esc(x.resp)}</td><td class="mono">${W.dataBR(x.prazo)}</td><td class="note">${esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div>
+        <div class="btns" style="margin-top:8px"><button class="btn pri" id="pvok">Criar as marcadas</button></div>`;
+      box.querySelector('#pvok').onclick = async ev => {
+        const chaves = [...box.querySelectorAll('[data-pv]:checked')].map(c => j.itens[+c.dataset.pv].chave);
+        if (!chaves.length) return H.toast('Marque ao menos uma.');
+        ev.target.disabled = true;
+        const r = await H.api('/api/tarefas-auto/aplicar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chaves }) }).then(x => x.json()).catch(() => ({}));
+        if (!r.success) { ev.target.disabled = false; return H.toast(esc(r.message || 'Não consegui criar.')); }
+        (r.criadas || []).forEach(t => { if (!(H.db.agendaTasks || []).some(x => x && x._id === t._id)) H.db.agendaTasks.unshift(t); });
+        H.fecharModal(); H.render(); H.toast(`${(r.criadas || []).length} tarefa(s) criada(s).`);
+      };
+    }).catch(() => { box.innerHTML = '<p class="note">Não consegui falar com o servidor.</p>'; });
+  }
+
   H.telas.agenda = function (el) {
     if (H.perfil().externo) { el.innerHTML = '<div class="banner">A Agenda é da equipe interna.</div>'; return; }
     const db = H.db, nome = eu(), rel = W.agRelogio();
@@ -48,23 +85,26 @@
       const id = esc(t._id || ''), late = W.agVencida(t, rel), su = W.agSitu(t), subs = W.agSubs(t), feitas = subs.filter(s => s.feita).length;
       const nova = t.status !== 'feita' && (!t.vistoEm || novasDaVisita.tarefas.has(t._id)), aberto = expandidas.has(t._id);
       const borda = late ? 'var(--crit)' : t.status === 'travada' ? 'var(--warn)' : 'transparent';
-      const origem = [t.opId ? `<span class="mono">${esc(t.opId)}</span>` : '', t.pedidoId ? 'do pedido' : '', t.chatMsgId ? 'do chat' : ''].filter(Boolean).join(' · ');
+      const auto = W.ehAuto && W.ehAuto(t), pode = !auto || W.podeConcluir(H.db, H.userKey, t);
+      const origem = [t.opId ? `<a href="#ops" class="mono" data-agop="${esc(t.opId)}">${esc(t.opId)}</a>` : '', t.pedidoId ? 'do pedido' : '', t.chatMsgId ? 'do chat' : '',
+        auto && (t.copia || []).length ? 'cópia: ' + esc(t.copia.join(', ')) : '', auto && t.auto.suspensa ? '<b>suspensa: ETA a mais de 30 dias</b>' : '',
+        t.status === 'feita' && t.feitaPor ? `concluída por ${esc(t.feitaPor)}${t.obsConclusao ? ' · ' + esc(t.obsConclusao) : ''}` : ''].filter(Boolean).join(' · ');
       return `<tr data-t="${id}" style="box-shadow:inset 3px 0 0 ${borda};${t.status === 'feita' ? 'opacity:.6' : ''}">
-        <td><select class="inp" data-situ aria-label="Situação" style="color:${su.c};font-weight:600">${W.AG_SITU.map(x => `<option value="${x.k}" ${x.k === su.k ? 'selected' : ''}>${x.l}</option>`).join('')}</select></td>
+        <td><select class="inp" data-situ aria-label="Situação" ${pode ? '' : 'disabled title="Só o responsável, Davi ou Samir"'} style="color:${su.c};font-weight:600">${W.AG_SITU.map(x => `<option value="${x.k}" ${x.k === su.k ? 'selected' : ''}>${x.l}</option>`).join('')}</select></td>
         <td><button class="btn sm ghost" data-exp aria-expanded="${aberto}" title="${subs.length ? 'Subtarefas' : 'Adicionar subtarefas'}" style="padding:2px 7px;margin-right:6px">${aberto ? '▾' : '▸'}</button><b style="${t.status === 'feita' ? 'text-decoration:line-through' : ''}">${esc(t.t)}</b>
-          ${subs.length ? ` <span class="pill ${feitas === subs.length ? 'ok' : 'info'}">${feitas}/${subs.length}</span>` : ''}${nova ? ' <span class="pill mag">nova</span>' : ''}</td>
+          ${subs.length ? ` <span class="pill ${feitas === subs.length ? 'ok' : 'info'}">${feitas}/${subs.length}</span>` : ''}${nova ? ' <span class="pill mag">nova</span>' : ''}${auto ? ` <span class="pill info" title="Criada pelo sistema na mudança de etapa${t.auto.retroativo ? ' · gerada retroativamente' : ''}">automática${t.auto.retroativo ? ' · retroativa' : ''}</span>` : ''}</td>
         <td>${esc(t.resp || '')}</td>
         <td style="white-space:nowrap">${late ? `<span class="pill crit">${esc(W.agPrazoTxt(t))}</span>` : esc(W.agPrazoTxt(t))}</td>
         <td>${pillPrio(t.prio)}</td>
         <td class="note">${esc(t.obs || '')}${origem ? `${t.obs ? '<br>' : ''}${origem}` : ''}</td>
         <td class="note">${esc(t.por || '')}</td>
-        <td style="white-space:nowrap"><button class="btn sm" data-edit>Editar</button> <button class="btn sm ghost" data-del title="Excluir tarefa">Excluir</button></td></tr>`
+        <td style="white-space:nowrap"><button class="btn sm" data-edit>Editar</button> ${!auto || W.podeGerir(H.userKey) ? '<button class="btn sm ghost" data-del title="Excluir tarefa">Excluir</button>' : ''}</td></tr>`
         + (aberto ? linhaSubs(t, id, subs, pessoas, nome) : '');
     };
 
     el.innerHTML = `<div data-ag-tela>
       <div class="head"><div><h1>Agenda & Tarefas</h1><p class="sub">Tarefas pontuais da equipe, com responsável, prazo e prioridade. Todos veem, cada um cuida das suas.</p></div>
-        <div class="btns"><button class="btn pri" id="agnova">+ Nova tarefa</button></div></div>
+        <div class="btns">${W.podeGerir && W.podeGerir(H.userKey) ? '<button class="btn" id="agauto">Automáticas: prazos e prévia</button>' : ''}<button class="btn pri" id="agnova">+ Nova tarefa</button></div></div>
       ${avisos.length ? `<div class="box"><div class="box-h"><h2>Para você</h2><span class="note">${avisos.length} aviso(s)</span></div><div class="box-b list">${avisos.map(a => `<div class="row"><span>${txtAviso(a)}</span><span class="pill ${a.tipo === 'vencida' ? 'crit' : a.tipo === 'hoje' ? 'warn' : 'mag'}">${a.tipo === 'vencida' ? 'vencida' : a.tipo === 'hoje' ? 'hoje' : 'nova'}</span></div>`).join('')}</div></div>` : ''}
       <div class="kpis">
         <div class="kpi"><span class="lbl">Em progresso</span><span class="v" style="color:var(--info)">${c.progresso}</span><span class="d">abertas, sem trava</span></div>
@@ -93,8 +133,21 @@
       const l = tarefas(), i = l.indexOf(t); if (i >= 0) l.splice(i, 1);
       H.salvar(); H.toast('Tarefa excluída'); H.render();
     });
+    el.querySelectorAll('[data-agop]').forEach(a => a.onclick = e => { e.preventDefault(); H.ir('ficha', a.dataset.agop); });
+    const ba = el.querySelector('#agauto'); if (ba) ba.onclick = telaAutomaticas;
     el.querySelectorAll('[data-situ]').forEach(s => s.onchange = () => {
       const t = achar(s); if (!t) return;
+      if (W.ehAuto && W.ehAuto(t)) {
+        if (!W.podeConcluir(H.db, H.userKey, t)) { H.toast('Só o responsável, Davi ou Samir mudam esta tarefa.'); return H.render(); }
+        if (s.value === 'feita') {
+          const m = H.modal('Concluir tarefa', `<p><b>${esc(t.t)}</b></p><div class="f" style="margin-top:8px"><label class="lbl" for="agobs">Observação (opcional)</label><input id="agobs"></div>`,
+            '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="agcok">Concluir</button>');
+          m.querySelector('[data-x]') && (m.querySelector('[data-x]').onclick = () => { H.fecharModal(); H.render(); });
+          m.querySelector('#agcok').onclick = () => { W.concluirTarefa(t, nome, new Date().toISOString(), m.querySelector('#agobs').value); H.salvar(); H.fecharModal(); H.render(); H.toast('Tarefa concluída.'); };
+          return;
+        }
+        if (t.status === 'feita') { W.reabrirTarefa(t, H.userKey, new Date().toISOString()); t.status = s.value; H.salvar(); return H.render(); }
+      }
       const { pendentes } = W.agSituar(t, s.value);
       H.salvar(); H.render();
       if (s.value === 'feita' && pendentes) H.toast(`Tarefa concluída. <b>${pendentes}</b> subtarefa${pendentes > 1 ? 's' : ''} ainda em aberto.`);
@@ -162,6 +215,7 @@
       if (t) {
         const atual = tarefa(t._id);
         if (!atual) { H.fecharModal(); H.toast('Tarefa não encontrada. Talvez tenha sido apagada.'); H.render(); return; }
+        if (W.ehAuto && W.ehAuto(atual) && campos.resp !== atual.resp && !W.podeReatribuir(H.db, H.userKey, atual)) { H.toast('Só Davi e Samir reatribuem tarefa automática.'); return; }
         const { mudouDono } = W.agEditar(atual, campos, nome);
         H.salvar(); H.fecharModal(); H.render();
         H.toast(mudouDono && campos.resp !== nome ? `Tarefa passada para <b>${esc(campos.resp)}</b>. Ele(a) será avisado(a).` : 'Tarefa atualizada');

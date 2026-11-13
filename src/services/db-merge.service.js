@@ -11,7 +11,7 @@
  */
 
 // Coleções em lista, unidas por `_id`
-const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe', 'hubComprovantes', 'propostaLinks', 'propostaAberturas', 'hubLixeiraArquivos'];
+const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qindex', 'agendaTasks', 'crm', 'crmDocs', 'crmOps', 'parceiros', 'opStatusHist', 'hubRecados', 'hubPedidos', 'hubErros', 'hubNotas', 'hubExtratos', 'hubFornecedores', 'hubReunioes', 'hubRH', 'hubCambio', 'hubContratos', 'hubCompliance', 'hubNFe', 'hubComprovantes', 'propostaLinks', 'propostaAberturas', 'hubLixeiraArquivos', 'hubTarefasLog'];
 
 // Objetos indexados por chave própria (opId, id da cotação, 'YYYY-MM'…)
 // `notifLidas` é indexado por usuário: mesclar por chave preserva o que cada um
@@ -21,7 +21,7 @@ const COLECOES = ['ops', 'docs', 'fin', 'finRec', 'fretes', 'fornecedores', 'qin
 const OBJETOS = ['users', 'checklists', 'quotes', 'gestao', 'agentes', 'ncmlib', 'notifLidas', 'portos', 'hubPainel', 'settings'];
 
 const DIAS_TOMBSTONE = 90;
-const MAIS_RECENTE = ['_arquivos', '_lixeira'];
+const MAIS_RECENTE = ['_arquivos', '_lixeira', '_tarefasAutoJob'];
 
 /**
  * Identidade do registro. Registros gravados antes do `_id` recebem um id

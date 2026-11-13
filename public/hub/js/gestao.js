@@ -48,7 +48,7 @@
   };
 
   /* ================= PRODUTIVIDADE & RANKING ================= */
-  let mesProd = null;
+  let mesProd = null, origemTarefas = 'todas';
   H.telas.produtividade = function (el) {
     const db = H.db, hoje = W.hojeISO(); mesProd = mesProd || hoje.slice(0, 7);
     const ks = Object.keys(db.users || {}).filter(k => W.perfilDe(db, k).id !== 'diretoria');
@@ -70,10 +70,15 @@
         <p class="note box-b">Pilar sem dado no mês fica de fora da conta (“—”) em vez de zerar a nota. Cultura vale quando o Samir lança a nota.</p></div>
       <div class="g3">${rk.filter(r => dir || r.nome === euNome).map(r => `<div class="box"><div class="box-h"><h2>${esc(r.nome)} · métricas da função</h2></div><div class="box-b"><table class="mini"><tbody>
         ${r.funcao.map(f => `<tr><td>${esc(f.l)}</td><td class="num"><b>${f.b == null ? f.a : f.a + ' de ' + f.b}</b></td></tr>`).join('') || '<tr><td class="empty">Sem métricas para este perfil.</td></tr>'}</tbody></table></div></div>`).join('')}</div>
+      ${W.rankingTarefas ? (() => { const rt = W.rankingTarefas(db, mesProd, origemTarefas, hoje).filter(r => dir || r.resp === String(euNome).split(' ')[0]);
+        return `<div class="box"><div class="box-h"><h2>Tarefas do mês por responsável</h2><select class="inp" id="porig" aria-label="Origem" style="width:auto">${[['todas', 'Todas as origens'], ['automatica', 'Origem: automática'], ['manual', 'Origem: manual']].map(([k, l]) => `<option value="${k}" ${origemTarefas === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          ${rt.length ? `<div class="tw"><table><thead><tr><th>Responsável</th><th class="num">Concluídas no prazo</th><th class="num">Concluídas com atraso</th><th class="num">Atrasadas em aberto</th><th class="num">Dias médios de atraso</th></tr></thead><tbody>${rt.map(r => `<tr><td>${esc(r.resp)}</td><td class="num">${r.noPrazo}</td><td class="num">${r.comAtraso}</td><td class="num" style="${r.atrasadasAbertas ? 'color:var(--crit);font-weight:700' : ''}">${r.atrasadasAbertas}</td><td class="num">${String(r.diasMediosAtraso).replace('.', ',')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Nenhuma tarefa com prazo neste mês.</p>'}
+          <p class="note" style="padding:8px 14px">Só o responsável pontua: quem está em cópia não ganha nem perde.</p></div>`; })() : ''}
       <div class="box" id="pTempo"><div class="box-h"><h2>Tempo no sistema</h2><span class="note">minutos com o sistema aberto e em uso</span></div><p class="empty">Carregando…</p></div>
       <div class="box"><div class="box-h"><h2>Erros do mês (descontam da qualidade)</h2></div>
         ${erros.length ? `<div class="tw"><table><thead><tr><th>Data</th><th>Pessoa</th><th>O que aconteceu</th><th>Impacto</th><th class="num">Pontos</th><th>Ação combinada</th></tr></thead><tbody>${erros.filter(e => dir || e.pessoa === euNome).map(e => `<tr><td class="mono">${W.dataBR(e.data).slice(0, 5)}</td><td>${esc(e.pessoa)}</td><td>${esc(e.texto)}</td><td>${esc(e.impacto || '—')}</td><td class="num neg">−${Math.abs(+e.pontos || 0)}</td><td>${esc(e.acao || '—')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Nenhum erro registrado no mês.</p>'}</div>`;
     el.querySelector('#pmes').onchange = e => { mesProd = e.target.value || mesProd; H.render(); };
+    const po = el.querySelector('#porig'); if (po) po.onchange = e => { origemTarefas = e.target.value; H.render(); };
     // Tempo ativo por pessoa: cada um vê o seu; diretoria, Davi e RH veem a equipe.
     if (H.carregarAtividade) { const de = mesProd + '-01', ate = W.vencDoMes(mesProd, 31) < hoje ? W.vencDoMes(mesProd, 31) : hoje;
       H.carregarAtividade(de, ate).then(atv => { const box = document.querySelector('#pTempo'); if (!box) return;

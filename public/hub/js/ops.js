@@ -160,9 +160,42 @@
 
   function abaEtapas(box, o) {
     const hist = H.db.opStatusHist.filter(h => h && h.op === o.id).sort((a, b) => String(b.em).localeCompare(String(a.em)));
-    box.innerHTML = `<div class="box"><div class="box-h"><h2>Linha do tempo das etapas</h2><span class="note">${hist.length} mudança(s) registrada(s)</span></div><div class="box-b tl">
+    box.innerHTML = `${blocoFreteETarefas(o)}<div class="box"><div class="box-h"><h2>Linha do tempo das etapas</h2><span class="note">${hist.length} mudança(s) registrada(s)</span></div><div class="box-b tl">
       ${hist.length ? hist.map(h => `<div class="ev"><span class="when">${W.dataBR(h.em)}</span><span class="rail"><i></i></span><div class="what">${h.tipo === 'renomeacao' ? `<b>${esc(h.motivo || 'Código alterado')}</b><small>${esc(h.por || '')}</small>` : `<b>${esc(W.stMeta(h.de).l)} → ${esc(W.stMeta(h.para).l)}</b><small>${esc(h.por || '')}${h.motivo ? ' · ' + esc(h.motivo) : ''}${h.tipo && h.tipo !== 'mudanca' ? ' · ' + esc(h.tipo) : ''}</small>`}</div></div>`).join('')
       : '<p class="empty">Nenhuma mudança registrada ainda.</p>'}</div></div>`;
+    ligarFrete(box, o);
+  }
+
+  /* ---------- Marco "Frete fechado" e tarefas da etapa (tarefas-auto.js) ---------- */
+  function blocoFreteETarefas(o) {
+    if (!W.alvoDe) return '';
+    const alvo = W.alvoDe(H.db, o), fr = W.freteDe(H.db, alvo), ts = W.tarefasDaOp(H.db, o), hoje = W.hojeISO();
+    const veValor = H.pode('fin.ver') || W.podeMarcarFrete(H.userKey);
+    const sit = t => t.status === 'feita' ? '<span class="pill ok">concluída</span>' : t.auto && t.auto.suspensa ? '<span class="pill">suspensa</span>' : t.prazo && t.prazo < hoje ? '<span class="pill crit">atrasada</span>' : '<span class="pill info">aberta</span>';
+    return `<div class="box"><div class="box-h"><h2>Frete fechado${alvo.id !== o.id ? ` · contêiner ${esc(alvo.id)}` : ''}</h2>${W.podeMarcarFrete(H.userKey) ? `<button class="btn sm ${fr ? '' : 'blue'}" id="frmk">${fr ? 'Editar' : 'Marcar frete fechado'}</button>` : ''}</div>
+      <div class="box-b">${fr ? `<p><b>Fechado em ${W.dataBR(String(fr.em).slice(0, 10))}</b> por ${esc(H.nomeUsuario(fr.por) || fr.por || '—')}${fr.agente ? ' · ' + esc(fr.agente) : ''}${fr.booking ? ' · booking <span class="mono">' + esc(fr.booking) + '</span>' : ''}${veValor && fr.valor != null ? ' · ' + W.fmtBRL(fr.valor) : ''}</p>` : '<p class="note">Ainda não marcado. É um marco, não uma etapa: a sequência de etapas continua a mesma.</p>'}</div></div>
+      <div class="box"><div class="box-h"><h2>Tarefas da operação</h2><span class="note">automáticas e manuais ligadas a ${esc(alvo.id)}</span></div><div class="box-b tl">
+        ${ts.length ? ts.map(t => `<div class="ev"><span class="when">${W.dataBR(String(t.criadaEm || '').slice(0, 10))}</span><span class="rail"><i></i></span><div class="what"><b>${esc(t.t)}</b> ${sit(t)}${t.auto && t.auto.retroativo ? ' <span class="pill">retroativa</span>' : ''}
+          <small>${esc(t.resp || '')}${(t.copia || []).length ? ' · cópia ' + esc(t.copia.join(', ')) : ''}${t.prazo ? ' · prazo ' + W.dataBR(t.prazo) : ''}${t.status === 'feita' ? ` · concluída${t.feitaPor ? ' por ' + esc(t.feitaPor) : ''}${t.doneAt ? ' em ' + W.dataBR(String(t.doneAt).slice(0, 10)) : ''}${t.obsConclusao ? ' · ' + esc(t.obsConclusao) : ''}` : ''}</small></div></div>`).join('')
+        : '<p class="empty">Nenhuma tarefa ligada a esta operação.</p>'}</div></div>`;
+  }
+  function ligarFrete(box, o) {
+    const b = box.querySelector('#frmk'); if (!b) return;
+    b.onclick = () => {
+      const alvo = W.alvoDe(H.db, o), fr = W.freteDe(H.db, alvo) || {};
+      const m = H.modal('Frete fechado', `<p class="note">${alvo.id !== o.id ? `Marca no contêiner <b>${esc(alvo.id)}</b>, que vale para todas as filhas. ` : ''}Ao marcar, a tarefa "Fechar frete" é concluída e a Ívina recebe a conferência da documentação pré-embarque.</p>
+        <div class="fields" style="margin-top:8px"><div class="f"><label class="lbl" for="fre">Data</label><input id="fre" type="date" value="${esc(String(fr.em || W.hojeISO()).slice(0, 10))}"></div>
+          <div class="f"><label class="lbl" for="fra">Agente / armador</label><input id="fra" value="${esc(fr.agente || '')}"></div>
+          <div class="f"><label class="lbl" for="frb">Booking</label><input id="frb" value="${esc(fr.booking || '')}"></div>
+          <div class="f"><label class="lbl" for="frv">Valor do frete (opcional)</label><input id="frv" inputmode="decimal" value="${fr.valor != null ? esc(fr.valor) : ''}"></div></div>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="frok">Salvar</button>');
+      m.querySelector('#frok').onclick = () => {
+        const v = s => m.querySelector(s).value.trim(), val = v('#frv');
+        const oa = (H.db.ops || []).find(x => x && x.id === o.id) || o;
+        W.marcarFreteFechado(H.db, oa, { em: v('#fre') ? v('#fre') + 'T12:00:00-03:00' : '', agente: v('#fra'), booking: v('#frb'), valor: val === '' ? '' : +val.replace(/\./g, '').replace(',', '.') }, H.userKey, new Date().toISOString());
+        H.salvar(); H.fecharModal(); H.render(); H.toast('Frete fechado marcado.');
+      };
+    };
   }
 
   function abaLogistica(box, o) {

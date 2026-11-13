@@ -70,7 +70,7 @@ console.log('\nExcluir documento:');
   ok(antes() === n, 'o arquivo não fica para trás no disco');
   process.env.SUPABASE_DISABLED = '1';
 
-  srv.close(); try { fs.unlinkSync(process.env.WINDGATE_DB_FILE); } catch (e) {}
+  await new Promise(ok => srv.close(ok)); try { fs.unlinkSync(process.env.WINDGATE_DB_FILE); } catch (e) {}
   console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
-  process.exit(falhou ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(1); });
+  process.exitCode = falhou ? 1 : 0;
+})().catch(e => { console.error(e); process.exitCode = 1; });
