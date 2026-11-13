@@ -145,8 +145,8 @@
       ${(n.pendencias || []).length ? `<h3 class="h3" style="margin-top:12px">Pendências · a nota não transmite enquanto houver</h3><div class="list pend">${n.pendencias.map(p => `<div class="row"><span>${esc(p.msg)}</span><span class="mono note">${esc(p.campo)}</span></div>`).join('')}</div>` : ''}
       ${(n.avisos || []).length ? `<h3 class="h3" style="margin-top:12px">Avisos</h3><div class="list">${n.avisos.map(a => `<div class="row"><span class="note">${esc(a)}</span></div>`).join('')}</div>` : ''}
       <h3 class="h3" style="margin-top:12px">Itens</h3>
-      <div class="tw"><table><thead><tr><th>#</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th class="num">Qtd</th><th class="num">Valor</th>${py.tipo_documento === 0 ? '<th class="num">II</th>' : ''}<th class="num">IPI</th><th class="num">ICMS</th>${dif ? '<th class="num">DIFAL</th>' : ''}<th>PIS/COFINS</th>${py.tipo_documento === 0 ? '<th class="num">Outras</th>' : ''}</tr></thead><tbody>
-        ${its.map(x => `<tr><td>${x.numero_item}</td><td>${esc(x.descricao)}</td><td class="mono">${esc(x.codigo_ncm)}</td><td class="mono">${esc(x.cfop)}</td><td class="num">${x.quantidade_comercial}</td><td class="num">${W.fmtBRL(x.valor_bruto)}</td>
+      <div class="tw"><table><thead><tr><th>#</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th class="num">Qtd</th><th class="num">Valor</th>${its.some(x => x.valor_frete) ? '<th class="num">Frete</th>' : ''}${py.tipo_documento === 0 ? '<th class="num">II</th>' : ''}<th class="num">IPI</th><th class="num">ICMS</th>${dif ? '<th class="num">DIFAL</th>' : ''}<th>PIS/COFINS</th>${py.tipo_documento === 0 ? '<th class="num">Outras</th>' : ''}</tr></thead><tbody>
+        ${its.map(x => `<tr><td>${x.numero_item}</td><td>${esc(x.descricao)}</td><td class="mono">${esc(x.codigo_ncm)}</td><td class="mono">${esc(x.cfop)}</td><td class="num">${x.quantidade_comercial}</td><td class="num">${W.fmtBRL(x.valor_bruto)}</td>${its.some(y => y.valor_frete) ? `<td class="num">${W.fmtBRL(x.valor_frete || 0)}</td>` : ''}
           ${py.tipo_documento === 0 ? `<td class="num">${W.fmtBRL(x.ii_valor || 0)}</td>` : ''}<td class="num">${x.ipi_valor != null ? W.fmtBRL(x.ipi_valor) : `<span class="note">CST ${esc(x.ipi_situacao_tributaria || '—')}</span>`}</td>
           <td class="num">${x.icms_valor != null ? `${W.fmtBRL(x.icms_valor)}<br><small class="note">${x.icms_aliquota}% s/ ${W.fmtBRL(x.icms_base_calculo)}</small>` : `<span class="note">CST ${esc(x.icms_situacao_tributaria)}</span>`}</td>
           ${dif ? `<td class="num">${x.icms_valor_uf_destino != null ? `${W.fmtBRL(x.icms_valor_uf_destino)}<br><small class="note">${x.icms_aliquota_interna_uf_destino}% s/ ${W.fmtBRL(x.icms_base_calculo_uf_destino)}</small>` : '—'}</td>` : ''}
@@ -272,7 +272,7 @@
 
   /* Entrada da DUIMP: só o que a DUIMP não traz ou o cenário permite, sempre com motivo. */
   /* Campos da nota de entrada que podem ser editados a partir do automático. */
-  const EDIT_NF = [['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['pesoLiquido', 'Peso líquido (kg)'], ['pesoBruto', 'Peso bruto (kg)'], ['volumes', 'Quantidade de volumes'], ['especie', 'Espécie dos volumes']];
+  const EDIT_NF = [['frete', 'Frete internacional (R$)'], ['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['pesoLiquido', 'Peso líquido (kg)'], ['pesoBruto', 'Peso bruto (kg)'], ['volumes', 'Quantidade de volumes'], ['especie', 'Espécie dos volumes']];
   function editarEntrada(n) {
     const ex = (n.entrada || {}).extras || {}, du = ex.duimp || {}, auto = (n.totais || {}).auto || {};
     const campo = (id, l, val, tipo) => `<div class="f"><label class="lbl" for="${id}">${l}</label><input id="${id}" ${tipo ? 'type="' + tipo + '"' : ''} value="${esc(val == null ? '' : val)}"></div>`;

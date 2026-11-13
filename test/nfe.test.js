@@ -122,6 +122,17 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(igual(mEd.totais.total, mEd.totais.somaItens), 'o total da nota continua fechando com os itens');
     const mIgual = R.montarNFe(base(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { afrmm: '500', siscomex: '', pesoLiquido: '' } } });
     ok(mIgual.totais.afrmm === 500 && mIgual.totais.siscomex === 150 && !mIgual.avisos.some(a => /digitad/.test(a)), 'campo vazio ou igual ao automático: fica automático, sem aviso');
+    /* Frete internacional: da DUIMP, editável. */
+    const baseF = () => { const d = banco(); d.ops[0].duimpDados = retrato({ itens: [itemDuimp(1, 3000, 0, 100, { frete: 100 }), itemDuimp(2, 7000, 0, 100, { frete: 300 })] }); return d; };
+    const mF0 = R.montarNFe(baseF(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' });
+    ok(mF0.totais.auto.frete === 400 && mF0.payload.items[0].valor_frete === 100 && mF0.payload.items[1].valor_frete === 300, 'frete automático da DUIMP, item a item (100 + 300)');
+    const mF = R.montarNFe(baseF(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { frete: '500' } } });
+    ok(mF.payload.items[0].valor_frete === 125 && mF.payload.items[1].valor_frete === 375 && mF.totais.frete === 500, 'frete digitado (500) rateado na proporção da DUIMP: 125 + 375');
+    ok(!mF.pendencias.some(p => p.campo === 'total.produtos') && mF.avisos.some(a => /Frete digitado na nota: R\$ 500,00 \(a DUIMP trazia R\$ 400,00\)/.test(a)) && mF.avisos.some(a => /diferem do valor aduaneiro da DUIMP .* frete digitado/.test(a)), 'a diferença com o valor aduaneiro vira aviso (conferir com o contador), não bloqueio');
+    ok(igual(mF.totais.total, mF.totais.somaItens), 'o total continua fechando com os itens');
+    ok(R.montarNFe(baseF(), { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29', extras: { duimp: { frete: '' } } }).totais.frete === 400, 'vazio: frete da DUIMP');
+    const torto = baseF(); torto.ops[0].duimpDados.itens[0].freteBRL = 999;
+    ok(R.montarNFe(torto, { cenario: 'A', opId: 'OP20', dataEmissao: '2026-10-29' }).pendencias.some(p => p.campo === 'total.produtos'), 'diferença que não veio de frete digitado continua bloqueando');
     /* Informações complementares: o texto inteiro editável. */
     const infA = mAuto.totais.auto.informacoes;
     ok(/^DUIMP 26BR/.test(infA) && /AFRMM R\$/.test(infA) && mAuto.payload.informacoes_adicionais_contribuinte === infA, 'o texto automático das informações complementares fica guardado e é o que sai na nota');
