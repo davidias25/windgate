@@ -89,7 +89,8 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     const sug = { desR1: app.document.getElementById('desR1').value, desR2: app.document.getElementById('desR2').value, desR3: app.document.getElementById('desR3').value };
     const H = C.calcular(q), s = C.desemSugerir(q, H);
     if (L.preco > 0 && (s.desR1 !== sug.desR1 || s.desR2 !== sug.desR2 || s.desR3 !== sug.desR3)) difD.push(q.id + ' sugestão');
-    const q2 = Object.assign({}, q, { fields: Object.assign({}, q.fields, i % 2 ? s : { desR1: '1', desR2: '1', desR3: '1' }) });
+    /* O sistema atual só conhece a cobertura por etapa: a comparação é nesse modo (o padrão do Hub agora é acumulada). */
+    const q2 = Object.assign({}, q, { coberturaDesembolso: 'etapa', fields: Object.assign({}, q.fields, i % 2 ? s : { desR1: '1', desR2: '1', desR3: '1' }) });
     rodarLegado(app, q2, 'pct');
     const el = JSON.stringify(app.desemErrors().map(e => e.replace(/ \(use ⚖ Sugerir\)/, ' (use Sugerir)'))), Rq2 = C.calcular(q2), errQ2 = C.desemErros(q2, Rq2), eh = JSON.stringify(errQ2.length && /^preencha/.test(errQ2[0]) ? errQ2 : C.desemAvisos(q2, Rq2).map(e => e.replace(/ Diferença: .*$/, '')).concat(errQ2));   // mesma regra; a cobertura agora só avisa
     if (el !== eh) difD.push(q.id + ' erros: ' + el.slice(0, 80) + ' × ' + eh.slice(0, 80));

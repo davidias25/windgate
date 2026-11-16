@@ -51,10 +51,11 @@ console.log('\nValor digitado:');
 
 console.log('\nOP228 — saídas e cobertura:');
 {
-  const q = q228(), R = R228(0), c = W.coberturaDesembolso(q, R);
+  ok(W.modoCobertura(q228()) === 'acumulada', 'padrão da casa: cobertura acumulada');
+  const q = q228(); q.coberturaDesembolso = 'etapa'; const R = R228(0), c = W.coberturaDesembolso(q, R);
   ok(c.linhas.map(l => l.saida.toFixed(2)).join(' / ') === '52022.92 / 121386.81 / 186685.65 / 0.00', 'saídas: sinal, saldo, chegada e zero na 4ª');
   ok(igual(c.base, 435424) && W.desemErros(q, R).every(e => !/soma/.test(e)), 'as 4 parcelas fecham os R$ 435.424');
-  ok(c.modo === 'etapa' && !c.linhas[1].cobre && W.desemAvisos(q, R).some(e => /^Parcela 2 .*MENOR que o saldo da fábrica .*Diferença: R\$\s?12\.890,81/.test(e)) && W.desemErros(q, R).length === 0, 'por etapa (padrão): a 2ª não cobre o saldo da fábrica — aparece com a diferença (R$ 12.890,81), sem bloquear');
+  ok(c.modo === 'etapa' && !c.linhas[1].cobre && W.desemAvisos(q, R).some(e => /^Parcela 2 .*MENOR que o saldo da fábrica .*Diferença: R\$\s?12\.890,81/.test(e)) && W.desemErros(q, R).length === 0, 'por etapa (opção): a 2ª não cobre o saldo da fábrica — aparece com a diferença (R$ 12.890,81), sem bloquear');
   ok(!W.mudarCobertura(q, 'acumulada', 'Davi', false).ok && W.modoCobertura(q) === 'etapa', 'só o Samir troca a regra');
   const r = W.mudarCobertura(q, 'acumulada', 'Samir', true, '2026-11-11T10:00:00Z');
   ok(r.ok && q.coberturaDesembolso === 'acumulada' && q.coberturaHist[0].por === 'Samir' && q.coberturaHist[0].em === '2026-11-11T10:00:00Z' && q.coberturaHist[0].de === 'etapa', 'a troca fica registrada: quem, quando, de e para');
@@ -128,6 +129,17 @@ console.log('\nProposta, contrato e câmbio:');
     const tab = JSON.stringify(bl);
     ok(/Entrega na obra/.test(tab) && /20 dias após a parcela anterior/.test(tab) && /4ª/.test(tab), 'cronograma do contrato: etapa, gatilho e prazo de cada parcela');
   } else ok(false, 'dadosDoContrato disponível');
+}
+
+console.log('\nRegra de proteção no desembolso (cobertura acumulada, um alerta por data):');
+{
+  const R = (v, d, st) => ({ op: 'OPX', tipo: 'Receita', valor: v, vencimento: d, status: st || 'Previsto' }), S = (desc, v, d, st) => ({ op: 'OPX', tipo: 'Despesa', desc, valor: v, vencimento: d, status: st || 'Previsto' });
+  const db = { fin: [R(100000, '2026-11-13', 'Realizado'), S('Fábrica 30%', 90000, '2026-11-14', 'Realizado'), S('Frete', 8000, '2026-12-10'), S('Seguro', 1000, '2026-12-10'), S('Impostos', 20000, '2026-12-10'), S('Porto', 3000, '2026-12-10'), R(20000, '2026-12-10')] };
+  const d = W.desembolsoOp(db, 'OPX', '2026-11-16');
+  ok(d.bloqueios.length === 1 && d.bloqueios[0].ate === '2026-12-10', 'quatro saídas na mesma data: um alerta só');
+  ok(d.bloqueios[0].totalDia === 32000 && d.bloqueios[0].saidas.map(x => x.desc).join(',') === 'Frete,Seguro,Impostos,Porto' && d.bloqueios[0].falta === 2000, 'com o total do dia (32.000), o detalhe e o saldo acumulado negativo (2.000)');
+  db.fin[6].valor = 22000;
+  ok(W.desembolsoOp(db, 'OPX', '2026-11-16').bloqueios.length === 0, 'recebimento na mesma data conta antes da saída: saldo zero, sem alerta');
 }
 
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);

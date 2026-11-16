@@ -633,7 +633,8 @@ function triCalcular(e){
     const saidas = ps.map(p => { if (!balde.hasOwnProperty(p.vinculo) || usado[p.vinculo]) return 0; usado[p.vinculo] = true; return balde[p.vinculo]; });
     return { saidas, balde, soltos: Object.keys(balde).filter(k => balde[k] > 0.004 && !usado[k]) };
   }
-  const modoCobertura = q => (q && q.coberturaDesembolso === 'acumulada' ? 'acumulada' : 'etapa');
+  /* Padrão da casa: cobertura acumulada. "Por etapa" é opção por operação, e só o Samir troca. */
+  const modoCobertura = q => (q && q.coberturaDesembolso === 'etapa' ? 'etapa' : 'acumulada');
   /**
    * Cobertura do cronograma. Por etapa: o recebimento de cada parcela cobre a saída dela.
    * Acumulada: a soma dos recebimentos menos a soma das saídas, até cada parcela, nunca fica negativa.

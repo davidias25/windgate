@@ -169,7 +169,7 @@
     const campo = (i, k, v, o) => { o = o || {}; return `<input class="inp" data-parc="${i}" data-pcampo="${k}" id="cp_${k}_${i}" value="${esc(v == null ? '' : v)}" ${o.tipo ? `type="${o.tipo}"` : ''} ${o.num ? 'inputmode="decimal"' : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.lista ? `list="${o.lista}"` : ''} style="width:${o.w || 120}px${o.num ? ';text-align:right' : ''}">`; };
     return `<div class="box"><div class="box-h"><h2>Cronograma de desembolso: cliente × fábrica</h2>${bloq ? '' : '<button class="btn blue sm" id="csug">Sugerir distribuição</button>'}</div><div class="box-b">
       <div class="fields">${inp('fabSinal', 'Sinal à fábrica (%)')}
-        <div class="f w2"><label class="lbl" for="ccob">Regra de cobertura</label><select id="ccob" ${souSamir() ? '' : 'disabled'}>${opt([['etapa', 'Por etapa: cada recebimento cobre a saída dele'], ['acumulada', 'Acumulada: o saldo nunca fica negativo']], modo)}</select>
+        <div class="f w2"><label class="lbl" for="ccob">Regra de cobertura</label><select id="ccob" ${souSamir() ? '' : 'disabled'}>${opt([['acumulada', 'Acumulada (padrão): o saldo nunca fica negativo'], ['etapa', 'Por etapa: cada recebimento cobre a saída dele']], modo)}</select>
           <small class="note">${souSamir() ? 'Só o Samir troca.' : 'Só o Samir troca esta regra.'}${hist ? ` Última troca: ${esc(hist.por)} em ${esc(W.dataBR(String(hist.em).slice(0, 10)))}.` : ''}</small></div>
         <p class="note">Padrão das fábricas: 30% para iniciar a produção e 70% na finalização.</p></div>
       <datalist id="cpnomes">${W.NOMES_ETAPA.map(n => `<option value="${esc(n)}">`).join('')}</datalist>

@@ -987,12 +987,15 @@
     const total = parcelas.reduce((a, l) => a + valorDe(l), 0);
     const recebido = parcelas.filter(realizado).reduce((a, l) => a + valorDe(l), 0);
     const aReceber = total - recebido;
+    /* Cobertura acumulada: recebido − pago até cada data. Um alerta por data (não um por saída), com o total e o
+       detalhe das saídas do dia. Na mesma data, o recebimento conta antes da saída. */
     const bloqueios = [];
-    saidas.forEach(sd => {
-      const ate = vencDe(sd);
+    [...new Set(saidas.filter(l => !realizado(l)).map(vencDe))].sort().forEach(ate => {
       const entra = parcelas.filter(l => vencDe(l) <= ate).reduce((a, l) => a + valorDe(l), 0);
       const sai = saidas.filter(l => vencDe(l) <= ate).reduce((a, l) => a + valorDe(l), 0);
-      if (!realizado(sd) && sai - entra > 0.005) bloqueios.push({ saida: sd, ate, falta: +(sai - entra).toFixed(2) });
+      if (sai - entra <= 0.005) return;
+      const doDia = saidas.filter(l => vencDe(l) === ate && !realizado(l));
+      bloqueios.push({ ate, falta: +(sai - entra).toFixed(2), saida: doDia[0], saidas: doDia.map(l => ({ desc: l.desc || 'pagamento', valor: +valorDe(l).toFixed(2) })), totalDia: +doDia.reduce((a, l) => a + valorDe(l), 0).toFixed(2) });
     });
     const proxima = parcelas.find(l => !realizado(l)) || null;
     return { parcelas, saidas, total, recebido, aReceber, proxima, bloqueios, protegido: !bloqueios.length };
