@@ -764,7 +764,8 @@
         if (cen._icmsZerado && CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst))) Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: 0, icms_aliquota: 0, icms_valor: 0 });
         else if (CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst)) && aliqIcms != null) {
           const red = num(cen.icms_reducao_base) / 100;
-          const baseIcms = r2((V + outras + (+cen.consumidor_final === 1 ? IPI : 0)) * (1 - red));   // outras despesas entram na base do ICMS
+          /* Na complementar (G), as outras despesas não entram na base do ICMS (igual à complementar de entrada): só o valor do produto. */
+          const baseIcms = r2((V + (cen.k === 'G' ? 0 : outras) + (+cen.consumidor_final === 1 ? IPI : 0)) * (1 - red));
           ICMS = r2(baseIcms * num(aliqIcms) / 100);
           Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: baseIcms, icms_aliquota: num(aliqIcms), icms_valor: ICMS }, red ? { icms_reducao_base_calculo: num(cen.icms_reducao_base) } : {});
           if (difal && temNum(interna)) {
