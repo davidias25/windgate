@@ -644,7 +644,9 @@
       const refIt = ((refNota && refNota.payload && refNota.payload.items) || []).find(Boolean);
       if (refIt && txt(refIt.icms_situacao_tributaria)) {
         cen = Object.assign({}, cen, { icms_cst: txt(refIt.icms_situacao_tributaria), icms_origem: txt(refIt.icms_origem) || cen.icms_origem,
-          icms_reducao_base: num(refIt.icms_reducao_base_calculo), _icmsRef: temNum(refIt.icms_aliquota) ? num(refIt.icms_aliquota) : 0 });
+          icms_reducao_base: num(refIt.icms_reducao_base_calculo), _icmsRef: temNum(refIt.icms_aliquota) ? num(refIt.icms_aliquota) : 0,
+          /* Original com base de ICMS zerada (entrada de importação, CST 51): a complementar também sai com base, alíquota e ICMS zerados. */
+          _icmsZerado: refNota.cenario === 'A' || (temNum(refIt.icms_base_calculo) && num(refIt.icms_base_calculo) === 0) });
         if (txt(refIt.ipi_situacao_tributaria)) cen.ipi_cst = txt(refIt.ipi_situacao_tributaria);
         /* PIS/COFINS-importação já foram pagos na DUIMP sobre o valor aduaneiro: a complementar da entrada (A) repete o CST, sem valor. */
         const imp = refNota.cenario === 'A';
@@ -759,7 +761,8 @@
       {
         /* Saídas: IPI por fora; ICMS sobre o valor (+ IPI para consumidor final). */
         if (CST_IPI_COM_VALOR.includes(txt(cen.ipi_cst))) { IPI = r2(V * ipiAliq / 100); Object.assign(x, { ipi_base_calculo: V, ipi_aliquota: ipiAliq, ipi_valor: IPI }); }
-        if (CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst)) && aliqIcms != null) {
+        if (cen._icmsZerado && CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst))) Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: 0, icms_aliquota: 0, icms_valor: 0 });
+        else if (CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst)) && aliqIcms != null) {
           const red = num(cen.icms_reducao_base) / 100;
           const baseIcms = r2((V + outras + (+cen.consumidor_final === 1 ? IPI : 0)) * (1 - red));   // outras despesas entram na base do ICMS
           ICMS = r2(baseIcms * num(aliqIcms) / 100);
