@@ -15,6 +15,7 @@
     el.innerHTML = `
       <div class="head"><div><h1>Desembolso & Cobrança</h1><p class="sub">Gerado do Financeiro: o que o cliente já pagou, o que falta e quando. A regra da casa é conferida sozinha: o cliente nunca paga menos do que já saiu para a fábrica.</p></div>
         <div class="btns"><select id="dop" class="inp" aria-label="Operação">${opsCom.map(x => `<option ${x.id === opDes ? 'selected' : ''} value="${esc(x.id)}">${esc(x.id)} · ${esc(x.cliente || '')}</option>`).join('')}</select></div></div>
+      ${(dv => dv.length ? `<div class="banner crit" style="margin-bottom:12px"><b>Tipo da operação diferente da cotação aprovada</b> (o favorecido sai pelo tipo; nada foi corrigido sozinho):<br>${dv.map(x => `<b>${esc(x.op)}</b> ${esc(x.cliente)}: cotação ${esc(x.cotacao)}, mas ${esc(x.onde.join('; '))} → hoje o desembolso sai como ${esc(x.usado)}`).join('<br>')}</div>` : '')(W.tiposDivergentes ? W.tiposDivergentes(db) : [])}
       ${o && d ? `<div class="g2 larga">
         <div class="box des" id="desDoc">${(dd => `<div class="des-h"><img src="logo-branca.png" alt="WindGate" class="des-logo" style="background:none;padding:0"><div class="des-r"><small>DESEMBOLSO DO CLIENTE · ATUALIZADO EM ${W.dataBR(dd.atualizado)}</small><b>${esc(dd.op)} · ${esc(dd.cliente)}</b>${dd.obra ? `<small>${esc(dd.obra)}</small>` : ''}<small>VALOR GLOBAL ATUALIZADO</small><span class="des-v">${W.fmtBRL(dd.total)}</span>${Math.abs(dd.reajuste) > 0.004 ? `<small>Contrato ${W.fmtBRL(dd.contrato)} ${dd.reajuste >= 0 ? '+' : '−'} reajuste ${W.fmtBRL(Math.abs(dd.reajuste))}</small>` : ''}</div></div>
           <div class="box-b"><div class="des-parc">${dd.parcelas.map(p => `<div class="dp"><span>${esc(p.rotulo)}</span><span class="mono">${W.dataBR(p.vencimento)}</span><b>${W.fmtBRL(p.valor)}</b><span class="pill ${p.situacao === 'pago' ? 'ok' : p.situacao === 'proximo' ? 'warn' : 'info'}">${p.situacao === 'pago' ? 'pago' : p.situacao === 'proximo' ? 'próximo pagamento' : 'a pagar'}</span></div>`).join('')}</div>
@@ -41,8 +42,11 @@
       try { await H.pdfDesembolso(dd); } catch (e) { H.toast('Não consegui gerar o PDF.'); }
     };
     el.querySelector('#dwpp').onclick = async () => {
-      const dd = W.dadosDesembolso(H.db, o.id, W.hojeISO()); const txt = `*Desembolso ${o.id} · ${o.cliente || ''}*\nValor global: ${W.fmtBRL(dd.total)}\n` + dd.parcelas.map(p => `${p.rotulo} · ${W.dataBR(p.vencimento)} · ${W.fmtBRL(p.valor)} · ${p.situacao === 'pago' ? 'PAGO' : 'a pagar'}`).join('\n')
-        + `\n\nPago: ${W.fmtBRL(d.recebido)}\nA pagar: ${W.fmtBRL(d.aReceber)}` + (d.proxima ? `\nPróximo pagamento: ${W.dataBR(W.vencDe(d.proxima))} · ${W.fmtBRL(d.proxima.valor)}` : '') + '\n\nWindGate · Good winds open doors';
+      const dd = W.dadosDesembolso(H.db, o.id, W.hojeISO());
+      if (dd.pendencias.length && !dd.pagamento.asaas) return H.toast('Antes do resumo, preencha os dados de pagamento em Contratos &gt; Dados das contratadas: ' + esc(dd.pendencias.join(', ')) + '.');
+      const pg = dd.pagamento, pagto = pg.asaas ? '' : `\n\n*Dados para pagamento*\nFavorecido: ${pg.favorecido}\nCNPJ: ${pg.cnpj}` + (pg.banco ? `\nBanco: ${pg.banco}` : '') + (pg.agencia ? ` · Ag. ${pg.agencia}` : '') + (pg.conta ? ` · CC ${pg.conta}` : '') + (pg.pix ? `\nPIX: ${pg.pix}` : '');
+      const txt = `*Desembolso ${o.id} · ${o.cliente || ''}*\nValor global: ${W.fmtBRL(dd.total)}\n` + dd.parcelas.map(p => `${p.rotulo} · ${W.dataBR(p.vencimento)} · ${W.fmtBRL(p.valor)} · ${p.situacao === 'pago' ? 'PAGO' : 'a pagar'}`).join('\n')
+        + `\n\nPago: ${W.fmtBRL(d.recebido)}\nA pagar: ${W.fmtBRL(d.aReceber)}` + (d.proxima ? `\nPróximo pagamento: ${W.dataBR(W.vencDe(d.proxima))} · ${W.fmtBRL(d.proxima.valor)}` : '') + pagto + '\n\nWindGate · Good winds open doors';
       try { await navigator.clipboard.writeText(txt); H.toast('Resumo copiado. É só colar no WhatsApp do cliente.'); } catch (e) { H.modal('Resumo do desembolso', `<textarea style="width:100%;min-height:220px">${esc(txt)}</textarea>`); }
     };
   };

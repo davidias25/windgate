@@ -15,6 +15,16 @@
 })(typeof self !== 'undefined' ? self : this, function (W) {
   const PENDENTE = '[PENDENTE]';
   const ESTRUTURAS = { jt: { nome: 'J&T Import', rotulo: 'Não contribuinte · J&T Import' }, sf: { nome: 'SF Trading', rotulo: 'Contribuinte · SF Trading' } };
+  /* Favorecido do pagamento pelo tipo da operação: triangular → J&T Import; direta → SF Trading.
+     O cadastro (Contratos › Dados das contratadas) vence; o que estiver vazio na J&T vem daqui. A SF não tem padrão:
+     sem cadastro, os documentos acusam a falta em vez de sair com conta errada. */
+  const FAVORECIDO_PADRAO = { jt: { razao: 'J&T Import Importação e Exportação Ltda', cnpj: '36.494.753/0001-48', banco: 'Itaú (341)', agencia: '1338', conta: '98404-8', pix: '36.494.753/0001-48' } };
+  function favorecidoDe(db, estrutura) {
+    const cad = (((db || {}).hubPainel || {})._contrato || {})[estrutura] || {}, out = Object.assign({}, FAVORECIDO_PADRAO[estrutura] || {});
+    Object.keys(cad).forEach(k => { if (cad[k] != null && String(cad[k]).trim() !== '') out[k] = cad[k]; });
+    return out;
+  }
+  const tipoDaEstrutura = e => (e === 'jt' ? 'triangular' : 'direta');
   const NIVEIS = ['bloqueante', 'atencao', 'informativo'];
   const CAMPOS_EDITAVEIS = [['razaoSocial', 'Razão social'], ['cnpj', 'CNPJ ou CPF'], ['endereco', 'Endereço'], ['cep', 'CEP'], ['representante', 'Representante'], ['representanteNacionalidade', 'Nacionalidade do representante'], ['representanteCargo', 'Cargo do representante'], ['cpf', 'CPF do representante'],
     ['ieNumero', 'Inscrição estadual (número)'], ['ieComprovanteEm', 'IE comprovada em'], ['incoterm', 'Incoterm'], ['porto', 'Porto de destino'], ['localEntrega', 'Cidade de entrega'], ['prazo', 'Prazo (dias)'], ['previsaoChegada', 'Previsão de chegada'], ['objeto', 'Objeto (cláusula 1.1)'], ['obsItens', 'Observação do Anexo I (ex.: bateria)']];
@@ -97,7 +107,7 @@
       ieNumero: contribuinte ? v('ieNumero', c.ie, c.inscricaoEstadual) : 'não se aplica', ieComprovanteEm: contribuinte ? v('ieComprovanteEm', c.ieComprovanteEm) : 'não se aplica',
       incoterm: v('incoterm', f.incoterm), localEntrega: v('localEntrega', f.destino), freteNacional: e.freteNacional != null ? (e.freteNacional ? 'incluso' : 'não incluso') : (R && (R.comp || {}).terrestre > 0 ? 'incluso' : 'não incluso'),
       prazo: v('prazo', f.prazoProposta, '90 a 100'), mercadoria: v('mercadoria', f.mercadoria, o.nome), operacao: o.id, data: W.dataBR ? W.dataBR(W.hojeISO()) : W.hojeISO(), difal: res ? moeda(res.difal) : '', investimento: res ? moeda(res.investimento) : '', total: res ? moeda(res.total) : '' };
-    const ct = cfg[estrutura] || {}, grupo = cfg.sf || {}, tab = q ? W.tabelaCambio(q) : null, uf = String(end.uf || f.ufDestino || '').toUpperCase();
+    const ct = favorecidoDe(db, estrutura), grupo = cfg.sf || {}, tab = q ? W.tabelaCambio(q) : null, uf = String(end.uf || f.ufDestino || '').toUpperCase();
     const itens = res ? res.itens : [], datas = parcelas.map(dataDa);
     const composicao = itens.map((i, k) => `(${['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][k] || k + 1}) ${i.q} ${i.d}, R$ ${moeda(i.total)}`).join('; ') + (res && res.desconto > 0 ? `; subtotal de R$ ${moeda(res.investimento + res.desconto)}, com **desconto comercial de R$ ${moeda(res.desconto)}**` : '');
     Object.assign(campos, { contratadaRazao: ct.razao || '', contratadaCnpj: ct.cnpj || '', contratadaEndereco: ct.endereco || '', socioNome: ct.socioNome || '', socioCpf: ct.socioCpf || '', banco: ct.banco || '', agencia: ct.agencia || '', conta: ct.conta || '', pix: ct.pix || '',
@@ -232,6 +242,28 @@
     if (o.empresa === 'JeT') return 'jt';
     return estruturaDe(o, W.cotacaoDaOp(db, o));
   }
+  /** Estrutura da cotação aprovada: triangular → jt; direta → sf. Multicliente: o tipo do cliente desta operação. */
+  function estruturaDaCotacao(db, o) {
+    const q = W.cotacaoDaOp(db, o); if (!q) return null;
+    if (W.ehMultiCliente && W.ehMultiCliente(q)) { const c = (q.clientes || []).find(c => c && String(c.opNum || '').trim().toUpperCase() === String(o.id).toUpperCase()); return c ? (c.tipoOperacao === 'triangular' ? 'jt' : 'sf') : null; }
+    return W.camposDe(q).tipoOp === 'triangular' ? 'jt' : 'sf';
+  }
+  /**
+   * Operações abertas cujo tipo (direta/triangular) não bate com a cotação aprovada. Só lista: quem corrige é o Samir.
+   * Confere cada lugar que decide o tipo: o contrato gerado, a estrutura fiscal da operação e a empresa que fatura.
+   */
+  function tiposDivergentes(db) {
+    const out = [];
+    (db.ops || []).filter(o => o && o.id && W.emAndamento(o)).forEach(o => {
+      const cot = estruturaDaCotacao(db, o); if (!cot) return;
+      const ct = contratoPadraoDaOp(db, o.id), onde = [];
+      if (ct && ct.estrutura && ct.estrutura !== cot) onde.push(`contrato como ${tipoDaEstrutura(ct.estrutura)}`);
+      if (o.estruturaFiscal && o.estruturaFiscal !== cot) onde.push(`operação como ${tipoDaEstrutura(o.estruturaFiscal)} (estrutura fiscal)`);
+      if (o.empresa === 'JeT' && cot === 'sf') onde.push('operação faturada pela JeT');
+      if (onde.length) out.push({ op: o.id, cliente: o.cliente || '', cotacao: tipoDaEstrutura(cot), usado: tipoDaEstrutura(estruturaDaOp(db, o)), onde });
+    });
+    return out;
+  }
   /** O que o cliente vê. A descrição interna do lançamento nunca entra: vale a do cliente ou o rótulo da parcela. */
   function dadosDesembolso(db, opId, hoje) {
     const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
@@ -252,7 +284,7 @@
     const total = parcelas.reduce((a, p) => a + p.valor, 0), pago = parcelas.filter(p => p.situacao === 'pago').reduce((a, p) => a + p.valor, 0);
     const reajuste = parcelas.reduce((a, p) => a + (p.composicao.total - p.composicao.contrato), 0);
     const comReaj = parcelas.filter(p => p.composicao.reajustes.length), escolhida = comReaj.find(p => p.situacao === 'proximo') || comReaj[comReaj.length - 1];
-    const cl = W.clausulaDaOp(db, o), est = estruturaDaOp(db, o), cfg = (db.hubPainel || {})._contrato || {}, ct = cfg[est] || {};
+    const cl = W.clausulaDaOp(db, o), est = estruturaDaOp(db, o), cfg = (db.hubPainel || {})._contrato || {}, ct = favorecidoDe(db, est);
     const n = prox ? W.numeroNaOp(db, prox) : null;
     return {
       op: o.id, cliente: o.cliente || '', obra: o.nome || '', atualizado: h, total, pago, aPagar: total - pago, reajuste, contrato: total - reajuste, parcelas,
@@ -266,5 +298,5 @@
     };
   }
 
-  return { estruturaDaOp, dadosDesembolso, valorExtenso, PENDENTE, ESTRUTURAS, NIVEIS, CAMPOS_EDITAVEIS, cnpjValido, cpfValido, ieValida, estruturaDe, dadosDoContrato, preencherTexto, preencherModelo, digitalDaCotacao, contratoPadraoDaOp, contratoDesatualizado, contratosDesatualizados, revisarEmCodigo, temBloqueante, liberarContrato };
+  return { estruturaDaOp, estruturaDaCotacao, tiposDivergentes, favorecidoDe, FAVORECIDO_PADRAO, dadosDesembolso, valorExtenso, PENDENTE, ESTRUTURAS, NIVEIS, CAMPOS_EDITAVEIS, cnpjValido, cpfValido, ieValida, estruturaDe, dadosDoContrato, preencherTexto, preencherModelo, digitalDaCotacao, contratoPadraoDaOp, contratoDesatualizado, contratosDesatualizados, revisarEmCodigo, temBloqueante, liberarContrato };
 });

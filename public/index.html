@@ -9472,20 +9472,18 @@ const PROPOSTA_BLOCOS=[
   {k:'cta',        l:'Página de contato',                  d:'"Vamos começar?" com responsável, telefone e e-mail.'},
   {k:'banco',      l:'Dados bancários para pagamento',     d:'Titular, banco, agência, conta, PIX e contato. Fora por padrão.', pad:false}
 ];
-/* Dados de recebimento. Ficam num lugar só: mudar banco ou chave PIX é mexer
-   aqui, não caçar o número dentro do gerador de PDF. */
-const DADOS_BANCARIOS={
-  titular:'SF TRADING LTDA', cnpj:'58762606000144', banco:'Santander',
-  agencia:'4279', conta:'130085588', pix:'58762606000144',
-  fone:'+55 85 99120-9410', email:'samir@windgate.com.br'
-};
-/* Triangular: quem fatura o cliente é a JeT, então o pagamento é na conta dela, a mesma do contrato
-   (Contratos → Configurar). Sem os dados cadastrados, devolve null e o bloco não sai com conta errada. */
-function contaDaJeT(){
+/* Dados de recebimento pelo tipo da operação: triangular → J&T Import; direta → SF Trading. Vêm do cadastro
+   (Contratos › Dados das contratadas), nunca de um número fixo aqui. Na J&T, o que faltar no cadastro sai do padrão
+   abaixo (o mesmo de contrato-regras.js). Sem os dados, devolve null e o bloco não sai com conta errada. */
+const CONTATO_PROPOSTA={fone:'+55 85 99120-9410', email:'samir@windgate.com.br'};
+const FAVORECIDO_PADRAO_JT={razao:'J&T Import Importação e Exportação Ltda', cnpj:'36.494.753/0001-48', banco:'Itaú (341)', agencia:'1338', conta:'98404-8', pix:'36.494.753/0001-48'};
+function contaPagamento(tri){
   try{
-    const j=((((typeof DB!=='undefined'&&DB)||{}).hubPainel||{})._contrato||{}).jt||{};
-    if(!(j.banco&&(j.conta||j.pix))) return null;
-    return {titular:j.razao||'JET IMPORT', cnpj:String(j.cnpj||'').replace(/\D/g,''), banco:j.banco, agencia:j.agencia||'', conta:j.conta||'', pix:j.pix||'', fone:DADOS_BANCARIOS.fone, email:DADOS_BANCARIOS.email};
+    const cad=(((((typeof DB!=='undefined'&&DB)||{}).hubPainel||{})._contrato||{})[tri?'jt':'sf'])||{}, j=Object.assign({}, tri?FAVORECIDO_PADRAO_JT:{});
+    Object.keys(cad).forEach(k=>{ if(cad[k]!=null&&String(cad[k]).trim()!=='') j[k]=cad[k]; });
+    if(!(j.razao&&j.banco&&(j.conta||j.pix))) return null;
+    const pd=String(j.pix||'').replace(/\D/g,''), pixDoc=/^[\d.\/\s-]+$/.test(String(j.pix||''))&&(pd.length===14||pd.length===11);
+    return {titular:j.razao, cnpj:String(j.cnpj||'').replace(/\D/g,''), banco:j.banco, agencia:j.agencia||'', conta:j.conta||'', pix:pixDoc?pd:(j.pix||''), fone:CONTATO_PROPOSTA.fone, email:CONTATO_PROPOSTA.email};
   }catch(e){ return null; }
 }
 /* Linhas de custo. Vêm desmarcadas: abrir a composição mostra ao cliente o que
@@ -9914,8 +9912,8 @@ async function gerarPropostaPDF(){
     });
     cy+=126;
     }
-    const contaPag=triProposta?contaDaJeT():DADOS_BANCARIOS;
-    if(triProposta&&!contaPag) toast('⚠ Dados bancários da JeT não cadastrados (Contratos → Configurar): a proposta saiu sem o bloco de pagamento.');
+    const contaPag=contaPagamento(triProposta);
+    if((B.banco||triProposta)&&!contaPag) toast('⚠ Dados bancários da '+(triProposta?'J&T Import':'SF Trading')+' não cadastrados (Contratos › Dados das contratadas): a proposta saiu sem o bloco de pagamento.');
     if((B.banco||triProposta)&&contaPag){
       const D=contaPag;
       // Vai depois do CTA: primeiro o aceite, depois para onde pagar.
@@ -9963,7 +9961,7 @@ async function gerarPropostaPDF(){
 /* fallback: janela de impressão no mesmo padrão */
 function gerarPropostaPrint(){
   const {difalV,totalWG,descontoV,triProposta}=dadosDaProposta();
-  const DP=(triProposta?contaDaJeT():DADOS_BANCARIOS)||DADOS_BANCARIOS;
+  const DP=contaPagamento(triProposta);
   const itens=propostaItens(totalWG+descontoV); const hj=new Date(); const B=propostaBlocos();
   const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   $('printProposal').innerHTML=`
@@ -9987,7 +9985,7 @@ function gerarPropostaPrint(){
       ${B.verde?`<div style="background:#E8F5EE;color:#1E5A3C;font-size:10px;padding:10px 14px;margin-top:12px;line-height:1.6"><b>Cobertura total WindGate.</b> Todos os custos previstos do processo estão contemplados nos valores acima: frete internacional, seguro, taxas portuárias, armazenagem, despachante, impostos de nacionalização e entrega no destino, nas condições e prazos descritos nesta proposta.</div>`:''}
       ${B.amarelo?`<div style="background:#FCF7E3;color:#785F14;font-size:10px;padding:10px 14px;margin-top:8px;line-height:1.6"><b>Validade e câmbio.</b> Os valores desta proposta são válidos por ${V('validade')||7} dias. ${state.tabelaCambio?'Câmbio: '+esc(state.tabelaCambio.referencia)+' '+esc(state.tabelaCambio.regra):'Câmbio: a composição do preço acompanha a taxa de câmbio do dia de cada pagamento; variações são comunicadas previamente ao cliente.'} Frete internacional: o frete incluído baseia-se na cotação vigente na data desta proposta, ${V('validadeFrete')?'válida para embarque até '+V('validadeFrete').split('-').reverse().join('/'):'válida na data desta proposta'}. Variações de até 5% no frete internacional são absorvidas pela WindGate. Variações superiores a 5%, bem como sobretaxas extraordinárias impostas pelo mercado (GRI — General Rate Increase, Peak Season, War Risk e equivalentes), serão ajustadas no valor da operação mediante comprovação documental da cotação do agente de carga.</div>`:''}
       ${B.cta?`<div style="background:#1B2A5B;color:#fff;text-align:center;padding:22px;margin-top:16px"><div style="font-size:19px;font-weight:800">Vamos começar?</div><div style="font-size:10px;color:#C9D4EE;margin-top:5px">Samir Fernandes · +55 85 99120-9410 · samir@windgate.com.br</div></div>`:''}
-      ${B.banco||triProposta?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
+      ${(B.banco||triProposta)&&DP?`<div style="border:1px solid #DDE4EA;padding:12px 16px;margin-top:12px;font-size:11px">
         <div style="font-weight:800;color:#1B2A5B;font-size:13px">${esc(DP.titular)}</div>
         <div style="font-size:9px;color:#64707D">CNPJ ${esc(cnpjFmt(DP.cnpj))}</div>
         <div style="margin-top:6px">${/^banco/i.test(DP.banco)?'':'Banco '}${esc(DP.banco)} · Agência ${esc(DP.agencia)} · Conta ${esc(DP.conta)}</div>

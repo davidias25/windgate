@@ -105,6 +105,40 @@ console.log('\nDesembolso do cliente:');
   ok(C.dadosDesembolso(d, 'OP26').pagamento.asaas, 'com o Asaas ativo, boleto e PIX gerados');
   d.ops[0].estruturaFiscal = 'sf'; d.hubPainel._asaas = { ativo: false };
   ok(C.dadosDesembolso(d, 'OP26').pendencias.length > 0, 'contratada sem dados de pagamento: o desembolso aponta o que falta');
+
+  console.log('\nFavorecido pelo tipo da operação:');
+  d.hubPainel._contrato = {}; d.ops[0].estruturaFiscal = 'jt';
+  const pj = C.dadosDesembolso(d, 'OP26').pagamento;
+  ok(/J&T Import/.test(pj.favorecido) && pj.cnpj === '36.494.753/0001-48' && /341/.test(pj.banco) && pj.agencia === '1338' && pj.conta === '98404-8' && pj.pix === '36.494.753/0001-48' && !C.dadosDesembolso(d, 'OP26').pendencias.length,
+    'triangular sem cadastro: J&T Import, Itaú (341), ag. 1338, CC 98404-8, PIX pelo CNPJ');
+  d.hubPainel._contrato = { jt: { conta: '11111-1' } };
+  ok(C.dadosDesembolso(d, 'OP26').pagamento.conta === '11111-1' && /J&T/.test(C.dadosDesembolso(d, 'OP26').pagamento.favorecido), 'o cadastro vence o padrão, campo a campo');
+  d.ops[0].estruturaFiscal = 'sf'; d.hubPainel._contrato = {};
+  const ds = C.dadosDesembolso(d, 'OP26');
+  ok(ds.estrutura === 'sf' && !ds.pagamento.favorecido && ds.pendencias.includes('favorecido'), 'direta sem cadastro da SF: acusa a falta, nunca sai com a conta da J&T');
+  d.hubPainel._contrato = { sf: { razao: 'SF Trading Ltda', cnpj: '58.762.606/0001-44', banco: 'Santander', agencia: '4279', conta: '130085588' } };
+  ok(C.dadosDesembolso(d, 'OP26').pagamento.favorecido === 'SF Trading Ltda' && !C.dadosDesembolso(d, 'OP26').pendencias.length, 'direta: SF Trading do cadastro');
+}
+
+{
+  const C = require('../public/hub/js/contrato-regras.js');
+  console.log('\nTipo da operação × cotação aprovada (só lista, não corrige):');
+  const q = tipo => ({ status: 'ok', fields: Object.assign({}, W.PADRAO, { tipoOp: tipo }) });
+  const d = { ops: [{ id: 'OP228', cliente: 'Marquise', status: 'contrato', quoteId: 'q1', estruturaFiscal: 'sf' }, { id: 'OP229', cliente: 'Certa', status: 'contrato', quoteId: 'q2' }, { id: 'OP230', cliente: 'Errada JeT', status: 'contrato', quoteId: 'q3', empresa: 'JeT' }, { id: 'OP100', cliente: 'Antiga', status: 'concluida', quoteId: 'q4', estruturaFiscal: 'sf' }],
+    quotes: { q1: q('triangular'), q2: q('triangular'), q3: q('direta'), q4: q('triangular') }, hubContratos: [], fin: [], hubPainel: {} };
+  const dv = C.tiposDivergentes(d), antes = JSON.stringify(d);
+  ok(dv.length === 2 && dv[0].op === 'OP228' && dv[0].cotacao === 'triangular' && dv[0].usado === 'direta' && /estrutura fiscal/.test(dv[0].onde[0]), 'OP228 direta na operação e triangular na cotação: listada');
+  ok(dv[1].op === 'OP230' && /JeT/.test(dv[1].onde[0]), 'faturada pela JeT com cotação direta: listada');
+  ok(!dv.some(x => x.op === 'OP229' || x.op === 'OP100'), 'a que bate e a encerrada ficam fora');
+  ok(JSON.stringify(d) === antes, 'nada é corrigido sozinho');
+  d.hubContratos.push({ padrao: true, op: 'OP229', estrutura: 'sf', versao: 1, status: 'gerado' });
+  ok(C.tiposDivergentes(d).some(x => x.op === 'OP229' && /contrato como direta/.test(x.onde[0])), 'contrato gerado com o tipo errado: listado');
+
+  /* A proposta (index.html → cotacao-pdf.js) usa a mesma J&T padrão e nenhuma conta fixa da SF. */
+  const html = require('fs').readFileSync(require('path').join(__dirname, '../public/index.html'), 'utf8');
+  const m = /const FAVORECIDO_PADRAO_JT=(\{[^;]*\});/.exec(html), jtHtml = m ? Function('return ' + m[1])() : null;
+  ok(jtHtml && JSON.stringify(jtHtml) === JSON.stringify(C.FAVORECIDO_PADRAO.jt), 'proposta e desembolso com a mesma J&T padrão');
+  ok(!/DADOS_BANCARIOS|130085588/.test(html), 'a proposta não tem mais a conta da SF fixa no código: vem do cadastro');
 }
 
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
