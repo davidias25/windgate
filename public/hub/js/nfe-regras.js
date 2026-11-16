@@ -639,6 +639,18 @@
       chaveRef = refNota ? refNota.chave || '' : soDig(ex.referencia).length === 44 ? soDig(ex.referencia) : '';
       const base = refNota ? cenarioDe(db, refNota.cenario) : null;
       if (base) cen = Object.assign({}, base, { k: 'G', nome: cen.nome, destino: base.destino, emitente: base.emitente, exige_referencia: true, conferido: cen.conferido, natureza_operacao: txt(ex.natureza) || cen.natureza_operacao || base.natureza_operacao, cfop_interna: '', cfop_interestadual: '', cfop_exterior: '' });
+      /* Tributação da complementar = a que saiu no item da nota original (CST e alíquotas do XML), não a do cenário:
+         uma importação (A) não tem alíquota interestadual, e o ICMS diferido/zerado da original tem de se repetir. */
+      const refIt = ((refNota && refNota.payload && refNota.payload.items) || []).find(Boolean);
+      if (refIt && txt(refIt.icms_situacao_tributaria)) {
+        cen = Object.assign({}, cen, { icms_cst: txt(refIt.icms_situacao_tributaria), icms_origem: txt(refIt.icms_origem) || cen.icms_origem,
+          icms_reducao_base: num(refIt.icms_reducao_base_calculo), _icmsRef: temNum(refIt.icms_aliquota) ? num(refIt.icms_aliquota) : 0 });
+        if (txt(refIt.ipi_situacao_tributaria)) cen.ipi_cst = txt(refIt.ipi_situacao_tributaria);
+        /* PIS/COFINS-importação já foram pagos na DUIMP sobre o valor aduaneiro: a complementar da entrada (A) repete o CST, sem valor. */
+        const imp = refNota.cenario === 'A';
+        if (txt(refIt.pis_situacao_tributaria)) Object.assign(cen, { pis_cst: txt(refIt.pis_situacao_tributaria), pis_aliquota: !imp && temNum(refIt.pis_aliquota_porcentual) ? num(refIt.pis_aliquota_porcentual) : 0 });
+        if (txt(refIt.cofins_situacao_tributaria)) Object.assign(cen, { cofins_cst: txt(refIt.cofins_situacao_tributaria), cofins_aliquota: !imp && temNum(refIt.cofins_aliquota_porcentual) ? num(refIt.cofins_aliquota_porcentual) : 0 });
+      }
       if (!chaveRef) P('notas_referenciadas', 'Informe a nota original (chave de 44 dígitos ou uma NF-e autorizada do sistema).');
       if (!base) P('cenario', 'Sem a nota original do sistema, a tributação não tem de onde vir: escolha a NF-e original.');
     }
@@ -712,6 +724,7 @@
     let aliqIcms = null;
     if (localDestino === 1) aliqIcms = temNum(cen.icms_aliquota_interna) ? num(cen.icms_aliquota_interna) : null;
     else aliqIcms = temNum(cen.icms_aliquota_interestadual) ? num(cen.icms_aliquota_interestadual) : null;
+    if (cen.k === 'G' && cen._icmsRef != null) aliqIcms = cen._icmsRef;   // a mesma alíquota da nota original
     if (aliqIcms == null && CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst))) P('icms_aliquota', `Alíquota de ICMS ${localDestino === 1 ? 'interna' : 'interestadual'} do cenário ${cen.k}.`);
     if (!txt(cen.icms_cst)) P('icms_situacao_tributaria', `CST de ICMS do cenário ${cen.k}.`);
     if (!txt(cen.pis_cst) || !txt(cen.cofins_cst)) P('pis_situacao_tributaria', `CST de PIS/COFINS do cenário ${cen.k} (definir com o contador).`);
