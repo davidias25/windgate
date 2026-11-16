@@ -710,7 +710,9 @@
       if (ncm.length !== 8) P(`items[${n}].codigo_ncm`, `NCM do item ${n} (8 dígitos).`);
       if (!txt(it.descricao)) P(`items[${n}].descricao`, `Descrição do item ${n}.`);
       if (!(qtd > 0)) P(`items[${n}].quantidade_comercial`, `Quantidade do item ${n}.`);
-      if (!(vu > 0)) P(`items[${n}].valor_unitario_comercial`, `Valor unitário do item ${n}.`);
+      /* Nota complementar (G): outras despesas por item; complemento só de despesas pode ter valor do produto zerado. */
+      const outrasG = cen.k === 'G' ? Math.max(0, r2(num(it.outras))) : 0;
+      if (!(vu > 0) && !(outrasG > 0)) P(`items[${n}].valor_unitario_comercial`, `Valor unitário do item ${n}${cen.k === 'G' ? ' (ou outras despesas)' : ''}.`);
       const lib = (db.ncmlib || {})[ncm];
       if (lib) ['ii', 'ipi', 'pis', 'cofins'].forEach(k => { if (temNum(lib[k]) && temNum(it[k]) && Math.abs(num(lib[k]) - num(it[k])) > 0.001) A(`Item ${n}: ${k.toUpperCase()} de ${num(it[k])}% difere do Catálogo de NCM (${num(lib[k])}%).`); });
       const cfop = /^\d{4}$/.test(txt(it.cfop)) ? txt(it.cfop) : cfopNota;
@@ -719,14 +721,15 @@
         valor_unitario_comercial: vu, unidade_tributavel: txt(it.unidade, 6) || 'UN', quantidade_tributavel: qtd, valor_unitario_tributavel: vu, valor_bruto: V, inclui_no_total: 1,
         icms_origem: txt(it.origem) || txt(cen.icms_origem), icms_situacao_tributaria: txt(cen.icms_cst) };
       const ipiAliq = t.ipi ? num(it.ipi) : 0;
-      let II = 0, IPI = 0, PIS = 0, COF = 0, outras = 0, ICMS = 0;
+      let II = 0, IPI = 0, PIS = 0, COF = 0, outras = outrasG, ICMS = 0;
+      if (outras) x.valor_outras_despesas = outras;
 
       {
         /* Saídas: IPI por fora; ICMS sobre o valor (+ IPI para consumidor final). */
         if (CST_IPI_COM_VALOR.includes(txt(cen.ipi_cst))) { IPI = r2(V * ipiAliq / 100); Object.assign(x, { ipi_base_calculo: V, ipi_aliquota: ipiAliq, ipi_valor: IPI }); }
         if (CST_ICMS_COM_VALOR.includes(txt(cen.icms_cst)) && aliqIcms != null) {
           const red = num(cen.icms_reducao_base) / 100;
-          const baseIcms = r2((V + (+cen.consumidor_final === 1 ? IPI : 0)) * (1 - red));
+          const baseIcms = r2((V + outras + (+cen.consumidor_final === 1 ? IPI : 0)) * (1 - red));   // outras despesas entram na base do ICMS
           ICMS = r2(baseIcms * num(aliqIcms) / 100);
           Object.assign(x, { icms_modalidade_base_calculo: 3, icms_base_calculo: baseIcms, icms_aliquota: num(aliqIcms), icms_valor: ICMS }, red ? { icms_reducao_base_calculo: num(cen.icms_reducao_base) } : {});
           if (difal && temNum(interna)) {
@@ -743,7 +746,7 @@
           }
         }
         // Como na NF 96 do Maino: PIS/COFINS sobre o valor sem o ICMS destacado.
-        if (!(cen.aplica_monofasico && it.mono) && t.pisCofinsImp && !CST_PIS_SEM_VALOR.includes(txt(cen.pis_cst))) { const bPC = r2(V - (cen.pis_cofins_exclui_icms ? ICMS : 0)); PIS = r2(bPC * num(cen.pis_aliquota) / 100); COF = r2(bPC * num(cen.cofins_aliquota) / 100); }
+        if (!(cen.aplica_monofasico && it.mono) && t.pisCofinsImp && !CST_PIS_SEM_VALOR.includes(txt(cen.pis_cst))) { const bPC = r2(V + outras - (cen.pis_cofins_exclui_icms ? ICMS : 0)); PIS = r2(bPC * num(cen.pis_aliquota) / 100); COF = r2(bPC * num(cen.cofins_aliquota) / 100); }
       }
       if (cen.k === 'G' && ex.informacoesItem) x.informacoes_adicionais_item = txt(ex.informacoesItem, 500);
 
@@ -752,7 +755,7 @@
       const pisCst = mono ? txt(cen.pis_cst_monofasico) || '04' : !t.pisCofinsImp ? txt(cen.pis_cst_extinto) || '08' : txt(cen.pis_cst);
       const cofCst = mono ? txt(cen.pis_cst_monofasico) || '04' : !t.pisCofinsImp ? txt(cen.pis_cst_extinto) || '08' : txt(cen.cofins_cst);
       x.pis_situacao_tributaria = pisCst; x.cofins_situacao_tributaria = cofCst;
-      const basePC = r2(V - (cen.pis_cofins_exclui_icms ? ICMS : 0));
+      const basePC = r2(V + outras - (cen.pis_cofins_exclui_icms ? ICMS : 0));
       if (!CST_PIS_SEM_VALOR.includes(pisCst)) Object.assign(x, { pis_base_calculo: basePC, pis_aliquota_porcentual: num(cen.pis_aliquota), pis_valor: PIS });
       if (!CST_PIS_SEM_VALOR.includes(cofCst)) Object.assign(x, { cofins_base_calculo: basePC, cofins_aliquota_porcentual: num(cen.cofins_aliquota), cofins_valor: COF });
       if (txt(cen.ipi_cst)) { x.ipi_situacao_tributaria = txt(cen.ipi_cst); x.ipi_codigo_enquadramento_legal = txt(cen.ipi_enquadramento) || '999'; }
