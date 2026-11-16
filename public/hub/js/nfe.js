@@ -305,7 +305,7 @@
 
   /* ---------------- Corrigir dados (volta a montar no servidor) ---------------- */
   function editar(n) {
-    const e = n.entrada || {}, ex = e.extras || {}, du = ex.duimp || {}, itens = e.itens || [], cen = n.cenario;
+    const e = n.entrada || {}, ex = e.extras || {}, du = ex.duimp || {}, itens = (e.itens || []).slice(), cen = n.cenario;
     /* Complementar/ajuste: remetente e destinatário são os da nota original (só leitura). */
     const refG = cen === 'G' && ex.referencia ? (H.db.hubNFe || []).find(x => x && (x._id === ex.referencia || (x.chave && x.chave === String(ex.referencia).replace(/\D/g, '')))) : null;
     const dRef = refG ? W.destDoPayload(refG) : null, d = dRef || e.destinatario || {};
@@ -318,6 +318,11 @@
     const campo = (k, l, val, extra) => `<div class="f ${extra || ''}"><label class="lbl" for="e_${k}">${l}</label><input id="e_${k}" data-k="${k}" value="${esc(val == null ? '' : val)}"></div>`;
     const dest = estr ? [['nome', 'Exportador'], ['pais', 'País'], ['codigo_pais', 'Código do país (BACEN)'], ['logradouro', 'Endereço'], ['numero', 'Número'], ['id_estrangeiro', 'ID estrangeiro']]
       : [['nome', 'Razão social'], ['cnpj', 'CNPJ ou CPF'], ['ie', 'Inscrição estadual'], ['logradouro', 'Logradouro'], ['numero', 'Número'], ['complemento', 'Complemento'], ['bairro', 'Bairro'], ['municipio', 'Município'], ['codigo_municipio', 'Código IBGE do município'], ['uf', 'UF'], ['cep', 'CEP'], ['email', 'E-mail'], ['telefone', 'Telefone']];
+    const linhaItem = (it, i) => { const ad = it.adicao || {}, inp = (c, val, w) => `<input class="inp" data-i="${i}" data-c="${c}" value="${esc(val == null ? '' : val)}" style="width:${w || 80}px">`;
+          const ce = ces[i], val = c => ['ii', 'ipi', 'pis', 'cofins'].includes(c) && (it[c] == null || it[c] === '') && ce && ce[c] != null ? ce[c] : it[c];
+          return `<tr>${[...(cen === 'G' ? ['codigo'] : []), 'descricao', 'ncm', 'unidade', 'quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].map(c => `<td>${inp(c, val(c), c === 'descricao' ? 200 : c === 'unidade' || c === 'codigo' ? 48 : c === 'valorUnitario' || c === 'ncm' ? 110 : 64)}</td>`).join('')}
+            <td><input type="checkbox" data-i="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td><input type="checkbox" data-i="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
+            ${A ? `<td>${inp('ad.numero', ad.numero, 48)}</td><td>${inp('ad.sequencial', ad.sequencial, 48)}</td><td>${inp('ad.fabricante', ad.fabricante, 140)}</td>` : ''}${cen === 'G' ? `<td>${inp('cfop', it.cfop, 60)}</td><td>${inp('outras', it.outras ? fmtN(it.outras) : '', 90)}</td><td><button class="btn ghost sm" type="button" data-rmi="${i}" title="Remover item">×</button></td>` : ''}</tr>`; };
     const m = H.modal(`Corrigir dados · ${n.ref}`, `<p class="note" style="margin-bottom:8px">Ao salvar, o servidor monta a nota de novo e recalcula as pendências. ${n.status === 'conferida' ? '<b>A conferência anterior deixa de valer.</b>' : ''}</p>
       <div class="fields">${campo('dataEmissao', 'Data de emissão', e.dataEmissao)}</div>
       <h3 class="h3" style="margin-top:10px">${estr ? 'Exportador' : 'Destinatário'}</h3>
@@ -330,12 +335,9 @@
       <div class="fields">${campo('icmsAliquota', 'ICMS de importação (%) — se o cenário não fixa', ex.icmsAliquota)}${campo('terceiroCnpj', 'CNPJ adquirente/encomendante', ex.terceiroCnpj)}${campo('terceiroUf', 'UF adquirente/encomendante', ex.terceiroUf)}</div>` : ''}
       ${cen === 'G' ? `<h3 class="h3" style="margin-top:10px">Nota de ajuste</h3><div class="fields">${campo('cfop', 'CFOP', ex.cfop)}${campo('finalidade', 'Finalidade (2, 3 ou 4)', ex.finalidade)}${campo('tipo_documento', 'Tipo (0 entrada, 1 saída)', ex.tipo_documento)}${campo('natureza', 'Natureza da operação', ex.natureza, 'w2')}${campo('referencia', 'Nota original (id ou chave)', ex.referencia, 'w2')}${campo('informacoesItem', 'Informação por item', ex.informacoesItem, 'w4')}</div>` : ''}
       <h3 class="h3" style="margin-top:10px">Itens</h3>
-      <div class="tw"><table id="fitens"><thead><tr><th>Descrição</th><th>NCM</th><th>Un</th><th>Qtd</th><th>Valor unit. (R$)</th><th>II %</th><th>IPI %</th><th>PIS %</th><th>COFINS %</th><th>52/91</th><th>Mono</th>${A ? '<th>Adição</th><th>Seq.</th><th>Fabricante</th>' : ''}${cen === 'G' ? '<th>CFOP</th><th>Outras desp. (R$)</th>' : ''}</tr></thead><tbody>
-        ${itens.map((it, i) => { const ad = it.adicao || {}, inp = (c, val, w) => `<input class="inp" data-i="${i}" data-c="${c}" value="${esc(val == null ? '' : val)}" style="width:${w || 80}px">`;
-          const ce = ces[i], val = c => ['ii', 'ipi', 'pis', 'cofins'].includes(c) && (it[c] == null || it[c] === '') && ce && ce[c] != null ? ce[c] : it[c];
-          return `<tr>${['descricao', 'ncm', 'unidade', 'quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].map(c => `<td>${inp(c, val(c), c === 'descricao' ? 200 : c === 'unidade' ? 48 : c === 'valorUnitario' || c === 'ncm' ? 110 : 64)}</td>`).join('')}
-            <td><input type="checkbox" data-i="${i}" data-c="c5291" ${it.c5291 ? 'checked' : ''}></td><td><input type="checkbox" data-i="${i}" data-c="mono" ${it.mono ? 'checked' : ''}></td>
-            ${A ? `<td>${inp('ad.numero', ad.numero, 48)}</td><td>${inp('ad.sequencial', ad.sequencial, 48)}</td><td>${inp('ad.fabricante', ad.fabricante, 140)}</td>` : ''}${cen === 'G' ? `<td>${inp('cfop', it.cfop, 60)}</td><td>${inp('outras', it.outras ? fmtN(it.outras) : '', 90)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+      <div class="tw"><table id="fitens"><thead><tr>${cen === 'G' ? '<th>Código</th>' : ''}<th>Descrição</th><th>NCM</th><th>Un</th><th>Qtd</th><th>Valor unit. (R$)</th><th>II %</th><th>IPI %</th><th>PIS %</th><th>COFINS %</th><th>52/91</th><th>Mono</th>${A ? '<th>Adição</th><th>Seq.</th><th>Fabricante</th>' : ''}${cen === 'G' ? '<th>CFOP</th><th>Outras desp. (R$)</th><th></th>' : ''}</tr></thead><tbody>
+        ${itens.map(linhaItem).join('')}</tbody></table></div>
+      ${cen === 'G' ? '<button class="btn sm" type="button" id="e_addit" style="margin-top:6px">+ Adicionar item</button>' : ''}
       ${custos ? `<h3 class="h3" style="margin-top:10px">Valor de venda sobre a NF de entrada</h3>
       <div class="fields"><div class="f"><label class="lbl" for="e_div">Divisor (venda = custo da entrada ÷ divisor)</label><input id="e_div" inputmode="decimal" value="${esc(fmtN(lerN(ex.divisorEntrada) || divPadrao))}"></div>
         <div class="f w2"><span class="lbl">Total</span><span class="ro" id="e_divres"></span></div><div class="f"><span class="lbl">&nbsp;</span><button class="btn" id="e_divok" type="button">Aplicar nos itens</button></div></div>
@@ -349,6 +351,16 @@
       <div class="fields" style="margin-top:10px"><div class="f w4"><label class="lbl" for="e_infos">Informações complementares (além das automáticas)</label><textarea id="e_infos" rows="2">${esc(ex.informacoes || '')}</textarea></div></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="e_ok">Salvar e montar de novo</button>');
     m.querySelector('.modal').classList.add('larga');
+    /* Nota complementar: incluir/remover itens (ex.: 001 NOTA FISCAL COMPLEMENTAR). */
+    const removidos = new Set();
+    m.querySelectorAll('[data-rmi]').forEach(b => { b.onclick = () => { removidos.add(+b.dataset.rmi); b.closest('tr').remove(); }; });
+    const addIt = m.querySelector('#e_addit');
+    if (addIt) addIt.onclick = () => {
+      const ncm0 = (itens.find(x => x && x.ncm) || {}).ncm || (((refG && refG.payload && refG.payload.items) || [])[0] || {}).codigo_ncm || '';
+      const it = { codigo: '001', descricao: 'NOTA FISCAL COMPLEMENTAR', ncm: ncm0, unidade: 'UN', quantidade: 1, valorUnitario: 0, cfop: ex.cfop || '' }, i = itens.length; itens.push(it);
+      m.querySelector('#fitens tbody').insertAdjacentHTML('beforeend', linhaItem(it, i));
+      const rb = m.querySelector(`[data-rmi="${i}"]`); if (rb) rb.onclick = () => { removidos.add(i); rb.closest('tr').remove(); };
+    };
     if (custos) {
       const divI = m.querySelector('#e_div'), res = m.querySelector('#e_divres');
       const mostra = () => { const dv = lerN(divI.value); res.textContent = dv ? `NF de entrada ${W.fmtBRL(custos.total)} ÷ ${fmtN(dv)} = ${W.fmtBRL(custos.total / dv)}` : 'Informe um divisor maior que zero.'; return dv; };
@@ -371,7 +383,7 @@
       const novos = itens.map((it, i) => { const x = Object.assign({}, it, { adicao: Object.assign({}, it.adicao) });
         m.querySelectorAll(`[data-i="${i}"]`).forEach(inp => { const c = inp.dataset.c; const val = inp.type === 'checkbox' ? inp.checked : inp.value.trim();
           if (c.startsWith('ad.')) x.adicao[c.slice(3)] = val; else if (['quantidade', 'valorUnitario', 'ii', 'ipi', 'pis', 'cofins'].includes(c)) x[c] = val === '' ? null : +String(val).replace(',', '.'); else if (c === 'outras') x[c] = lerN(val) || ''; else x[c] = val; });
-        return x; });
+        return x; }).filter((x, i) => !removidos.has(i));
       ev.target.disabled = true;
       const r = await post('/api/nfe/montar', { id: n._id, itens: novos, destinatario: destino, extras, dataEmissao: v(m, '#e_dataEmissao') }).catch(() => ({ ok: false, j: {} }));
       ev.target.disabled = false;

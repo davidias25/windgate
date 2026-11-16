@@ -257,8 +257,11 @@
       out.destinatario = {};
       out.extras.duimp = {};
     } else if (cen.k === 'G') {
-      if (ref && ref.entrada) { out.itens = (ref.entrada.itens || []).map(x => Object.assign({}, x)); out.opId = ref.op || out.opId; }
-      out.extras = { referencia: ref ? ref._id : '', finalidade: 2, cfop: '' };
+      /* Nasce com um item "001 NOTA FISCAL COMPLEMENTAR" (NCM e CFOP da original); o valor vai em outras despesas ou no valor unitário. */
+      const it0 = ((ref && ref.payload && ref.payload.items) || [])[0] || {};
+      if (ref) out.opId = ref.op || out.opId;
+      out.itens = [{ codigo: '001', descricao: 'NOTA FISCAL COMPLEMENTAR', ncm: soDig(it0.codigo_ncm) || soDig(((ref && ref.entrada && ref.entrada.itens) || [])[0] && ref.entrada.itens[0].ncm), unidade: 'UN', quantidade: 1, valorUnitario: 0, outras: '' }];
+      out.extras = { referencia: ref ? ref._id : '', finalidade: 2, cfop: txt(it0.cfop) };
     } else {
       const ent = orig && orig.cenario === 'A' ? orig : notaEntradaDaOp(db, a.opId, a.ambiente), itensEnt = ent && ent.payload ? ent.payload.items || [] : [];
       const baseEnt = x => num(x.valor_bruto) + num(x.valor_frete) + num(x.valor_seguro) + num(x.ipi_valor) + num(x.ii_valor) + num(x.valor_outras_despesas);
