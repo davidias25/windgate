@@ -784,6 +784,15 @@
         if (!(cen.aplica_monofasico && it.mono) && t.pisCofinsImp && !CST_PIS_SEM_VALOR.includes(txt(cen.pis_cst))) { const bPC = r2(V + outras - (cen.pis_cofins_exclui_icms ? ICMS : 0)); PIS = r2(bPC * num(cen.pis_aliquota) / 100); COF = r2(bPC * num(cen.cofins_aliquota) / 100); }
       }
       if (cen.k === 'G' && ex.informacoesItem) x.informacoes_adicionais_item = txt(ex.informacoesItem, 500);
+      /* Complementar com CFOP de importação (3xxx): a SEFAZ exige os dados da DI (rejeição 525) e o grupo do II.
+         Vêm da nota original, como saíram no XML dela; o II do complemento vai zerado. */
+      if (cen.k === 'G' && /^3/.test(cfop)) {
+        const its = (refNota && refNota.payload && refNota.payload.items) || [], ri = its[i] && its[i].documentos_importacao ? its[i] : its.find(y => y && y.documentos_importacao);
+        if (ri) {
+          x.documentos_importacao = JSON.parse(JSON.stringify(ri.documentos_importacao));
+          Object.assign(x, { ii_base_calculo: 0, ii_despesas_aduaneiras: 0, ii_valor: 0, ii_valor_iof: 0 });
+        } else P(`items[${n}].documentos_importacao`, `Item ${n}: CFOP de importação (${cfop}) precisa dos dados da DI. Escolha como nota original a NF de entrada de importação autorizada no sistema.`);
+      }
 
       /* PIS/COFINS: monofásico (CST 04), extinto (após 2026) ou pelo cenário. */
       const mono = cen.aplica_monofasico && it.mono;
