@@ -234,6 +234,9 @@ const autorizada = (db, cen, op, m, chave) => ({ _id: 'n-' + cen + op, ref: 'wg-
     ok(vE.peso_liquido === 180 && vE.peso_bruto === 210.5 && mE.avisos.some(a => /Peso líquido digitado/.test(a)) && mE.avisos.some(a => /Peso bruto digitado/.test(a)), 'digitado vale no lugar, com aviso');
     const mV = R.montarNFe(dbP, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29', extras: Object.assign({}, sD.extras, { pesoLiquido: '', pesoBruto: '' }) }));
     ok(mV.payload.volumes[0].peso_bruto === 950 && !mV.avisos.some(a => /digitado/.test(a)), 'vazio: volta ao automático');
+    ok(vS.quantidade === volA.quantidade && vS.especie === volA.especie, 'saída: quantidade e espécie dos volumes vêm da NF de entrada');
+    const mQ = R.montarNFe(dbP, Object.assign({}, sD, { ambiente: 'homologacao', dataEmissao: '2026-10-29', extras: Object.assign({}, sD.extras, { volumes: '3', especie: 'CAIXAS', marca: 'OZONE' }) })), vQ = mQ.payload.volumes[0];
+    ok(vQ.quantidade === 3 && vQ.especie === 'CAIXAS' && vQ.marca === 'OZONE' && vQ.peso_bruto === 950 && mQ.avisos.some(a => /Quantidade de volumes digitada/.test(a)), 'saída: quantidade, espécie e marca digitadas valem no lugar, pesos continuam');
     const semEnt = banco(), mC2 = montar(semEnt, 'C', 'OP30');
     ok(mC2.payload.volumes === undefined || mC2.totais.auto.fonte !== 'NF de entrada', 'sem NF de entrada nem peso na cotação: sem volumes inventados');
     const comPeso = banco(); comPeso.quotes.q30.items[0].p = 2.5;

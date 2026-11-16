@@ -602,10 +602,17 @@
        o líquido da cotação (quantidade × peso). O que for digitado na nota vale no lugar. */
     const entPeso = a.opId ? notaEntradaDaOp(db, a.opId, a.ambiente) : null, volE = (entPeso && entPeso.payload && Array.isArray(entPeso.payload.volumes) && entPeso.payload.volumes[0]) || {};
     const qPeso = o && W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null, pesoCot = qPeso ? (qPeso.items || []).filter(Boolean).reduce((s, it) => s + num(it.q) * num(it.p), 0) : 0;
-    const pesoAuto = { pesoLiquido: num(volE.peso_liquido) || +pesoCot.toFixed(3) || '', pesoBruto: num(volE.peso_bruto) || '', fonte: volE.peso_liquido ? 'NF de entrada' : pesoCot ? 'cotação' : '' };
+    const pesoAuto = { pesoLiquido: num(volE.peso_liquido) || +pesoCot.toFixed(3) || '', pesoBruto: num(volE.peso_bruto) || '', fonte: volE.peso_liquido ? 'NF de entrada' : pesoCot ? 'cotação' : '',
+      volumes: num(volE.quantidade) ? Math.round(num(volE.quantidade)) : '', especie: txt(volE.especie, 60), marca: txt(volE.marca, 60) };
     const pesoDig = k => (ex[k] !== '' && ex[k] != null && isFinite(num(ex[k])) ? num(ex[k]) : null);
     const pesoLiqS = pesoDig('pesoLiquido') != null ? pesoDig('pesoLiquido') : pesoAuto.pesoLiquido, pesoBrutoS = pesoDig('pesoBruto') != null ? pesoDig('pesoBruto') : pesoAuto.pesoBruto;
-    const volumesSaida = num(pesoLiqS) || num(pesoBrutoS) ? [limpar({ peso_liquido: num(pesoLiqS) ? +num(pesoLiqS).toFixed(3) : '', peso_bruto: num(pesoBrutoS) ? +num(pesoBrutoS).toFixed(3) : '' })] : '';
+    /* Quantidade, espécie e marca dos volumes: as da NF de entrada; o que for digitado na nota vale no lugar. */
+    const volQtdS = pesoDig('volumes') != null ? Math.round(pesoDig('volumes')) : pesoAuto.volumes;
+    const txtDig = k => (ex[k] != null && String(ex[k]).trim() !== '' ? txt(ex[k], 60) : null);
+    const especieS = txtDig('especie') != null ? txtDig('especie') : pesoAuto.especie, marcaS = txtDig('marca') != null ? txtDig('marca') : pesoAuto.marca;
+    const volumesSaida = num(pesoLiqS) || num(pesoBrutoS) || num(volQtdS) || especieS || marcaS ? [limpar({ quantidade: num(volQtdS) ? volQtdS : '', especie: especieS || '', marca: marcaS || '',
+      peso_liquido: num(pesoLiqS) ? +num(pesoLiqS).toFixed(3) : '', peso_bruto: num(pesoBrutoS) ? +num(pesoBrutoS).toFixed(3) : '' })] : '';
+    if (pesoDig('volumes') != null && Math.round(pesoDig('volumes')) !== num(pesoAuto.volumes)) A(`Quantidade de volumes digitada na nota: ${Math.round(pesoDig('volumes'))} (automático: ${pesoAuto.volumes || '—'}).`);
     if (pesoDig('pesoLiquido') != null && pesoDig('pesoLiquido') !== num(pesoAuto.pesoLiquido)) A(`Peso líquido digitado na nota: ${pesoDig('pesoLiquido')} kg (automático: ${pesoAuto.pesoLiquido || '—'}${pesoAuto.fonte ? ', da ' + pesoAuto.fonte : ''}).`);
     if (pesoDig('pesoBruto') != null && pesoDig('pesoBruto') !== num(pesoAuto.pesoBruto)) A(`Peso bruto digitado na nota: ${pesoDig('pesoBruto')} kg (automático: ${pesoAuto.pesoBruto || '—'}).`);
     if (!a.opId && cen.k !== 'G') P('op', 'Escolha a operação da nota.');
