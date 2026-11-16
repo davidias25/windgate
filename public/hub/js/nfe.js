@@ -305,7 +305,10 @@
 
   /* ---------------- Corrigir dados (volta a montar no servidor) ---------------- */
   function editar(n) {
-    const e = n.entrada || {}, d = e.destinatario || {}, ex = e.extras || {}, du = ex.duimp || {}, itens = e.itens || [], cen = n.cenario;
+    const e = n.entrada || {}, ex = e.extras || {}, du = ex.duimp || {}, itens = e.itens || [], cen = n.cenario;
+    /* Complementar/ajuste: remetente e destinatário são os da nota original (só leitura). */
+    const refG = cen === 'G' && ex.referencia ? (H.db.hubNFe || []).find(x => x && (x._id === ex.referencia || (x.chave && x.chave === String(ex.referencia).replace(/\D/g, '')))) : null;
+    const dRef = refG ? W.destDoPayload(refG) : null, d = dRef || e.destinatario || {};
     const estr = cen === 'A' || d.estrangeiro, A = cen === 'A';
     /* Venda sobre a NF de entrada (como no Maino): valor do item = custo dele na entrada ÷ divisor; alíquotas que faltam vêm da entrada. */
     const entV = A || cen === 'G' ? null : W.entradaDaVenda(H.db, n), custos = entV ? W.custosEntrada(entV) : null;
@@ -318,8 +321,9 @@
     const m = H.modal(`Corrigir dados · ${n.ref}`, `<p class="note" style="margin-bottom:8px">Ao salvar, o servidor monta a nota de novo e recalcula as pendências. ${n.status === 'conferida' ? '<b>A conferência anterior deixa de valer.</b>' : ''}</p>
       <div class="fields">${campo('dataEmissao', 'Data de emissão', e.dataEmissao)}</div>
       <h3 class="h3" style="margin-top:10px">${estr ? 'Exportador' : 'Destinatário'}</h3>
-      <div class="fields" id="fdest">${dest.map(([k, l]) => campo(k, l, d[k], k === 'nome' || k === 'logradouro' ? 'w2' : '')).join('')}
-        ${estr || cen === 'F' ? '' : `<div class="f"><label class="lbl" for="e_contrib">Contribuinte ICMS</label><select id="e_contrib"><option value="">a confirmar</option><option value="sim" ${d.contribuinte === true ? 'selected' : ''}>Sim</option><option value="nao" ${d.contribuinte === false ? 'selected' : ''}>Não</option></select></div>`}</div>
+      ${dRef ? `<p class="note">Iguais aos da nota original ${esc(refG.numero ? 'nº ' + refG.numero : refG.ref || '')}: remetente <b>${esc(W.nomeEmpresa ? W.nomeEmpresa(refG.empresa) : refG.empresa)}</b> e o destinatário abaixo. Para mudar, troque a nota original.</p>` : ''}
+      <div class="fields" id="fdest" ${dRef ? 'style="opacity:.7;pointer-events:none"' : ''}>${dest.map(([k, l]) => campo(k, l, d[k], k === 'nome' || k === 'logradouro' ? 'w2' : '')).join('')}
+        ${estr || cen === 'F' || dRef ? '' : `<div class="f"><label class="lbl" for="e_contrib">Contribuinte ICMS</label><select id="e_contrib"><option value="">a confirmar</option><option value="sim" ${d.contribuinte === true ? 'selected' : ''}>Sim</option><option value="nao" ${d.contribuinte === false ? 'selected' : ''}>Não</option></select></div>`}</div>
       ${A ? `<h3 class="h3" style="margin-top:10px">DUIMP (do extrato do despachante)</h3>
       <div class="fields" id="fduimp">${[['numero', 'Número da DUIMP'], ['data_registro', 'Data de registro (AAAA-MM-DD)'], ['local', 'Local do desembaraço'], ['uf', 'UF do desembaraço'], ['data_desembaraco', 'Data do desembaraço'], ['via_transporte', 'Via (1 = marítima)'], ['afrmm', 'AFRMM (R$)'], ['siscomex', 'Taxa Siscomex (R$)'], ['outras', 'Outras despesas aduaneiras (R$)'], ['codigo_exportador', 'Código do exportador']].map(([k, l]) => campo(k, l, du[k])).join('')}
         <div class="f w2"><label class="lbl"><input type="checkbox" id="e_duconf" style="width:auto" ${du.manual ? '' : 'checked'}> Conferido com a DUIMP</label></div></div>

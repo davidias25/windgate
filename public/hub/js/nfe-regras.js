@@ -191,6 +191,18 @@
   const destDeCliente = c => c ? { nome: c.empresa || c.nome || '', cnpj: soDig(c.cnpj), ie: c.ie || '', contribuinte: c.contribuinte, email: c.email || '', telefone: soDig(c.fone),
     logradouro: (c.end || {}).logradouro || '', numero: (c.end || {}).numero || '', bairro: (c.end || {}).bairro || '', municipio: (c.end || {}).cidade || '', codigo_municipio: (c.end || {}).codigoMunicipio || '', uf: (c.end || {}).uf || '', cep: soDig((c.end || {}).cep) } : {};
   /** Destinatário de partida: CRM, empresa do grupo ou exportador; completa com a última nota para o mesmo CNPJ. */
+  /** Destinatário exatamente como saiu na nota (payload enviado à Focus): base da nota complementar/ajuste. */
+  function destDoPayload(ref) {
+    const py = (ref && ref.payload) || {}, ent = (ref && ref.entrada && ref.entrada.destinatario) || {}, g = k => py[k + '_destinatario'];
+    if (!g('nome') && !g('cnpj') && !g('cpf')) return null;
+    const estr = String(g('municipio') || '').toUpperCase() === 'EXTERIOR' || (soDig(g('codigo_pais')) && soDig(g('codigo_pais')) !== '1058');
+    const d = { nome: txt(ent.nome) || g('nome') || '', cnpj: g('cnpj') || '', cpf: g('cpf') || '', ie: g('inscricao_estadual') || '', indicador_ie: g('indicador_inscricao_estadual') || '',
+      logradouro: g('logradouro') || '', numero: g('numero') || '', complemento: g('complemento') || '', bairro: g('bairro') || '', municipio: g('municipio') || '',
+      codigo_municipio: g('codigo_municipio') || '', uf: g('uf') || '', cep: g('cep') || '', pais: g('pais') || '', codigo_pais: g('codigo_pais') || '',
+      id_estrangeiro: g('id_estrangeiro') || '', telefone: g('telefone') || '', email: g('email') || '', estrangeiro: !!estr };
+    if (+d.indicador_ie === 1) d.contribuinte = true; else if (+d.indicador_ie === 9) d.contribuinte = false;
+    return d;
+  }
   function destinatarioBase(db, cen, o, ref) {
     let d = {};
     if (cen.destino === 'exportador') d = { nome: (o && (o.fornecedor || o.fabrica)) || '', pais: (o && o.paisOrigem) || '', codigo_pais: '', municipio: 'EXTERIOR', codigo_municipio: '9999999', logradouro: '', numero: 'S/N', bairro: '', estrangeiro: true };
@@ -632,14 +644,18 @@
 
     const data = ehData(a.dataEmissao) ? a.dataEmissao : W.soData(W.hojeISO());
     const t = W.tributosNaData(db, data);
-    const empresa = cen.emitente === 'qualquer' || cen.k === 'G' ? (a.empresa || (refNota && refNota.empresa) || (o && o.empresa) || 'WindGate') : cen.emitente;
+    /* Complementar/ajuste: remetente e destinatário iguais aos da nota original, sem edição. */
+    const empresa = cen.k === 'G' && refNota && refNota.empresa ? refNota.empresa
+      : cen.emitente === 'qualquer' || cen.k === 'G' ? (a.empresa || (refNota && refNota.empresa) || (o && o.empresa) || 'WindGate') : cen.emitente;
     if (a.empresa && cen.emitente !== 'qualquer' && cen.k !== 'G' && a.empresa !== cen.emitente) P('empresa', `O cenário ${cen.k} é emitido pela ${nomeEmpresa(cen.emitente)}.`);
     const emit = empresaDados(db, empresa);
     if (soDig(emit.cnpj).length !== 14) P('cnpj_emitente', `CNPJ da ${nomeEmpresa(empresa)} não cadastrado (Fiscal › Configurar).`);
     if (!emit.uf) P('uf_emitente', `UF da ${nomeEmpresa(empresa)} não cadastrada.`);
 
     /* ---- Destinatário ---- */
-    const dest = Object.assign({}, destinatarioBase(db, cen, o, refNota), a.destinatario || {});
+    const destRef = cen.k === 'G' ? destDoPayload(refNota) : null;
+    const dest = destRef ? destRef : Object.assign({}, destinatarioBase(db, cen, o, refNota), a.destinatario || {});
+    if (destRef) A(`Remetente e destinatário iguais aos da nota original ${refNota.numero ? 'nº ' + refNota.numero : refNota.ref || ''} (${nomeEmpresa(empresa)} → ${txt(destRef.nome, 60)}).`);
     const estrangeiro = cen.destino === 'exportador' || !!dest.estrangeiro;
     let indIE;
     if (estrangeiro || cen.destino === 'consumidor') indIE = 9;
@@ -898,5 +914,5 @@
 
   return { montarEntradaDuimp, conferirDuimpCotacao, dataDesembaracoDaOp, PAISES_BACEN, paisBacen,
     CENARIOS_PADRAO, CAMPOS_CENARIO, cenarios, cenarioDe, CONFIG_PADRAO, configNFe, empresaDados, FORMA_INTERMEDIO, formaIntermedio, STATUS_NFE, HOMOLOGACAO_NOME,
-    clienteDaOp, notaEntradaDaOp, custosEntrada, entradaDaVenda, custoDoItem, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, totaisCabecalho, r2 };
+    clienteDaOp, notaEntradaDaOp, custosEntrada, entradaDaVenda, custoDoItem, destDoPayload, aliquotasItem, sugerirEntrada, montarNFe, refNFe, proximaRef, podeAcao, aplicarRetornoFocus, mensagemFocus, paraEnvio, totaisCabecalho, r2 };
 });
