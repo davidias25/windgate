@@ -98,7 +98,7 @@
         <td>${pillPrio(t.prio)}</td>
         <td class="note">${esc(t.obs || '')}${origem ? `${t.obs ? '<br>' : ''}${origem}` : ''}</td>
         <td class="note">${esc(t.por || '')}</td>
-        <td style="white-space:nowrap"><button class="btn sm" data-edit>Editar</button> ${!auto || W.podeGerir(H.userKey) ? '<button class="btn sm ghost" data-del title="Excluir tarefa">Excluir</button>' : ''}</td></tr>`
+        <td style="white-space:nowrap"><button class="btn sm" data-edit>Editar</button> <button class="btn sm ghost" data-del title="Excluir tarefa">Excluir</button></td></tr>`
         + (aberto ? linhaSubs(t, id, subs, pessoas, nome) : '');
     };
 
@@ -129,8 +129,10 @@
     el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { const t = achar(b); if (t) modalTarefa(t); });
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
       const t = achar(b); if (!t) return;
-      if (!confirm(`Excluir a tarefa "${t.t}"?`)) return;
-      const l = tarefas(), i = l.indexOf(t); if (i >= 0) l.splice(i, 1);
+      const auto = W.ehAuto && W.ehAuto(t);
+      if (!confirm(`Excluir a tarefa "${t.t}"?${auto ? '\n\nEla foi criada pelo sistema: fica registrado que você excluiu, e ela não volta a ser criada para esta operação.' : ''}`)) return;
+      if (auto && W.excluirTarefa) W.excluirTarefa(H.db, t, H.nomeUsuario ? H.nomeUsuario(H.userKey) : H.userKey);
+      else { const l = tarefas(), i = l.indexOf(t); if (i >= 0) l.splice(i, 1); }
       H.salvar(); H.toast('Tarefa excluída'); H.render();
     });
     el.querySelectorAll('[data-agop]').forEach(a => a.onclick = e => { e.preventDefault(); H.ir('ficha', a.dataset.agop); });

@@ -102,7 +102,7 @@
     const chave = chaveDe(g, alvo), ja = tarefaDe(db, chave);
     if (ja) return { tarefa: ja, criada: false };
     const id = idTarefa(chave);
-    if (removido(db, id)) return { tarefa: null, criada: false, excluida: true };
+    if (removido(db, id) || excluidaNoLog(db, chave)) return { tarefa: null, criada: false, excluida: true };
     const filhas = filhasDe(db, alvo), prazo = c.prazo || somaDias(hoje, cfg.prazos[g]);
     const titulo = def.titulo(alvo.id) + (filhas.length ? ` · contêiner com ${filhas.join(', ')}` : '');
     const obs = [c.retroativo ? 'Gerado retroativamente: a etapa pulou este passo.' : '', c.origemBackfill ? `Criada pela prévia, aprovada por ${c.por || '—'}.` : ''].filter(Boolean).join(' ');
@@ -270,6 +270,14 @@
   const podeConcluir = (db, k, t) => !ehAuto(t) || podeGerir(k) || nomeDe(db, k) === t.resp;
   /** Reatribuir tarefa automática: só Davi e Samir. */
   const podeReatribuir = (db, k, t) => !ehAuto(t) || podeGerir(k);
+  /** Excluir: qualquer usuário, inclusive a automática. Fica no log quem excluiu, e ela não é recriada para a operação. */
+  function excluirTarefa(db, t, por, agora) {
+    const l = db.agendaTasks || [], i = l.indexOf(t); if (i < 0) return false;
+    l.splice(i, 1);
+    if (ehAuto(t)) registrar(db, { acao: 'excluida', gatilho: t.auto.gatilho, chave: t.auto.chave, op: t.auto.op, tarefa: t._id, resp: t.resp, por: por || '', em: agora || new Date().toISOString(), motivo: 'excluída na agenda' });
+    return true;
+  }
+  const excluidaNoLog = (db, chave) => (db.hubTarefasLog || []).some(x => x && x.acao === 'excluida' && x.chave === chave);
   /** Conclusão com quem, quando e observação. Reabrir uma G1 impede que o marco a feche de novo. */
   function concluirTarefa(t, quem, agora, obs) {
     t.status = 'feita'; t.doneAt = hojeSP(agora); t.feitaPor = quem || ''; t.feitaEm = agora || new Date().toISOString(); t.obsConclusao = String(obs || '').trim();
@@ -333,5 +341,5 @@
 
   return { PRAZOS_PADRAO, ROTULOS_PRAZO, GATILHOS, GESTORES, MARCAM_FRETE, configTarefas, nomeDeUsuario: nomeDe, chaveDeUsuario, alvoDe, chaveDe, idTarefa, tarefaDe, freteDe, ehAuto,
     garantirTarefa, avaliarG4, reconciliar, aoGravar, escalonar, rodadaDiaria, previaBackfill, aplicarBackfill,
-    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, concluirTarefa, reabrirTarefa, marcarFreteFechado, tarefasNaTorre, tarefasDaOp, rankingTarefas };
+    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, marcarFreteFechado, tarefasNaTorre, tarefasDaOp, rankingTarefas };
 });

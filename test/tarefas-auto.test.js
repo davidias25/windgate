@@ -196,6 +196,19 @@ console.log('\nPrazos editáveis:');
   ok(tarefas(db, 'G1')[0].prazo === '2026-11-20', 'Fechar frete com o prazo editado (7 dias)');
 }
 
+console.log('\nExcluir tarefa automática (qualquer usuário):');
+{
+  const db = banco();
+  gravar(db, d => { op(d, 'OP300').status = 'preparacao_embarque'; });
+  const t = tarefas(db, 'G1')[0];
+  ok(T.excluirTarefa(db, t, 'Ívina', em('2026-11-14')) && !tarefas(db, 'G1').length, 'a Ívina exclui o "Fechar frete" do Matheus');
+  ok(db.hubTarefasLog.some(l => l.acao === 'excluida' && l.por === 'Ívina' && l.op === 'OP300' && l.gatilho === 'G1'), 'log: quem excluiu e de qual operação');
+  db._removidos = {};   // mesmo sem a marca de exclusão do sincronismo (podada com o tempo)
+  gravar(db, d => { op(d, 'OP300').status = 'em_producao'; });
+  gravar(db, d => { op(d, 'OP300').status = 'preparacao_embarque'; });
+  ok(!tarefas(db, 'G1').length, 'voltar à etapa não recria a tarefa excluída');
+}
+
 (async () => {
   console.log('\nPelo servidor (gravação em /api/db):');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tarefas-'));
