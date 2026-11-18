@@ -251,5 +251,27 @@ if (fs.existsSync(ARQ)) {
   ok(perto(sim.custo, 167479.24) && perto(sim.margem, 52520.76), 'Azul desiste: Márcio com custo R$ 167.479,24 e margem R$ 52.520,76 (' + sim.custo.toFixed(2) + ' / ' + sim.margem.toFixed(2) + ')');
 } else console.log('\n  ⚠️  sem backups/op227.json nesta máquina: os valores de aceite da OP227 não foram conferidos.');
 
+console.log('\nConferência 18/11: filha que já existe com lançamentos (OP26.2) e datas da mãe:');
+{
+  const q = cotacao(), d = banco(q);
+  /* A filha OP300.1 já existe, com o ETA do contêiner, e com lançamentos feitos à mão. */
+  d.ops.push({ _id: 'm', id: 'OP300', papel: 'mae', status: 'producao', eta: '2027-01-09', criadaEm: T }, { _id: 'f1', id: 'OP300.1', maeId: 'OP300', cliente: 'Marcos', status: 'producao', eta: '2027-01-09', criadaEm: T });
+  d.fin.push({ _id: 'x1', op: 'OP300.1', tipo: 'Receita', desc: '1ª parcela (manual)', valor: 45000, vencimento: '2026-11-19', status: 'Previsto' },
+    { _id: 'x2', op: 'OP300.1', tipo: 'Receita', desc: '2ª parcela (manual)', valor: 45000, vencimento: '2026-12-19', status: 'Previsto' });
+  W.aprovarCliente(q, 'c1', 'Samir', T);
+  const n0 = d.fin.length, r = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T });
+  ok(!r.ok && r.confirmarExistentes && r.existentes.length === 2 && d.fin.length === n0, 'aprovar: "a OP300.1 já tem 2 lançamentos: substituir, manter ou cancelar", e nada é criado');
+  const rm = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T, lancExistentes: { 'OP300.1': 'manter' } });
+  ok(rm.ok && rm.manteve === 2 && d.fin.length === n0, 'manter: liga a cotação e não lança nada (receita continua R$ 90 mil, não vira o dobro)');
+  const rs = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T, lancExistentes: { 'OP300.1': 'substituir' } });
+  const rec = de(d, 'OP300.1', 'Receita');
+  ok(rs.ok && !d.fin.some(l => l._id === 'x1' || l._id === 'x2') && rec.length && rec.every(l => String(l.origem).startsWith('cotacao:q300')), 'substituir: saem os previstos à mão e entra o cronograma da cotação, uma vez só');
+  const chegada = W.parcelasDe(q.clientes[0] ? W.calcularPorCliente(q).clientes[0].q : q).findIndex(p => p.vinculo === 'chegada');
+  const lc = rec.find(l => new RegExp('^' + (chegada + 1) + 'º recebimento').test(l.desc));
+  ok(chegada < 0 || (lc && lc.vencimento === '2027-01-09'), `a parcela da chegada vence no ETA da mãe (09/01/2027), não em data contada de hoje (${lc ? lc.vencimento : 'sem parcela de chegada'})`);
+  const de2 = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T });
+  ok(de2.ok && de(d, 'OP300.1', 'Receita').length === rec.length, 'aprovar de novo: só sincroniza, sem perguntar e sem duplicar');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
 process.exit(falhou ? 1 : 0);

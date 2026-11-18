@@ -217,6 +217,11 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   ok(r1.id === 'OP77' && r1.op && r1.lancamentos.filter(l => l.tipo === 'Receita').length === 3 && r1.lancamentos.filter(l => l.tipo === 'Despesa' && !l.desc.startsWith('3º')).length === 2 && r1.lancamentos.some(l => l.desc.startsWith('3º pagamento') && l.custo) && r1.lancamentos[0].tipo === 'Receita' && r1.lancamentos[0].vencimento === '2026-11-03' && igual(r1.lancamentos[1].valor, +o.o1.toFixed(2)), 'aprovada vira operação com as 3 parcelas e os 3 pagamentos (5, 35 e 95 dias)');
   const r2 = C.operacaoDaCotacao({ ops: [r1.op], fin: r1.lancamentos }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
   ok(r2.jaLancado && !r2.op && r2.lancamentos.length === 0, 'aprovar de novo não duplica a operação nem o cronograma');
+  {
+    const manual = [{ _id: 'mn1', op: 'OP77', tipo: 'Receita', desc: 'Parcela 1 (lançada à mão)', valor: 45000, vencimento: '2026-11-19', status: 'Previsto' }];
+    const rx = C.operacaoDaCotacao({ ops: [r1.op], fin: manual }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
+    ok(rx.jaTemOutros && rx.daOperacao.length === 1 && rx.daOperacao[0]._id === 'mn1', 'operação que já tem lançamentos feitos à mão (OP26.2): aprovar avisa antes (substituir, manter ou cancelar), não cria em dobro');
+  }
 
   console.log('\nRelançar no Financeiro o que foi excluído:');
   {

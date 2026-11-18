@@ -703,6 +703,12 @@ function triCalcular(e){
     ps.forEach((p, i) => out.push(p.data ? p.data : (i > 0 && p.diasAposAnterior != null) ? somaDias(out[i - 1], p.diasAposAnterior) : i < DIAS_PADRAO.length ? somaDias(base, DIAS_PADRAO[i]) : somaDias(out[i - 1], 20)));
     return out;
   }
+  /** Filha de contêiner compartilhado: a parcela da chegada vence no ETA da mãe (nunca numa data contada a partir de hoje). */
+  function parcelasComEta(ps, eta) {
+    const e = String(eta || '').slice(0, 10);
+    return W.ehISO(e) ? ps.map(p => (p.vinculo === 'chegada' && !p.data ? Object.assign({}, p, { data: e }) : p)) : ps;
+  }
+  const etaDoConteiner = (db, o) => { const m = o && o.maeId ? (db.ops || []).find(x => x && x.id === o.maeId) : null; return String((m && m.eta) || (o && o.eta) || '').slice(0, 10); };
   /** Prazo em texto, para a proposta e o contrato. */
   function prazoDaParcela(p) {
     if (p.data) return W.dataBR ? W.dataBR(p.data) : p.data;
@@ -1044,12 +1050,14 @@ function triCalcular(e){
     const daCotacao = (db.fin || []).filter(l => l && l.origem === marca), mesmaOp = l => String(l.op || '').trim().toUpperCase() === id.trim();
     const soltos = daCotacao.filter(l => !String(l.op || '').trim());
     const existentes = daCotacao.filter(mesmaOp).concat(soltos), emOutraOp = daCotacao.filter(l => !mesmaOp(l) && String(l.op || '').trim());
+    /* Lançamentos da operação que NÃO vieram desta cotação (feitos à mão, ou de outra cotação): aprovar não pode duplicar (OP26.2, 18/11). */
+    const daOperacao = existe ? (db.fin || []).filter(l => l && mesmaOp(l) && l.origem !== marca && !String(l.origem || '').startsWith(marca + ':')) : [];
     // Mesma parcela: mesmo tipo e o começo da descrição ("2º pagamento"), que é o que o sistema antigo também grava.
     const jaTem = (tipo, rot, palavra) => existentes.some(l => l.tipo === tipo && String(l.desc || '').startsWith(rot + ' ' + palavra));
     const origens = existentes.map(l => l.data).filter(W.ehISO).sort();
     const hj = origens[0] || hoje || W.hojeISO();
     const { o1, o2 } = desemOuts(q, R);
-    const ps = parcelasDe(q), venc = vencimentosDasParcelas(ps, hj), propria = temListaPropria(q);
+    const ps = parcelasComEta(parcelasDe(q), existe ? etaDoConteiner(db, existe) : ''), venc = vencimentosDasParcelas(ps, hj), propria = temListaPropria(q);
     const recebe = ps.map(p => p.valor + p.reajuste);
     if (recebe.reduce((a, b) => a + b, 0) <= 0) recebe.forEach((v, i) => { recebe[i] = i === 0 ? R.preco || 0 : 0; });
     const vencDe = (vinc, k) => { const i = ps.findIndex(p => p.vinculo === vinc); return i >= 0 ? venc[i] : somaDias(hj, DIAS_PADRAO[k]); };
@@ -1073,7 +1081,7 @@ function triCalcular(e){
       if (!jaTem('Receita', rot, 'recebimento')) lancar(venc[k], 'Receita', rot + ' recebimento do cliente — parcela ' + (k + 1) + (propria ? ' · ' + p.nome : ''), recebe[k]);
       despesas.filter(d => d[0] === k).forEach(d => lancar(d[1], 'Despesa', d[2], d[3], d[4]));
     });
-    return { id, op, lancamentos: out, soltos, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
+    return { id, op, lancamentos: out, soltos, daOperacao, jaTemOutros: daOperacao.length > 0 && !existentes.length && out.length > 0, jaLancado: existentes.length > 0 && !out.length, relancar: existentes.length > 0 && out.length > 0, jaExistem: existentes.length, existentes, outraOp: !existentes.length && emOutraOp.length > 0, emOutraOp };
   }
 
   /* ==== Cotação com vários clientes vira mãe e filhas ====
@@ -1087,10 +1095,10 @@ function triCalcular(e){
     return n ? n.split('.')[0] : '';
   }
   /** Lançamentos previstos de um cliente, sem gravar nada. */
-  function linhasDoCliente(cc) {
+  function linhasDoCliente(cc, eta) {
     const R = cc.R, f = camposDe(cc.q), o = desemOuts(cc.q, R), out = [];
     const add = (k, tipo, desc, valor, custo) => { if (valor > 0.004) out.push({ k, tipo, desc, valor: +(+valor).toFixed(2), custo: custo || '' }); };
-    const ps = parcelasDe(cc.q), propria = temListaPropria(cc.q), rec = ps.map(p => p.valor), ult = rec.length - 1;
+    const ps = parcelasComEta(parcelasDe(cc.q), eta), propria = temListaPropria(cc.q), rec = ps.map(p => p.valor), ult = rec.length - 1;
     if (rec.reduce((a, b) => a + b, 0) <= 0) rec.forEach((v, i) => { rec[i] = i === 0 ? precoDesem(R) : 0; });
     /* Parcelas abaixo do preço: a diferença entra em linha própria. Acima: sai da última. A receita sempre fecha com o preço. */
     const difPreco = +(precoDesem(R) - rec.reduce((a, b) => a + b, 0)).toFixed(2);
@@ -1111,7 +1119,8 @@ function triCalcular(e){
     linhas.forEach(([k, val]) => add(k === 'nacional' && comEntrega ? naParcela('entrega', 2) : naParcela('chegada', 2), 'Despesa', '3º pagamento — ' + (k === 'impVenda' ? 'Imposto de venda (resultante)' : ROTULO_CHEGADA[k]), val, k));
     if (difal > 0.004) add(naParcela('chegada', 2), 'Despesa', '3º pagamento — DIFAL (guia da JeT)', difal, 'impVenda');
     const venc = vencimentosDasParcelas(ps, W.hojeISO());
-    out.forEach(x => { if (venc[x.k]) x.dias = Math.max(0, W.diasEntre(W.hojeISO(), venc[x.k]) || 0); });
+    /* Parcela com data fixa (digitada, ou o ETA da mãe): vale a data, não "dias a partir de hoje". */
+    out.forEach(x => { if (venc[x.k]) x.dias = Math.max(0, W.diasEntre(W.hojeISO(), venc[x.k]) || 0); if (ps[x.k] && ps[x.k].data && W.ehISO(ps[x.k].data)) x.dataFixa = ps[x.k].data; });
     return out;
   }
   /** Deixa os previstos iguais às linhas: realizado não é tocado, e nada duplica. */
@@ -1121,7 +1130,7 @@ function triCalcular(e){
     linhas.forEach(x => {
       const a = doOp.find(l => l.tipo === x.tipo && l.desc === x.desc);
       if (a) { if (!W.realizado(a) && !a.ajusteCambial) a.valor = x.valor; a.origem = marca; if (x.custo) a.custo = x.custo; return; }
-      const l = { _id: W.novoId(), data: hj, vencimento: somaDias(hj, x.dias != null ? x.dias : CRONO_OP[x.k] ? CRONO_OP[x.k].dias : 95 + 20 * (x.k - 2)), op: opId, tipo: x.tipo, categoria: '', fixo: false, empresa: 'WindGate', desc: x.desc, valor: x.valor, status: 'Previsto', comp: '', nf: '', por: por || '', origem: marca };
+      const l = { _id: W.novoId(), data: hj, vencimento: x.dataFixa || somaDias(hj, x.dias != null ? x.dias : CRONO_OP[x.k] ? CRONO_OP[x.k].dias : 95 + 20 * (x.k - 2)), op: opId, tipo: x.tipo, categoria: '', fixo: false, empresa: 'WindGate', desc: x.desc, valor: x.valor, status: 'Previsto', comp: '', nf: '', por: por || '', origem: marca };
       if (x.custo) l.custo = x.custo; novos.push(l);
     });
     const validas = new Set(linhas.map(x => x.tipo + '|' + x.desc));
@@ -1150,9 +1159,15 @@ function triCalcular(e){
       if (!r.ok) return { ok: false, msg: (cc.nome || cc.id) + ': ' + r.msg };
       f = r.op; criouFilha = true;
     }
+    /* Filha que já existia com lançamentos que não são desta cotação: perguntar antes (substituir, manter ou cancelar). */
+    const marcaQ = 'cotacao:' + q.id, outros = criouFilha ? [] : (db.fin || []).filter(l => l && l.op === f.id && !String(l.origem || '').startsWith(marcaQ));
+    const escolha = (o.lancExistentes || {})[f.id] || o.lancExistentes;
+    if (outros.length && escolha !== 'substituir' && escolha !== 'manter') return { ok: false, confirmarExistentes: true, filha: f, existentes: outros, msg: `${f.id} já tem ${outros.length} lançamento(s): substituir, manter ou cancelar.` };
     Object.assign(f, { clienteCotId: cc.id, modalidade: 'propria', estruturaFiscal: cc.R.tri ? 'jt' : 'sf' }); delete f.quoteClienteId;
     c.opNum = f.id;
-    const s = sincronizarLancamentos(db, f.id, 'cotacao:' + q.id + ':' + cc.id, linhasDoCliente(cc), por, o.hoje);
+    if (outros.length && escolha === 'manter') { W.sincronizarMaes(db, por, t); return { ok: true, mae, criouMae, filha: f, criouFilha, lancamentos: [], manteve: outros.length }; }
+    if (outros.length && escolha === 'substituir') { const sai = new Set(outros.filter(l => !W.realizado(l)).map(l => l._id)); db.fin = (db.fin || []).filter(l => !l || !sai.has(l._id)); }
+    const s = sincronizarLancamentos(db, f.id, 'cotacao:' + q.id + ':' + cc.id, linhasDoCliente(cc, etaDoConteiner(db, f) || mae.eta), por, o.hoje);
     W.sincronizarMaes(db, por, t);
     return { ok: true, mae, criouMae, filha: f, criouFilha, lancamentos: s.novos };
   }

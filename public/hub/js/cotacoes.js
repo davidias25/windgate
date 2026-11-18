@@ -652,8 +652,10 @@
   }
   /* Cria o que falta para os clientes aprovados. Pede o código do contêiner só se não der para saber. */
   function criarOperacoesMulti(depois) {
+    const escolhas = {};
     const executar = codigo => {
-      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: codigo, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO });
+      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: codigo, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO, lancExistentes: escolhas });
+      if (!r.ok && r.confirmarExistentes) { perguntarExistentes(r.filha.id, r.existentes, esc_ => { escolhas[r.filha.id] = esc_; executar(codigo); }); return true; }
       if (!r.ok) { if (r.semCodigo) return false; H.toast('⛔ ' + esc(r.msg)); return true; }
       if (H.db.quotes[ed.id]) H.db.quotes[ed.id].clientes = ed.clientes;
       H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b>: ${r.filhas.length} filha(s) · ${r.lancamentos.length} lançamento(s) previstos.`);
@@ -666,6 +668,16 @@
       <div class="f" style="margin-top:8px"><label class="lbl" for="mcod">Código do contêiner</label><input id="mcod"></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="mcok">Criar</button>');
     m.querySelector('#mcok').onclick = () => { const cod = m.querySelector('#mcod').value.trim(); if (!cod) return H.toast('Informe o código.'); ed.fields.opMae = cod.toUpperCase(); H.fecharModal(); executar(cod); };
+  }
+  /** A operação já tem lançamentos que não vieram desta cotação: nunca criar em dobro sem a decisão de quem aprova. */
+  function perguntarExistentes(opId, existentes, escolher) {
+    const tot = t => existentes.filter(l => l.tipo === t).reduce((a, l) => a + (+l.valor || 0), 0), real = existentes.filter(l => W.realizado(l)).length;
+    const m = H.modal('Operação já tem lançamentos', `<p>A <b>${esc(opId)}</b> já tem <b>${existentes.length} lançamento(s)</b> no Financeiro (receitas ${fmt(tot('Receita'))} · despesas ${fmt(tot('Despesa'))}).</p>
+      <div class="list" style="margin-top:8px;max-height:220px;overflow:auto">${existentes.slice(0, 20).map(l => `<div class="row"><span>${esc(l.desc || '')}<br><small class="note">${esc(l.tipo || '')} · ${esc(l.status || '')} · ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(+l.valor || 0)}</span></div>`).join('')}</div>
+      <p class="note" style="margin-top:8px"><b>Substituir</b>: os previstos saem e entra o cronograma da cotação${real ? ` (os ${real} já realizados ficam: confira depois)` : ''}. <b>Manter</b>: liga a cotação e não lança nada.</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn" id="exman">Manter</button><button class="btn pri" id="exsub">Substituir</button>');
+    m.querySelector('#exman').onclick = () => { H.fecharModal(); escolher('manter'); };
+    m.querySelector('#exsub').onclick = () => { H.fecharModal(); escolher('substituir'); };
   }
   function aprovar(el) {
     if (!podeAprovar()) return H.toast('Somente o Samir aprova margem.');
@@ -690,6 +702,13 @@
   function criarOperacao(confirmado) {
     if (W.ehMultiCliente(ed)) return criarOperacoesMulti();
     const r = W.operacaoDaCotacao(H.db, ed, R, eu(), W.hojeISO());
+    if (r.jaTemOutros && confirmado !== 'substituir' && confirmado !== 'manter') return perguntarExistentes(r.id, r.daOperacao, criarOperacao);
+    if (r.jaTemOutros && confirmado === 'manter') {
+      const oe = H.db.ops.find(o => o && o.id === r.id); if (oe && !oe.quoteId) oe.quoteId = ed.id;
+      if (H.db.quotes[ed.id]) W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { preco: R.preco, por: eu() });
+      H.salvar(); return H.toast(`Cotação ligada à <b>${esc(r.id)}</b>. Os ${r.daOperacao.length} lançamento(s) dela ficaram como estavam: nada foi duplicado.`);
+    }
+    if (r.jaTemOutros && confirmado === 'substituir') { const sai = new Set(r.daOperacao.filter(l => !W.realizado(l)).map(l => l._id)); H.db.fin = H.db.fin.filter(l => !l || !sai.has(l._id)); confirmado = true; }
     const linhaLanc = l => `<div class="row"><span>${esc(l.desc || '')}<br><small class="note">${esc(l.op || '')} · ${esc(l.status || '')} · vencimento ${W.dataBR(l.vencimento)}</small></span><span class="num">${fmt(+l.valor || 0)}</span></div>`;
     if (r.outraOp && confirmado !== true) {
       const m = H.modal('Cotação já lançada em outra operação', `<p>Esta cotação já tem <b>${r.emOutraOp.length} lançamento(s)</b> no Financeiro, mas em outra operação:</p>
