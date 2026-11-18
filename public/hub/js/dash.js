@@ -48,19 +48,22 @@
     if (!H.pode('fin.ver')) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
     const db = H.db, hoje = W.hojeISO(), s = W.saudeFinanceira(db, hoje, empresa);
     const pm = s.porMes, ext = (db.hubExtratos || []).filter(e => e && e.saldo != null).sort((a, b) => String(b.mes).localeCompare(String(a.mes)));
-    const saldoBanco = ext.length ? ext.filter(e => e.mes === ext[0].mes).reduce((a, e) => a + (+e.saldo || 0), 0) : null;
+    /* Caixa = último extrato de cada conta (W.caixaHoje). "Recebido − pago" só aparece como referência quando não há extrato. */
+    const cx = W.caixaHoje ? W.caixaHoje(db, empresa, hoje) : { temExtrato: false, contas: [] }, caixaBase = cx.temExtrato ? cx.total : s.caixa;
     // A primeira faixa reúne o que já venceu e não foi baixado; entra no ponto de partida.
-    const proj = s.projecao.filter(p => !p.vencido), venc = s.projecao.find(p => p.vencido) || { entra: 0, sai: 0 }; let acum = s.caixa + venc.entra - venc.sai; const projVals = proj.map(p => (acum += p.entra - p.sai));
+    const proj = s.projecao.filter(p => !p.vencido), venc = s.projecao.find(p => p.vencido) || { entra: 0, sai: 0 }; let acum = caixaBase + venc.entra - venc.sai; const projVals = proj.map(p => (acum += p.entra - p.sai));
     const ultimos3 = pm.slice(-3), margem3 = ultimos3.filter(m => m.margem != null), mediaMargem = margem3.length ? margem3.reduce((a, m) => a + m.margem, 0) / margem3.length : null;
     el.innerHTML = `
       <div class="head"><div><h1>Saúde financeira</h1><p class="sub">Atualiza sozinho com o Financeiro. Competência pelo vencimento; transferências entre SF e JeT fora do resultado.</p></div>
         <div class="btns"><div class="seg">${[['todas', 'SF + JeT'], ['WindGate', 'SF'], ['JeT', 'JeT']].map(([a, b]) => `<button data-emp="${a}" class="${empresa === a ? 'on' : ''}">${b}</button>`).join('')}</div></div></div>
       <div class="kpis">
-        ${kpi('Caixa pelo sistema', W.fmtBRLk(s.caixa), saldoBanco != null ? 'banco (último extrato): ' + W.fmtBRLk(saldoBanco) : 'recebido − pago, todos os meses', s.caixa < 0 ? 'bad' : '')}
-        ${kpi('Resultado 12 meses', W.fmtBRLk(s.resultado12), 'receita ' + W.fmtBRLk(s.receita12), s.resultado12 < 0 ? 'bad' : 'good')}
+        ${cx.temExtrato ? kpi('Caixa hoje', W.fmtBRLk(cx.total), `<span title="${esc(cx.contas.map(c => `${c.empresa === 'JeT' ? 'JeT' : 'SF'} ${c.banco} ${c.nome}: ${W.fmtBRL(c.saldo)} (extrato ${W.dataBR(c.data)})`).join('
+'))}">extratos de ${cx.contas.length} conta(s) · mais antigo ${W.dataBR(cx.maisAntigo)}</span>${cx.distorcido ? ` · <b>pode estar distorcido</b>: ${cx.vencidosSemBaixa} vencido(s) sem baixa` : ''}`, cx.total < 0 || cx.distorcido ? 'bad' : '')
+          : kpi('Caixa hoje', '—', 'sem extrato: envie o extrato de cada conta em Fiscal', 'bad')}
+        ${kpi('Resultado 12 meses', W.fmtBRLk(s.resultado12), `<span title="Lucro das operações (mesma conta do Resultado por operação) − despesas fixas e impostos gerais de 12 meses">operações ${W.fmtBRLk(s.lucroOps12)} − fixas ${W.fmtBRLk(s.fixas12)}</span>`, s.resultado12 < 0 ? 'bad' : 'good')}
         ${kpi('Margem bruta (3 meses)', pct(mediaMargem), 'receita − custos da operação − impostos')}
         ${kpi('A receber', W.fmtBRLk(s.totalReceber), pct(s.inadimplencia) + ' vencido', s.inadimplencia > .15 ? 'bad' : '')}
-        ${kpi('Fôlego de caixa', s.folego == null ? '—' : s.folego.toFixed(1).replace('.', ',') + ' meses', 'caixa ÷ despesas fixas (' + W.fmtBRLk(s.fixasMes) + '/mês)', s.folego != null && s.folego < 3 ? 'bad' : '')}
+        ${kpi('Fôlego de caixa', !(s.fixasMes > 0) ? '—' : (caixaBase / s.fixasMes).toFixed(1).replace('.', ',') + ' meses', 'caixa ÷ despesas fixas (' + W.fmtBRLk(s.fixasMes) + '/mês)', s.fixasMes > 0 && caixaBase / s.fixasMes < 3 ? 'bad' : '')}
         ${kpi('Concentração', pct(s.concentracaoTop5), 'da receita nos 5 maiores clientes', s.concentracaoTop5 > .7 ? 'bad' : '')}</div>
       <div class="g2">
         <div class="box"><div class="box-h"><h2>Receita, custos e resultado · 12 meses</h2></div><div class="box-b">${barras(pm.map(m => rot(m.mes)), [{ nome: 'Receita', valores: pm.map(m => m.receita), cor: 'var(--blue)' }, { nome: 'Custos + impostos', valores: pm.map(m => m.custos), cor: 'var(--cds-c2, #9AA5B8)' }, { nome: 'Resultado líquido', valores: pm.map(m => m.resultado), cor: 'var(--ok)', neg: 'var(--crit)' }], { titulo: 'Receita, custos e resultado por mês' })}</div></div>

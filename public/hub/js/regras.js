@@ -1283,9 +1283,17 @@
     const pagos = fin.filter(l => ehReceita(l) && realizado(l) && l.liquidadoEm && meses.includes(mesDe(l.liquidadoEm)));
     const atrasoMedio = pagos.length ? pagos.reduce((a, l) => a + Math.max(0, diasEntre(vencDe(l), soData(l.liquidadoEm)) || 0), 0) / pagos.length : null;
     const receita12 = porMes.reduce((a, m) => a + m.receita, 0), impostos12 = porMes.reduce((a, m) => a + m.impostos, 0);
+    /* Resultado 12 meses pela MESMA conta do Resultado por operação: lucro inteiro das operações com contrato nos
+       últimos 12 meses − despesas fixas e impostos gerais do período. (Antes: competência mês a mês, que punha o custo
+       pago agora contra a receita que só vence depois, e dava −R$ 375 mil × +R$ 1,66 mi.) */
+    const opsPorId = Object.fromEntries((db.ops || []).filter(o => o && o.id).map(o => [o.id, o]));
+    const noPeriodo = id => { const o = opsPorId[id]; if (!o) return false; const c = dataContratoDaOp(db, o.maeId && opsPorId[o.maeId] ? opsPorId[o.maeId] : o); return !!c && meses.includes(c.slice(0, 7)) || (o && emAndamento(o)); };
+    const rops = resultadoPorOp(db, emp).filter(r => noPeriodo(r.op));
+    const lucroOps12 = rops.reduce((a, r) => a + r.resultado, 0), receitaOps12 = rops.reduce((a, r) => a + r.receita, 0);
+    const fixas12 = porMes.reduce((a, m) => a + m.despesas, 0);
     return { caixa, porMes, aging, totalReceber, inadimplencia: totalReceber ? vencido / totalReceber : 0, pagar, receber, fixasMes, folego: fixasMes > 0 ? caixa / fixasMes : null,
       top, concentracaoTop5: top.reduce((a, t) => a + t.pct, 0), atrasoMedio, cargaTributaria: receita12 ? impostos12 / receita12 : null, receita12,
-      resultado12: porMes.reduce((a, m) => a + m.resultado, 0), emprestimos: fin.filter(l => ehEmprestimo(l) && !realizado(l)).reduce((a, l) => a + valorDe(l), 0),
+      resultado12: lucroOps12 - fixas12, lucroOps12, receitaOps12, fixas12, resultadoCompetencia12: porMes.reduce((a, m) => a + m.resultado, 0), emprestimos: fin.filter(l => ehEmprestimo(l) && !realizado(l)).reduce((a, l) => a + valorDe(l), 0),
       projecao: fluxoSemanal(db, h, 13, emp, true) };
   }
 

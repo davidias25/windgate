@@ -167,6 +167,28 @@
     return { ini, fim, entradas: r2((e.transacoes || []).filter(t => t.valor > 0).reduce((a, t) => a + num(t.valor), 0)), saidas: r2((e.transacoes || []).filter(t => t.valor < 0).reduce((a, t) => a - num(t.valor), 0)) };
   }
 
+  /**
+   * Caixa hoje = soma do saldo do ÚLTIMO extrato de cada conta bancária, com a data de cada um.
+   * Nunca "recebido − pago" (conta vencida sem baixa não é dinheiro em caixa). Função única: Financeiro, Torre e ficha.
+   * Extrato sem conta cadastrada (contaId vazio) entra pela chave banco+conta.
+   */
+  function caixaHoje(db, empresa, hoje) {
+    const h = hoje || W.hojeISO();
+    const ext = ((db && db.hubExtratos) || []).filter(e => e && e.saldo != null && e.saldo !== '' && empOk(empresa, e.empresa));
+    const chave = e => e.contaId || [e.empresa || 'WindGate', e.banco || '', e.contaNome || ''].join('|');
+    const ultimo = {};
+    ext.forEach(e => { const k = chave(e), a = ultimo[k]; if (!a || String(e.mes) > String(a.mes) || (e.mes === a.mes && String(e.em || '') > String(a.em || ''))) ultimo[k] = e; });
+    const nomes = Object.fromEntries(contasAtivas(db).map(c => [c.id, c]));
+    const fimDoMes = m => { const [y, mm] = String(m).split('-').map(Number); return y && mm ? new Date(Date.UTC(y, mm, 0)).toISOString().slice(0, 10) : ''; };
+    const contas = Object.values(ultimo).map(e => {
+      const c = nomes[e.contaId] || {}, data = W.ehISO(String(e.ate || '').slice(0, 10)) ? String(e.ate).slice(0, 10) : (W.ehISO(String(e.em || '').slice(0, 10)) && String(e.em).slice(0, 7) === e.mes ? String(e.em).slice(0, 10) : fimDoMes(e.mes));
+      return { contaId: e.contaId || '', empresa: e.empresa || c.empresa || 'WindGate', banco: e.banco || c.banco || '', nome: e.contaNome || c.nome || '', mes: e.mes, data: data > h ? h : data, saldo: r2(e.saldo), extratoId: e._id || '' };
+    }).sort((a, b) => a.empresa.localeCompare(b.empresa) || a.banco.localeCompare(b.banco));
+    const vencidos = ((db && db.fin) || []).filter(l => l && !W.realizado(l) && !W.transferencia(l) && empOk(empresa, l.empresa) && W.vencDe(l) && W.vencDe(l) < h);
+    return { total: r2(contas.reduce((a, c) => a + c.saldo, 0)), contas, temExtrato: contas.length > 0, maisAntigo: contas.map(c => c.data).sort()[0] || '',
+      vencidosSemBaixa: vencidos.length, distorcido: vencidos.length > 0 };
+  }
+
   /* ---------- Semelhança de nomes (favorecido × fornecedor/cliente) ---------- */
   const PALAVRAS_VAZIAS = new Set(['ltda', 'eireli', 'epp', 'me', 'sa', 'cia', 'comercio', 'servicos', 'industria', 'importacao', 'exportacao', 'do', 'da', 'de', 'dos', 'das', 'e', 'the', 'co', 'limited', 'ltd']);
   const tokens = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(t => t.length >= 3 && !PALAVRAS_VAZIAS.has(t));
@@ -492,7 +514,7 @@
     return { porConta, resumo, notas };
   }
 
-  return { TIPOS_CONTA, ehBanco, contasBancarias, migrarContas, movimentoDaChave, vincularGrupo, desvincularGrupo, vincularUm, sugestoesConciliacao, corrigirDataPagamento, mudarConta, MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
+  return { caixaHoje, TIPOS_CONTA, ehBanco, contasBancarias, migrarContas, movimentoDaChave, vincularGrupo, desvincularGrupo, vincularUm, sugestoesConciliacao, corrigirDataPagamento, mudarConta, MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
     situacaoLanc: situacao, contraparteOk, notaOk, comprovanteOk, classificado, somaNotas, contasAtivas, contaDoLanc, saldosExtrato, parecido,
     normalizarLeitura, empresaDoDoc, sugerirComprovante, legendaDoComprovante, aplicarComprovante, sugerirNotas, casarTransferencias, fechamento, PENDENCIAS,
     notaTexto, COLUNAS_PACOTE, linhasPacote };
