@@ -164,13 +164,13 @@ console.log('\nOperações já em andamento (prévia):');
   const r = T.rodadaDiaria(db, em('2026-11-13', '08'));
   ok(r.iniciou && db.hubPainel._tarefasAutoJob.inicio === '2026-11-13' && tarefas(db).length === 0, 'primeira rodada: marca o início e não cria nada');
   T.rodadaDiaria(db, em('2026-11-14', '08'));
-  ok(tarefas(db).length === 0, 'rodada seguinte: nada retroativo para quem já estava no caminho (ETA já dentro dos 30 dias)');
+  const g1 = tarefas(db, 'G1');
+  ok(tarefas(db).length === 1 && g1.length === 1 && g1[0].auto.op === 'OP227' && g1[0].auto.filhas.join() === 'OP227.1,OP227.2', 'rodada seguinte: só o "Fechar frete" de quem já estava em Preparando embarque (pedido de 18/11), uma vez no contêiner, com as filhas; G3/G4 nada retroativo');
   const pv = T.previaBackfill(db, em('2026-11-14'));
   const gs = pv.map(x => x.gatilho + ' ' + x.op).sort().join(', ');
-  ok(gs === 'G1 OP227, G3 OP300, G4 OP300', `prévia: ${gs}`);
-  ok(pv.find(x => x.gatilho === 'G1').filhas.join() === 'OP227.1,OP227.2', 'na prévia, o contêiner aparece uma vez, com as filhas');
+  ok(gs === 'G3 OP300, G4 OP300', `prévia: ${gs}`);
   const criadas = T.aplicarBackfill(db, pv.filter(x => x.gatilho !== 'G3').map(x => x.chave), 'samir', em('2026-11-14'));
-  ok(criadas.length === 2 && criadas.every(t => t.auto.origem === 'backfill' && /aprovada por samir/.test(t.obs)) && !tarefas(db, 'G3').length, 'só cria o que foi aprovado, com quem aprovou');
+  ok(criadas.length === 1 && criadas.every(t => t.auto.origem === 'backfill' && /aprovada por samir/.test(t.obs)) && !tarefas(db, 'G3').length, 'só cria o que foi aprovado, com quem aprovou');
   ok(T.previaBackfill(db, em('2026-11-14')).map(x => x.gatilho).join() === 'G3', 'o que já foi criado sai da prévia');
 }
 
@@ -194,6 +194,34 @@ console.log('\nPrazos editáveis:');
   ok(c.G1 === 7 && c.diasParaSamir === 5 && c.G2 === 3, 'o que Samir/Davi editam vale; campo vazio volta ao padrão');
   gravar(db, d => { op(d, 'OP300').status = 'preparacao_embarque'; });
   ok(tarefas(db, 'G1')[0].prazo === '2026-11-20', 'Fechar frete com o prazo editado (7 dias)');
+}
+
+console.log('\nOperação encerrada, estudo e exportação (conferência de 18/11):');
+{
+  const db = banco();
+  db.ops.push({ _id: 'o1', id: 'OP01', status: 'contrato', criadaEm: '2026-09-01' }, { _id: 'oe', id: 'ESTUDO01', status: 'contrato', criadaEm: '2026-09-01' }, { _id: 'ox', id: 'EXPO01', status: 'producao', criadaEm: '2026-09-01' });
+  gravar(db, d => { op(d, 'OP01').status = 'concluida'; op(d, 'ESTUDO01').status = 'embarcado'; op(d, 'EXPO01').status = 'preparacao_embarque'; });
+  ok(tarefas(db).length === 0, 'pular para Concluída, ou estudo/exportação mudando de etapa: nenhuma tarefa retroativa');
+  /* As 22 que já existem em produção: criadas antes da correção. */
+  ['OP01', 'ESTUDO01'].forEach(id => ['G1', 'G3'].forEach(g => T.garantirTarefa(db, g, op(db, id), { agora: em('2026-11-10'), retroativo: true })));
+  const feita = T.garantirTarefa(db, 'G1', op(db, 'OP300'), { agora: em('2026-11-10') }).tarefa; feita.status = 'feita';
+  op(db, 'OP300').status = 'entregue';
+  ok(tarefas(db).length === 5 && db.hubRecados.length === 5, 'cenário: 4 tarefas abertas de operações encerradas (+1 concluída)');
+  const r = T.rodadaDiaria(db, em('2026-11-18', '10'));
+  ok(r.rodou && r.limpas.length === 4 && tarefas(db).length === 1 && tarefas(db)[0] === feita, 'a rodada exclui as 4 abertas; a concluída fica no histórico');
+  ok(r.limpas.every(id => db._removidos[id]) && db.hubTarefasLog.filter(x => x.acao === 'excluida' && x.por === 'Sistema').length === 4, 'ficam no log e em _removidos (nenhum navegador devolve)');
+  ok(db.hubRecados.length === 1, 'e somem os avisos "nova tarefa" delas');
+  op(db, 'OP01').status = 'contrato'; gravar(db, d => { op(d, 'OP01').status = 'preparacao_embarque'; });
+  ok(!T.tarefaDe(db, T.chaveDe('G1', op(db, 'OP01'))), 'excluída pela limpeza não volta sozinha');
+}
+{
+  const db = banco(); db.hubPainel._tarefasAutoJob.ultimaRodada = '2026-11-18';
+  db.ops.push({ _id: 'o26', id: 'OP26', status: 'preparacao_embarque', criadaEm: '2026-09-01' }, { _id: 'o25', id: 'OP25', status: 'preparacao_embarque', criadaEm: '2026-09-01', freteFechado: { em: em('2026-11-01'), por: 'Matheus' } });
+  const r = T.rodadaDiaria(db, em('2026-11-18', '10'));
+  const g1 = tarefas(db, 'G1');
+  ok(r.rodou && g1.length === 1 && g1[0].auto.op === 'OP26' && g1[0].resp === 'Matheus', 'OP26 já em Preparando embarque, sem tarefa: cria "Fechar frete" para o Matheus (na conferência da hora, sem esperar o dia seguinte)');
+  ok(!g1.some(t => t.auto.op === 'OP25'), 'com o frete já fechado (OP25): não cria');
+  ok(T.rodadaDiaria(db, em('2026-11-18', '11')).rodou === false, 'na hora seguinte, nada a fazer');
 }
 
 console.log('\nExcluir tarefa automática (qualquer usuário):');

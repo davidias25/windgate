@@ -737,7 +737,7 @@ async function rodarTarefas(forcar) {
   const r = tarefasAuto.rodadaDiaria(memoryDB, new Date().toISOString(), forcar);
   if (r.iniciou || r.rodou) {
     await dbStore.salvar(memoryDB, DB_FILE_PATH);
-    console.log(r.iniciou ? `🗓  Tarefas automáticas no ar desde ${r.inicio}.` : `🗓  Rodada das tarefas: ${r.g4.length} ETA, ${r.concluidas} concluída(s), ${r.escalonadas.length} escalonamento(s).`);
+    console.log(r.iniciou ? `🗓  Tarefas automáticas no ar desde ${r.inicio}.` : `🗓  Rodada das tarefas: ${r.g4.length} ETA, ${r.concluidas} concluída(s), ${r.escalonadas.length} escalonamento(s), ${(r.limpas || []).length} excluída(s) de operação encerrada, ${(r.fretes || []).length} "Fechar frete" criada(s).`);
   }
   return r;
 }

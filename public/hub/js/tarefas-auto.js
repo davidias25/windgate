@@ -163,7 +163,11 @@
     });
     return mudou;
   }
-  const opsAtivas = db => (db.ops || []).filter(o => o && o.id && !['concluida', 'entregue'].includes(o.status));
+  /* Sem tarefa automática: operação Entregue/Concluída, ou de estudo/exportação (não tem frete de importação). */
+  const FINAIS = ['concluida', 'entregue'];
+  const ehEstudoOuExpo = o => !!o && (/^(ESTUDO|EXPO)/i.test(String(o.id || '')) || /estudo|exporta/i.test([o.tipo, o.tipoOp, o.natureza, o.tipoPedido].filter(Boolean).join(' ')));
+  const semTarefaAuto = o => !o || FINAIS.includes(o.status) || ehEstudoOuExpo(o);
+  const opsAtivas = db => (db.ops || []).filter(o => o && o.id && !semTarefaAuto(o));
   const alvosAtivos = db => { const vistos = new Set(), out = []; opsAtivas(db).forEach(o => { const a = alvoDe(db, o); if (a && !vistos.has(a.id)) { vistos.add(a.id); out.push(a); } }); return out; };
 
   /**
@@ -180,6 +184,7 @@
     depois.ops.forEach(op => {
       if (!op || !op.id) return;
       const velha = velhas.get(op.id), alvo = alvoDe(depois, op);
+      if (semTarefaAuto(op) || semTarefaAuto(alvo)) return;
       if (velha) {
         const iV = indiceAnterior(antes || depois, velha), iN = W.FLUXO.indexOf(op.status);
         if (iN > iV) [['G1', 'preparacao_embarque'], ['G3', 'embarcado']].forEach(([g, st]) => {
@@ -223,7 +228,11 @@
     db.hubPainel = db.hubPainel || {};
     const job = Object.assign({}, db.hubPainel._tarefasAutoJob || {});
     if (!job.inicio) { job.inicio = hoje; job.em = a; db.hubPainel._tarefasAutoJob = job; return { iniciou: true, inicio: hoje }; }
-    if (!forcar && (job.ultimaRodada === hoje || horaSP(a) < cfg.prazos.horaRodada)) return { rodou: false };
+    if (!forcar && (job.ultimaRodada === hoje || horaSP(a) < cfg.prazos.horaRodada)) {
+      /* Limpeza e "Fechar frete" das ativas não esperam a rodada do dia: conferem a cada hora. */
+      const limpas = limparTarefasInativas(db, a), fretes = garantirFreteDasAtivas(db, a);
+      return limpas.length || fretes.length ? { rodou: true, g4: [], concluidas: 0, escalonadas: [], limpas, fretes } : { rodou: false };
+    }
     const g4 = [];
     alvosAtivos(db).forEach(alvo => {
       const eta = W.soData(alvo.eta); if (!W.ehISO(eta)) return;
@@ -232,9 +241,38 @@
       const podeCriar = limite >= job.inicio || W.soData(alvo.criadaEm) >= job.inicio;
       const r = avaliarG4(db, alvo, a, podeCriar, 'sistema'); if (r) g4.push([alvo.id, r]);
     });
+    const limpas = limparTarefasInativas(db, a), fretes = garantirFreteDasAtivas(db, a);
     const concluidas = reconciliar(db, a), escalonadas = escalonar(db, a);
     db.hubPainel._tarefasAutoJob = Object.assign(job, { ultimaRodada: hoje, em: a });
-    return { rodou: true, g4, concluidas, escalonadas };
+    return { rodou: true, g4, concluidas, escalonadas, limpas, fretes };
+  }
+
+  /**
+   * Tarefas automáticas em aberto de operação Entregue, Concluída ou de estudo/exportação: o Sistema exclui
+   * (não têm dado de usuário). Fica no log e em _removidos, para nenhum navegador devolver. Concluídas ficam.
+   */
+  function limparTarefasInativas(db, agora) {
+    const a = agora || new Date().toISOString(), ops = db.ops || [], n = [];
+    const opDa = t => ops.find(o => o && (o._id || o.id) === t.auto.opRef) || ops.find(o => o && o.id === t.auto.op);
+    (db.agendaTasks || []).filter(t => ehAuto(t) && aberta(t) && !t.feitaPor && !t.auto.reabertaEm).forEach(t => {
+      const o = opDa(t); if (!o || !semTarefaAuto(o)) return;
+      if (excluirTarefa(db, t, 'Sistema', a)) {
+        db._removidos = db._removidos || {}; db._removidos[t._id] = Date.parse(a) || Date.now();
+        const log = (db.hubTarefasLog || []).find(x => x && x.acao === 'excluida' && x.tarefa === t._id); if (log) log.motivo = `operação ${o.status === 'entregue' || o.status === 'concluida' ? o.status : 'de estudo/exportação'}: sem tarefa automática`;
+        db.hubRecados = (db.hubRecados || []).filter(r => { const tira = r && r.tarefaId === t._id && r.por === 'Sistema · Tarefas'; if (tira) db._removidos[r._id] = Date.parse(a) || Date.now(); return !tira; });
+        n.push(t._id);
+      }
+    });
+    return n;
+  }
+  /** Operação ativa que já estava em Preparando embarque sem frete fechado e sem a tarefa: cria "Fechar frete" (Matheus). */
+  function garantirFreteDasAtivas(db, agora) {
+    const a = agora || new Date().toISOString(), n = [];
+    alvosAtivos(db).filter(o => o.status === 'preparacao_embarque' && !freteDe(db, o)).forEach(o => {
+      const r = garantirTarefa(db, 'G1', o, { agora: a, por: 'sistema', motivo: 'já estava em Preparando embarque' });
+      if (r.criada) n.push(r.tarefa._id);
+    });
+    return n;
   }
 
   /** Prévia para operações já em andamento: o que seria criado. Nada é gravado. */
@@ -340,6 +378,6 @@
   }
 
   return { PRAZOS_PADRAO, ROTULOS_PRAZO, GATILHOS, GESTORES, MARCAM_FRETE, configTarefas, nomeDeUsuario: nomeDe, chaveDeUsuario, alvoDe, chaveDe, idTarefa, tarefaDe, freteDe, ehAuto,
-    garantirTarefa, avaliarG4, reconciliar, aoGravar, escalonar, rodadaDiaria, previaBackfill, aplicarBackfill,
+    garantirTarefa, avaliarG4, reconciliar, aoGravar, semTarefaAuto, limparTarefasInativas, garantirFreteDasAtivas, escalonar, rodadaDiaria, previaBackfill, aplicarBackfill,
     podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, marcarFreteFechado, tarefasNaTorre, tarefasDaOp, rankingTarefas };
 });
