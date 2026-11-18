@@ -127,7 +127,7 @@ function bancoReal() {
   ok(dre.receita === 150000, 'DRE: receita = 150 mil (empréstimo e transferência fora)');
   ok(dre.lucroBruto === 150000 - 80000 - 12000, 'DRE: lucro bruto = receita − custo − impostos da operação');
   ok(dre.lair === 58000 - 5000, 'DRE: lucro antes do IR desconta a despesa fixa');
-  ok(perto(dre.ir, 53000 * 0.34) && perto(dre.porSocio, 53000 * 0.66 / 2), 'DRE: IR 34% e divisão por 2 sócios');
+  ok(dre.ir === 0 && perto(dre.porSocio, 53000 / 2), 'DRE interna sem IRPJ/CSLL: por sócio = lucro antes do IR ÷ 2');
   const rop = W.resultadoPorOp(d, 'todas').find(x => x.op === 'OP20');
   ok(rop.receita === 150000 && rop.despesa === 92000 && rop.resultado === 58000 && rop.saldoReceber === 50000 && rop.caixa === 20000, 'resultado da OP20: receita, custo, resultado, falta receber e caixa');
   const l = { valor: 1000, status: 'Previsto' }; W.realizar(l, 950, '2026-10-24');
@@ -205,6 +205,12 @@ function bancoReal() {
     ok(dm.lanc === 1 && dm.baixas === 1 && dm.feitas === 1 && dm.atrasadas === 1, 'desempenho Matheus: 1 lançamento, 1 baixa, 1 tarefa feita, 1 atrasada');
     ok(di.coletados === 1 && dd.etapas === 1, 'desempenho: documento coletado conta para a Ívina, etapa avançada para o Davi');
     ok(W.fechadasNoMes(d, '2026-10').includes('OP20'), 'importação fechada no mês: OP20 entrou em contrato em outubro');
+    {
+      const m = { ops: [{ id: 'OP01', status: 'concluida', criadaEm: '2026-11-05' }, { id: 'OP02', status: 'entregue', criadaEm: '2026-10-01' }, { id: 'ESTUDO01', status: 'contrato', criadaEm: '2026-11-02' }, { id: 'EXPO01', status: 'producao', criadaEm: '2026-11-02' },
+        { id: 'OP26', status: 'contrato', criadaEm: '2026-11-03' }, { id: 'OP27', status: 'producao', criadaEm: '2026-10-03' }, { id: 'OP28', status: 'producao', criadaEm: '2026-11-01' }],
+        opStatusHist: [{ op: 'OP02', para: 'contrato', em: '2026-11-04' }, { op: 'OP27', para: 'contrato', em: '2026-11-10' }, { op: 'OP28', para: 'contrato', em: '2026-10-30' }] };
+      ok(W.fechadasNoMes(m, '2026-11').sort().join() === 'OP26,OP27', 'meta do mês (18/11): só contrato fechado no mês; antigas cadastradas agora, estudo, exportação e contrato de outro mês ficam fora');
+    }
 
     d.hubRecados.push({ _id: 'r1', texto: 'Fechar frete OP20', para: 'matheus', por: 'Samir', em: '2026-10-20', prio: 'alta', feito: {} },
       { _id: 'r2', texto: 'Para todos', para: 'todos', por: 'Samir', em: '2026-10-21', feito: { ivina: 'x' } },

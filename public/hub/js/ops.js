@@ -72,7 +72,7 @@
       ${r ? `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
         <div class="kpi"><span class="lbl">Receita da operação</span><span class="v">${W.fmtBRLk(r.receita)}</span><span class="d">${W.fmtBRLk(r.rr)} já recebido</span></div>
         <div class="kpi"><span class="lbl">Custos da operação</span><span class="v">${W.fmtBRLk(r.despesa)}</span><span class="d">${W.fmtBRLk(r.dr)} já pago</span></div>
-        <div class="kpi"><span class="lbl">Resultado previsto</span><span class="v ${r.resultado < 0 ? 'neg' : ''}">${W.fmtBRLk(r.resultado)}</span><span class="d">${r.margem == null ? '' : 'margem ' + (r.margem * 100).toFixed(1) + '% s/ custo'}</span></div>
+        <div class="kpi"><span class="lbl">Resultado previsto</span><span class="v ${r.resultado < 0 ? 'neg' : ''}">${W.fmtBRLk(r.resultado)}</span><span class="d">${r.margem == null ? '' : 'margem ' + (r.margem * 100).toFixed(1) + '% s/ receita'}</span></div>
         <div class="kpi"><span class="lbl">Caixa da operação hoje</span><span class="v ${r.caixa < 0 ? 'neg' : ''}">${W.fmtBRLk(r.caixa)}</span><span class="d">recebido − pago</span></div></div>` : ''}
       <div class="tabs" role="tablist">${abas.map(([k, l]) => `<button role="tab" aria-selected="${abaFicha === k}" data-aba="${k}">${l}</button>`).join('')}</div>
       <div id="fichaAba"></div>`;
@@ -139,6 +139,8 @@
   function salvarCampos(box, o0) {
     const o = opAtual(o0);
     if (!o) { H.toast('Esta operação foi removida por outra pessoa. Nada foi gravado.'); H.render(); return; }
+    const ie = box.querySelector('[data-k="eta"]'), etaErr = ie && ie.value !== String(o.eta || '') ? W.etaInvalida(H.db, o, ie.value) : '';
+    if (etaErr) { H.toast(esc(etaErr) + ' Nada foi gravado.'); ie.focus(); return; }
     let mudou = false;
     box.querySelectorAll('[data-k]').forEach(i => { const k = i.dataset.k; if ((o[k] == null ? '' : String(o[k])) !== i.value) { o[k] = i.value; mudou = true; } });
     if (mudou) { o.atualizadoEm = new Date().toISOString(); o.atualizadoPor = H.nomeUsuario(H.userKey); H.salvar(); H.toast('Operação salva'); H.render(); }

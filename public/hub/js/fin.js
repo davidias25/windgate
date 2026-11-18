@@ -51,9 +51,7 @@
             ${linha('(−) Despesas fixas da empresa', -t(L.despesasFixas), -t(A.despesasFixas))}
             ${linha('(−) Impostos gerais', -t(L.impostosGerais), -t(A.impostosGerais))}
             ${linha('<b>Lucro antes do IR</b>', d.lair, ant.lair, 'sub')}
-            ${linha('(−) IRPJ/CSLL estimado (34%)', -d.ir, -ant.ir)}
-            ${linha('<b>Lucro líquido</b>', d.lucroLiquido, ant.lucroLiquido, 'sub')}
-            ${linha('Por sócio (÷ 2)', d.porSocio, ant.porSocio)}
+            ${linha('Por sócio (lucro antes do IR ÷ 2)', d.porSocio, ant.porSocio)}
           </tbody><tfoot><tr><td colspan="3" class="note">Fora do resultado: empréstimos recebidos ${W.fmtBRL(t(L.emprestimosEntrada))} · pagos ${W.fmtBRL(t(L.emprestimosSaida))}. A contabilidade oficial continua com os contadores.</td></tr></tfoot></table></div></div>
         <div class="box"><div class="box-h"><h2>Fluxo projetado · 8 semanas</h2><span class="note">contas em aberto, a partir de hoje</span></div><div class="box-b">
           ${fluxo.map(s => { saldo += s.entra - s.sai; return `<div style="display:grid;grid-template-columns:70px minmax(0,1fr) 92px;gap:8px;align-items:center;padding:4px 0;font-size:12.5px">
@@ -187,11 +185,11 @@
     const opMap = Object.fromEntries(H.db.ops.map(o => [o.id, o]));
     el.innerHTML = `
       <div class="head"><div><h1>Resultado por operação</h1><p class="sub">Operação inteira, todos os meses: receita, custos, margem e o que ainda falta receber.</p></div>${filtrosTopo()}</div>
-      <div class="box"><div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th class="num">Receita</th><th class="num">Custos</th><th class="num">Resultado</th><th class="num">Margem s/ custo</th><th class="num">Falta receber</th><th class="num">Caixa hoje</th></tr></thead><tbody>
+      <div class="box"><div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th class="num">Receita</th><th class="num">Custos</th><th class="num">Resultado</th><th class="num">Margem s/ receita</th><th class="num">Falta receber</th><th class="num">Caixa hoje</th></tr></thead><tbody>
       ${rs.map(r => `<tr class="click" data-op="${esc(r.op)}"><td class="mono"><b>${esc(r.op)}</b><br><small class="note">${esc((opMap[r.op] || {}).cliente || '')}</small></td><td>${opMap[r.op] ? H.pillStatus(opMap[r.op].status) : '<span class="note">—</span>'}</td>
         <td class="num">${W.fmtBRL(r.receita)}</td><td class="num">${W.fmtBRL(r.despesa)}</td><td class="num ${r.resultado < 0 ? 'neg' : 'pos'}"><b>${W.fmtBRL(r.resultado)}</b></td>
         <td class="num">${r.margem == null ? '—' : (r.margem * 100).toFixed(1) + '%'}</td><td class="num">${W.fmtBRL(r.saldoReceber)}</td><td class="num ${r.caixa < 0 ? 'neg' : ''}">${W.fmtBRL(r.caixa)}</td></tr>`).join('')}
-      </tbody><tfoot><tr><td colspan="2">Total</td><td class="num">${W.fmtBRL(tot.rec)}</td><td class="num">${W.fmtBRL(tot.desp)}</td><td class="num">${W.fmtBRL(tot.res)}</td><td></td><td class="num">${W.fmtBRL(tot.sr)}</td><td></td></tr></tfoot></table></div></div>`;
+      </tbody><tfoot><tr><td colspan="2">Total</td><td class="num">${W.fmtBRL(tot.rec)}</td><td class="num">${W.fmtBRL(tot.desp)}</td><td class="num">${W.fmtBRL(tot.res)}</td><td class="num">${tot.rec ? (tot.res / tot.rec * 100).toFixed(1) + '%' : '—'}</td><td class="num">${W.fmtBRL(tot.sr)}</td><td></td></tr></tfoot></table></div></div>`;
     ligarTopo(el);
     el.querySelectorAll('[data-op]').forEach(x => x.onclick = () => H.ir('ficha', x.dataset.op));
   };

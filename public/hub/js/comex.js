@@ -254,7 +254,7 @@
       receita: receitaTotal, receitaRecebida: receita.recebida, margemSimulada: cq && cq.preco ? (cq.preco - soma(simulado)) / cq.preco : null,
       margemPrevista: totPrev > 0 ? margem(totPrev) : null, margemProjetada: margem(custoProjetado), desvio: totPrev ? (custoProjetado - totPrev) / totPrev : null,
       fobUSD, freteUSD, usdTotal, usdFechado: cb.usdFechado, usdAberto, taxaPrevista, taxaMedia: cb.taxaMedia, variacaoCambial: cb.variacao, impactoAberto, ptax,
-      remessas: remsAbertas, contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) * (1 - 0.34) : null,
+      remessas: remsAbertas, contratos: cb.contratos, lucroLiquido: receitaTotal ? (receitaTotal - custoProjetado) : null,
       duimp: du ? { numero: du.numero, versao: du.versao, itens: du.itens.length, impostosFederais: impostosDuimp } : null
     };
   }
@@ -665,6 +665,8 @@ Modelo para revisão jurídica antes da assinatura.`;
     (db.ops || []).filter(o => W.ehMae(o) && W.emAndamento(o)).forEach(m => {
       const pi = W.prazoInfo(db, m, h);
       if (pi.sit === 'atrasado' && meu(['operacoes', 'frete', 'documentos'])) add({ tipo: 'prazo', nivel: 2, titulo: `Contêiner ${m.id} atrasado em ${W.stMeta(m.status).l}`, detalhe: `${pi.dias != null ? pi.dias + ' dia(s) na etapa' : ''} · ${W.filhasDe(db, m.id).length} cliente(s)`, op: m.id, ir: ['ficha', m.id] });
+      const etaErrM = W.etaInvalida ? W.etaInvalida(db, m) : '';
+      if (etaErrM && meu(['operacoes', 'frete'])) add({ tipo: 'cadastro', nivel: 3, titulo: `Contêiner ${m.id}: ETA inválido`, detalhe: etaErrM, op: m.id, ir: ['ficha', m.id] });
       const em = (m.etaHist || []).slice(-1)[0];
       if (em && Math.abs(W.diasEntre(em.de, em.para) || 0) > 3 && W.diasEntre(W.soData(em.em), h) <= 7 && meu(['operacoes', 'frete'])) add({ tipo: 'eta', nivel: 2, titulo: `ETA do contêiner ${m.id} mudou ${W.diasEntre(em.de, em.para) > 0 ? '+' : ''}${W.diasEntre(em.de, em.para)} dias`, detalhe: `${W.dataBR(em.de)} → ${W.dataBR(em.para)}. Avisar os clientes e rever a semana dos impostos.`, op: m.id, ir: ['ficha', m.id] });
       if (fin) {
@@ -680,6 +682,8 @@ Modelo para revisão jurídica antes da assinatura.`;
       const eh = (o.etaHist || []).slice(-1)[0];
       if (!o.maeId && eh && Math.abs(W.diasEntre(eh.de, eh.para) || 0) > 3 && W.diasEntre(W.soData(eh.em), h) <= 7 && meu(['operacoes', 'frete'])) add({ tipo: 'eta', nivel: 2, titulo: `ETA da ${o.id} mudou ${W.diasEntre(eh.de, eh.para) > 0 ? '+' : ''}${W.diasEntre(eh.de, eh.para)} dias`, detalhe: `${W.dataBR(eh.de)} → ${W.dataBR(eh.para)}. Avisar o cliente e rever a semana dos impostos.`, op: o.id, ir: ['ficha', o.id] });
       if (['conta e ordem', 'encomenda'].includes(o.modalidade) && !contratoDaOp(db, o) && meu(['operacoes'])) add({ tipo: 'contrato', nivel: 1, titulo: `${o.id} sem contrato de ${o.modalidade}`, detalhe: o.cliente || '', op: o.id, ir: ['contratos'] });
+      const etaErr = !naMae && W.etaInvalida ? W.etaInvalida(db, o) : '';
+      if (etaErr && meu(['operacoes', 'frete'])) add({ tipo: 'cadastro', nivel: 3, titulo: `${o.id}: ETA inválido`, detalhe: etaErr, op: o.id, ir: ['ficha', o.id] });
       if (!o.modalidade && meu(['operacoes'])) add({ tipo: 'cadastro', nivel: 1, titulo: `${o.id} sem modalidade`, detalhe: 'Conta e ordem, encomenda ou própria: muda impostos, documentos e numerário.', op: o.id, ir: ['ficha', o.id] });
       if (res) { const c = custeioOp(db, o.id, { ptax });
         if (c.previstoAprovado && c.desvio != null && c.desvio > 0.05) add({ tipo: 'custo', nivel: 2, titulo: `${o.id}: custo ${Math.round(c.desvio * 100)}% acima do previsto`, detalhe: `projetado ${W.fmtBRLk(c.projetado)} × previsto ${W.fmtBRLk(c.previsto)}`, op: o.id, ir: ['custeio', o.id] });

@@ -224,6 +224,17 @@ console.log('\nOperação encerrada, estudo e exportação (conferência de 18/1
   ok(T.rodadaDiaria(db, em('2026-11-18', '11')).rodou === false, 'na hora seguinte, nada a fazer');
 }
 
+console.log('\nETA com ano errado (OP25, 04/01/2026):');
+{
+  const R = require('../public/hub/js/regras.js'), db = banco();
+  db.ops.push({ _id: 'o25', id: 'OP25', status: 'producao', criadaEm: '2026-09-10', eta: '2026-01-04' }); db.opStatusHist.push({ op: 'OP25', para: 'contrato', em: '2026-09-15' });
+  const o = op(db, 'OP25');
+  ok(/anterior ao contrato \(15\/09\/2026\)/.test(R.etaInvalida(db, o)) && R.etaInvalida(db, o, '2027-01-04') === '', 'ETA antes da data do contrato é recusado; 2027 vale');
+  ok(T.avaliarG4(db, o, em('2026-11-18'), true, 'x') === null && !tarefas(db, 'G4').length, 'não abre "Enviar documentos ao despachante" com ETA inválido');
+  o.eta = '2026-12-01'; T.avaliarG4(db, o, em('2026-11-18'), true, 'x'); const t = tarefas(db, 'G4')[0];
+  o.eta = '2026-01-04'; ok(T.avaliarG4(db, o, em('2026-11-19'), true, 'x') === 'suspensa' && t.auto.suspensa, 'a que já abriu fica suspensa até corrigir o ETA');
+}
+
 console.log('\nExcluir tarefa automática (qualquer usuário):');
 {
   const db = banco();

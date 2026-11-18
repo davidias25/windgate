@@ -379,7 +379,7 @@
   function consolidadoDaMae(db, id, resultados) {
     const res = resultados || Object.fromEntries(resultadoPorOp(db, 'todas').map(r => [r.op, r])), filhas = filhasDe(db, id).map(o => Object.assign({ op: o.id, cliente: o.cliente || '', receita: 0, despesa: 0, resultado: 0, saldoReceber: 0 }, res[o.id] || {}, { op: o.id, cliente: o.cliente || '' }));
     const soma = k => filhas.reduce((a, f) => a + (+f[k] || 0), 0), despesa = soma('despesa'), resultado = soma('resultado');
-    return { filhas, receita: soma('receita'), despesa, resultado, saldoReceber: soma('saldoReceber'), rr: soma('rr'), dr: soma('dr'), caixa: soma('caixa'), margem: despesa ? resultado / despesa : null };
+    return { filhas, receita: soma('receita'), despesa, resultado, saldoReceber: soma('saldoReceber'), rr: soma('rr'), dr: soma('dr'), caixa: soma('caixa'), margem: soma('receita') ? resultado / soma('receita') : null };
   }
   /** A pesquisa do Financeiro também acha pelo cliente da operação. */
   function lancBatePesquisa(db, l, q) {
@@ -518,7 +518,7 @@
   const daOperacao = l => !!(l.op && l.op !== 'WindGate');
 
   function dre(db, mes, empresa, aliqIR) {
-    const ir = aliqIR == null ? 0.34 : aliqIR;
+    const ir = aliqIR == null ? 0 : aliqIR;   // DRE interna sem IRPJ/CSLL (Samir, 18/11): lucro por sócio = lucro antes do IR ÷ 2
     const z = () => ({ prev: 0, real: 0 });
     const L = { receitaOps: z(), receitaOutras: z(), impostosOps: z(), custoOps: z(), despesasFixas: z(), impostosGerais: z(), emprestimosEntrada: z(), emprestimosSaida: z() };
     (db.fin || []).forEach(l => {
@@ -536,7 +536,7 @@
     const lucroBruto = receita - tot('impostosOps') - tot('custoOps');
     const lair = lucroBruto - tot('despesasFixas') - tot('impostosGerais');
     const irEst = lair > 0 ? lair * ir : 0;
-    return { linhas: L, receita, lucroBruto, lair, ir: irEst, lucroLiquido: lair - irEst, porSocio: (lair - irEst) / 2,
+    return { linhas: L, receita, lucroBruto, lair, ir: irEst, lucroLiquido: lair - irEst, porSocio: lair / 2,
       realizadoPct: receita ? (L.receitaOps.real + L.receitaOutras.real) / receita : 0 };
   }
 
@@ -552,7 +552,7 @@
     });
     return Object.values(m).map(o => {
       const rec = o.rp + o.rr, desp = o.dp + o.dr;
-      return Object.assign(o, { receita: rec, despesa: desp, resultado: rec - desp, margem: desp ? (rec - desp) / desp : null,
+      return Object.assign(o, { receita: rec, despesa: desp, resultado: rec - desp, margem: rec ? (rec - desp) / rec : null,   // margem s/ receita (lucro ÷ receita); s/ custo só na cotação
         saldoReceber: o.rp, caixa: o.rr - o.dr });
     }).sort((a, b) => String(b.op).localeCompare(String(a.op), 'pt-BR', { numeric: true }));
   }
@@ -729,12 +729,28 @@
     const opsAtrasadas = opsResp.filter(o => prazoInfo(db, o, h).sit === 'atrasado').length;
     return { nome, etapas, coletados, revisados, lanc, baixas, feitas, atrasadas, ops: opsResp.length, opsAtrasadas };
   }
+  /** Data do contrato da operação: a entrada em Contrato no histórico; sem ela, a criação. */
+  function dataContratoDaOp(db, o) {
+    if (!o) return '';
+    const h = (db.opStatusHist || []).filter(x => x && x.op === o.id && x.para === 'contrato').map(x => String(x.em || '').slice(0, 10)).filter(ehISO).sort();
+    return h[0] || (ehISO(String(o.criadaEm || '').slice(0, 10)) ? String(o.criadaEm).slice(0, 10) : '');
+  }
+  /** ETA nunca antes do contrato (ex.: OP25 com 04/01/2026 em vez de 2027). Devolve o motivo, ou ''. */
+  function etaInvalida(db, o, eta) {
+    const e = String(eta == null ? (o && o.eta) || '' : eta).slice(0, 10); if (!ehISO(e)) return '';
+    const c = dataContratoDaOp(db, o);
+    return c && e < c ? `ETA ${dataBR(e)} é anterior ao contrato (${dataBR(c)}). Confira o ano.` : '';
+  }
   /** Importações fechadas no mês: operações que entraram em Contrato (ou além) neste mês. */
   function fechadasNoMes(db, mes) {
     const ids = new Set();
     (db.opStatusHist || []).forEach(x => { if (x && String(x.em || '').slice(0, 7) === mes && x.para === 'contrato') ids.add(x.op); });
-    (db.ops || []).forEach(o => { if (o && String(o.criadaEm || '').slice(0, 7) === mes && o.status && !['cotacao', 'travada'].includes(o.status)) ids.add(o.id); });
-    (db.ops || []).filter(ehMae).forEach(o => ids.delete(o.id));
+    /* Criada no mês já com contrato: conta, desde que não seja operação antiga cadastrada agora (já entregue/concluída),
+       estudo ou exportação, e não tenha entrado em contrato em outro mês. (Conferência de 18/11: "21/2 · 1050%".) */
+    const contratoEmOutroMes = new Set((db.opStatusHist || []).filter(x => x && x.para === 'contrato' && String(x.em || '').slice(0, 7) !== mes).map(x => x.op));
+    (db.ops || []).forEach(o => { if (o && String(o.criadaEm || '').slice(0, 7) === mes && o.status && !['cotacao', 'travada', 'entregue', 'concluida'].includes(o.status) && !/^(ESTUDO|EXPO)/i.test(o.id || '') && !contratoEmOutroMes.has(o.id)) ids.add(o.id); });
+    /* Já entregue/concluída e passou por contrato neste mês: é operação antiga sendo cadastrada etapa por etapa. */
+    (db.ops || []).filter(o => o && (ehMae(o) || /^(ESTUDO|EXPO)/i.test(o.id || '') || ['entregue', 'concluida'].includes(o.status))).forEach(o => ids.delete(o.id));
     return [...ids];
   }
   function recadosPara(db, k, hoje) {
@@ -1310,7 +1326,7 @@
     ehMae, emAndamento, filhasDe, maeDe, etapasPermitidas, sincronizarMaes, virarMae, desfazerMae, proximoCodigoFilha, criarFilha, desligarFilha, CAMPOS_HERDADOS, ETAPAS_DA_MAE, DOCS_DA_MAE, linkPerdido, arquivosPerdidos, CANAIS_DUIMP, canalDuimp, canaisComAcao, caminhoNoStorage, linksDeArquivo, conferirLinks, COLECOES_ARQUIVO, lixeiraParaApagar, DIAS_LIXEIRA, arquivoDeTela, aberturasDaProposta, textoAberturaProposta, followUpsProposta, consolidadoDaMae, lancBatePesquisa, excluirDocumento, bloqueiosExclusao, ligadosDaOp, renomearOperacao, excluirOperacao, DOC_TIPOS, docTipoMeta, tipoDoc, situacaoDoc, completudeDocs, proximaVersao,
     PRECO_ESTUDO, lerPedidoRegras, jaOperado, tarefasDoPedido,
     CRM_FASES, CRM_ABERTAS, CRM_ORIGENS, CRM_MOTIVOS_PERDA, CRM_ATIVIDADES, faseMeta, faseDe, negocioAberto, nomeCliente, ultimoMovimento, diasParado, slaNegocio, scoreNegocio, indicadoresCrm, moverNegocio, ganharNegocio,
-    vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, recadosPara,
+    vencimentoDaFixa, PERFIS, PERFIL_PADRAO, perfilDe, pode, PAINEIS, paineisPermitidos, torreDe, desempenho, fechadasNoMes, dataContratoDaOp, etaInvalida, recadosPara,
     STATUS_OP, FLUXO, FINALIZADAS, PRAZO_STATUS, stMeta, ativa, prazoAlvo, prazoInfo, prazoDaOp, prazoAlvoOp, mudancasDePrazo, checklistPct, diasEntre, hojeISO, soData, ehISO,
     ehReceita, realizado, transferencia, vencDe, mesDe, painelMes, contasAbertas, dre, resultadoPorOp, fluxoSemanal,
     novaSerie, realizar, mesSoma, vencDoMes, alertas, fmtBRL, fmtBRLk, dataBR

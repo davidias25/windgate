@@ -125,6 +125,17 @@
   /* A tarefa do despachante: abre em ETA − 30, prazo ETA − 20 (nunca antes de hoje); ETA longe de novo: suspensa. */
   function avaliarG4(db, alvo, agora, podeCriar, por) {
     const eta = W.soData(alvo.eta); if (!W.ehISO(eta)) return null;
+    /* ETA com ano errado (antes do contrato, ex.: OP25): não abre a tarefa do despachante; a que já abriu fica suspensa até corrigir. */
+    const invalida = W.etaInvalida ? W.etaInvalida(db, alvo, eta) : '';
+    if (invalida) {
+      const tj = tarefaDe(db, chaveDe('G4', alvo));
+      if (tj && aberta(tj) && !tj.auto.suspensa) {
+        tj.auto.suspensa = true; tj.auto.prazoSuspenso = tj.prazo; tj.prazo = '';
+        registrar(db, { acao: 'suspensa', gatilho: 'G4', chave: tj.auto.chave, op: alvo.id, tarefa: tj._id, por: por || 'sistema', em: agora, motivo: invalida });
+        return 'suspensa';
+      }
+      return null;
+    }
     const cfg = configTarefas(db).prazos, hoje = hojeSP(agora), limite = somaDias(eta, -cfg.antecedenciaEta);
     const prazo = maior(somaDias(limite, cfg.G4), hoje), chave = chaveDe('G4', alvo), t = tarefaDe(db, chave);
     if (hoje < limite) {
