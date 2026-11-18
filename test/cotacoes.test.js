@@ -220,6 +220,13 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
   {
     const manual = [{ _id: 'mn1', op: 'OP77', tipo: 'Receita', desc: 'Parcela 1 (lançada à mão)', valor: 45000, vencimento: '2026-11-19', status: 'Previsto' }];
     const rx = C.operacaoDaCotacao({ ops: [r1.op], fin: manual }, qOp, C.calcular(qOp), 'Samir', '2026-10-29');
+    /* Item 3: margem digitada em R$ não muda ao reabrir (o % é que foi arredondado). */
+    const qm = JSON.parse(JSON.stringify(qOp)); qm.fields.margemPct = '8'; const r8 = C.calcular(qm, { modo: 'pct' }).margemBRLCampo;
+    qm.fields.margemBRL = (r8 + 19.71).toFixed(2); delete qm.margemModo;
+    C.inferirModoMargem(qm);
+    ok(qm.margemModo === 'brl' && C.calcular(qm, { modo: qm.margemModo }).margemBRLCampo.toFixed(2) === qm.fields.margemBRL, 'cotação antiga com R$ digitado: reabre em R$ e a margem fica a mesma (não recalcula pelo % arredondado)');
+    const qp = JSON.parse(JSON.stringify(qOp)); qp.fields.margemPct = '8'; qp.fields.margemBRL = r8.toFixed(2); delete qp.margemModo; C.inferirModoMargem(qp);
+    ok(!qp.margemModo, 'R$ que bate com o %: continua em %');
     ok(rx.jaTemOutros && rx.daOperacao.length === 1 && rx.daOperacao[0]._id === 'mn1', 'operação que já tem lançamentos feitos à mão (OP26.2): aprovar avisa antes (substituir, manter ou cancelar), não cria em dobro');
   }
 

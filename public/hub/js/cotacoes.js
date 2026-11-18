@@ -26,7 +26,9 @@
     const s = H.db.quotes[id]; if (!s) { H.toast('Cotação não encontrada.'); return false; }
     ed = JSON.parse(JSON.stringify(s)); ed.id = ed.id || id; ed.fields = W.camposDe(ed);
     ed.items = ed.items || []; ed.exps = ed.exps || []; ed.fotos = ed.fotos || []; ed.blocos = ed.blocos || W.propostaBlocosPadrao(); ed.status = ed.status || 'draft';
-    editando = false; modo = 'pct';
+    /* Reabre no campo que foi editado por último (R$ ou %): só o outro é recalculado (OP26.2: R$ 3.351,58 virava 3.331,87). */
+    if (!ed.margemModo || W.ehMultiCliente(ed)) W.inferirModoMargem(ed);
+    editando = false; modo = ed.margemModo === 'brl' ? 'brl' : 'pct';
     return true;
   }
   const semFlag = () => !!ed && W.ehMultiCliente(ed) && !W.multiClienteLigado(H.db);
@@ -444,7 +446,7 @@
     el.querySelectorAll('[data-foto]').forEach(b => b.onclick = () => { ed.fotos = ed.fotos.filter(f => f._id !== b.dataset.foto); if (ed.id) salvar(true, true); editor(el); });
     el.querySelectorAll('[data-rmit]').forEach(b => b.onclick = () => { ed.items.splice(+b.dataset.rmit, 1); editor(el); });
     el.querySelectorAll('[data-rmex]').forEach(b => b.onclick = () => { ed.exps.splice(+b.dataset.rmex, 1); editor(el); });
-    el.querySelectorAll('[data-mp]').forEach(b => b.onclick = () => { modo = 'pct'; ed.fields.margemPct = b.dataset.mp; el.querySelector('#cf_margemPct').value = b.dataset.mp; atualizar(el); });
+    el.querySelectorAll('[data-mp]').forEach(b => b.onclick = () => { modo = 'pct'; ed.margemModo = 'pct'; ed.fields.margemPct = b.dataset.mp; el.querySelector('#cf_margemPct').value = b.dataset.mp; atualizar(el); });
     const form = el.querySelector('#cform');
     form.addEventListener('input', e => {
       const t = e.target;
@@ -472,7 +474,7 @@
       if (t.type === 'checkbox' && t.dataset.it != null) atualizar(el);
     });
     el.querySelectorAll('[data-marg]').forEach(i => i.addEventListener('input', () => {
-      modo = i.dataset.marg; ed.fields[modo === 'pct' ? 'margemPct' : 'margemBRL'] = i.value; atualizar(el);
+      modo = i.dataset.marg; ed.margemModo = modo; ed.fields[modo === 'pct' ? 'margemPct' : 'margemBRL'] = i.value; atualizar(el);
     }));
   }
 

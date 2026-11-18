@@ -269,6 +269,13 @@ console.log('\nConferência 18/11: filha que já existe com lançamentos (OP26.2
   const chegada = W.parcelasDe(q.clientes[0] ? W.calcularPorCliente(q).clientes[0].q : q).findIndex(p => p.vinculo === 'chegada');
   const lc = rec.find(l => new RegExp('^' + (chegada + 1) + 'º recebimento').test(l.desc));
   ok(chegada < 0 || (lc && lc.vencimento === '2027-01-09'), `a parcela da chegada vence no ETA da mãe (09/01/2027), não em data contada de hoje (${lc ? lc.vencimento : 'sem parcela de chegada'})`);
+  {
+    const qm = cotacao(); qm.clientes[0].margemPct = '8'; delete qm.clientes[0].margemModo;
+    const r8 = W.calcularPorCliente(qm).clientes[0].R.margemBRLCampo; qm.clientes[0].margemRS = (r8 + 19.71).toFixed(2);
+    W.inferirModoMargem(qm);
+    const depois = W.calcularPorCliente(qm).clientes[0].R.margemBRLCampo;
+    ok(qm.clientes[0].margemModo === 'brl' && depois.toFixed(2) === qm.clientes[0].margemRS && !qm.clientes[1].margemModo, 'compartilhada (OP26.2): o cliente com R$ digitado reabre em R$ e mantém a margem; o outro não muda');
+  }
   const de2 = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T });
   ok(de2.ok && de(d, 'OP300.1', 'Receita').length === rec.length, 'aprovar de novo: só sincroniza, sem perguntar e sem duplicar');
 }

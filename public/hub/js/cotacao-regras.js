@@ -973,6 +973,29 @@ function triCalcular(e){
 
   /* ==== Lista (qindex) e gravação ==== */
   /** Monta o registro de quotes[id] e a entrada de qindex — mesmo formato do saveQuote. */
+  /**
+   * Cotação gravada antes de existir o "último campo editado": se o R$ guardado não é o que o % daria, quem digitou
+   * foi o R$ (o % é que foi arredondado). Fica 'brl', e a margem em R$ não muda ao reabrir. Vale para cada cliente.
+   */
+  function inferirModoMargem(q) {
+    if (!q || !q.fields) return q;
+    try {
+      if (ehMultiCliente(q)) {
+        clientesDe(q).forEach(c => {
+          if (c.margemModo) return;
+          const rs = parseFloat(String(c.margemRS || '').replace(',', '.'));
+          if (!(rs > 0)) return;
+          const t = clonar(q), tc = clientesDe(t).find(x => x.id === c.id); tc.margemModo = 'pct';
+          const cc = calcularPorCliente(t).clientes.find(x => x.id === c.id);
+          if (cc && Math.abs(cc.R.margemBRLCampo - rs) > 0.01) c.margemModo = 'brl';
+        });
+      } else if (!q.margemModo) {
+        const rs = parseFloat(String(q.fields.margemBRL || '').replace(',', '.'));
+        if (rs > 0) { const R = calcular(q, { modo: 'pct' }); if (Math.abs(R.margemBRLCampo - rs) > 0.01) q.margemModo = 'brl'; }
+      }
+    } catch (e) { /* cotação incompleta: fica como está */ }
+    return q;
+  }
   function snapshot(q, R) {
     const f = camposDe(q), fields = {};
     CAMPOS.forEach(k => { fields[k] = f[k]; });
@@ -1423,6 +1446,6 @@ function triCalcular(e){
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
   return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
-    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, definirParcelasCliente, cotacaoSozinho, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, entradaIndice, prepararGravacao,
+    clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, definirParcelasCliente, cotacaoSozinho, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, inferirModoMargem, parcelasComEta, entradaIndice, prepararGravacao,
     separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });
