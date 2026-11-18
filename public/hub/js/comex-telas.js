@@ -611,7 +611,7 @@
           <td class="num"><input class="inp" data-rg="alta" inputmode="decimal" value="${dec(v.alta)}" style="width:80px;text-align:right"></td><td class="num"><input class="inp" data-rg="queda" inputmode="decimal" value="${dec(v.queda)}" style="width:80px;text-align:right"></td>
           <td><select class="inp" data-rg="parcelaAlvo">${[2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${v.parcelaAlvo === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select></td>
           <td>${pill(sit[0], sit[1])}<br><small class="note">${esc(det)}</small>${e.status === 'aguardando-gatilho' && e.estimativa && !e.estimativa.dentro ? `<br><small class="note">estimativa pela PTAX de hoje: ${W.fmtBRL(e.estimativa.valor)}</small>` : ''}</td>
-          <td class="num">${e.calculo ? `<b>${W.fmtBRL(e.calculo.valor)}</b>${e.novoValor != null && e.status === 'aguardando-samir' ? `<br><small class="note">parcela ${W.fmtBRL(e.alvo.valor)} → ${W.fmtBRL(e.novoValor)}</small>` : ''}` : '—'}</td>
+          <td class="num">${e.calculo ? `<b>${W.fmtBRL(e.calculo.valor)}</b>${e.novoValor != null && e.status === 'aguardando-samir' ? `<br><small class="note">parcela ${W.fmtBRL(e.alvo.valor)} → ${W.fmtBRL(e.novoValor)}</small>` : ''}${e.conflito && e.status === 'aguardando-samir' ? `<br><small style="color:#b45309">⚠ já tem reajuste gravado (${esc(e.conflito.obs)}: ${W.fmtBRL(e.conflito.valor)}); substituindo, fica ${W.fmtBRL(e.novoValorSubstituindo)}</small>` : ''}` : '—'}</td>
           <td style="white-space:nowrap">${e.status === 'aguardando-samir' && aprova ? `<button class="btn pri sm" data-rgok="${esc(v.k)}">Aprovar</button> <button class="btn ghost sm" data-rgno="${esc(v.k)}">Recusar</button>` : ''}${edita ? ` <button class="btn ghost sm" data-rgrm="${i}" title="Remover evento">✕</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
       ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="rgadd">+ Evento</button><button class="btn blue sm" id="rgsal">Salvar regra</button></div>' : ''}
       <p class="note" style="margin-top:8px">Ao cliente vai só a PTAX oficial do Banco Central: nunca o valor remetido, o contrato de câmbio, a DI ou custo interno.</p></div></div>`;
@@ -620,7 +620,10 @@
         const v0 = x.eventos[+tr.dataset.i] || {}; return { k: v0.k || 'e' + W.novoId().slice(-6), rotulo: g('rotulo').trim(), gatilho: g('gatilho'), parcelaGatilho: +g('parcelaGatilho') || v0.parcelaGatilho || 1, parcelaAlvo: +g('parcelaAlvo'), alta: num('alta'), queda: num('queda') }; }) });
     const regravar = nova => { const oa = opById(o.id); W.salvarRegraOp(oa, nova, H.nomeUsuario(H.userKey)); H.salvar(); blocoRegraEvento(div, oa); };
     div.querySelectorAll('[data-rgok]').forEach(b => b.onclick = () => {
-      const oa = opById(o.id), res = W.aprovarReajusteEvento(H.db, oa, b.dataset.rgok, px, H.nomeUsuario(H.userKey));
+      const oa = opById(o.id);
+      let res = W.aprovarReajusteEvento(H.db, oa, b.dataset.rgok, px, H.nomeUsuario(H.userKey));
+      if (!res.ok && res.conflito && confirm(`A parcela já tem um reajuste gravado antes (${res.conflito.obs}: ${W.fmtBRL(res.conflito.valor)}).\n\nSubstituir pelo reajuste deste evento? O anterior fica no histórico da parcela. Cancelar não muda nada.`))
+        res = W.aprovarReajusteEvento(H.db, oa, b.dataset.rgok, px, H.nomeUsuario(H.userKey), null, { substituir: true });
       if (!res.ok) return H.toast(esc(res.msg));
       H.salvar(); H.toast(`Reajuste aprovado: ${W.fmtBRL(res.calculo.valor)} na parcela seguinte.`); blocoRegraEvento(div, oa);
     });

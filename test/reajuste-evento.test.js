@@ -58,6 +58,19 @@ console.log('\nEventos da OP228 (Teste 1):');
   ok(!JSON.stringify(comp).includes('porUnidade') && !JSON.stringify(comp).includes('quantidade'), 'o que o cliente vê não leva a tabela interna');
 }
 
+console.log('\nOP228 com reajuste já gravado direto (produção, PTAX 16/11 = 5,7324):');
+{
+  const db = banco(), o = db.ops[0], px = { '2026-11-16': 5.7324 };
+  ok(perto(W.calcularReajusteEvento(REGRA_228, REGRA_228.eventos[0], 5.7324).valor, 2231.04), '(5,7324 − 5,50) ÷ 0,10 × 0,30 × 3.200 = R$ 2.231,04');
+  const p2 = db.fin[1]; p2.valorContrato = 107920; p2.reajustes = [{ tipo: 'cambio', valor: 2231.04, obs: 'reajuste 1ª remessa · PTAX 16/11/2026' }]; p2.valor = 110151.04;
+  const ev = W.eventosDaOp(db, o, px)[0];
+  ok(ev.conflito && perto(ev.conflito.valor, 2231.04) && perto(ev.novoValorSubstituindo, 110151.04), 'o evento mostra que a parcela 02 já tem R$ 2.231,04 gravado');
+  const r = W.aprovarReajusteEvento(db, o, 'rem1', px, 'Samir');
+  ok(!r.ok && r.conflito && perto(p2.valor, 110151.04) && !o.reajustesEvento, 'aprovar sem decidir: recusa e não soma em dobro (não vira R$ 112.382,08)');
+  const r2 = W.aprovarReajusteEvento(db, o, 'rem1', px, 'Samir', '2026-11-18T10:00:00Z', { substituir: true });
+  ok(r2.ok && perto(p2.valor, 110151.04) && p2.reajustes.length === 1 && p2.reajustes[0].tipo === 'evento' && p2.alteracoes.some(a => a.reajustesAnteriores && a.reajustesAnteriores.length === 1), 'substituir: parcela 02 = R$ 110.151,04, uma vez só, e o anterior fica no histórico');
+}
+
 console.log('\nDI pela data do registro, recusa e dentro da faixa:');
 {
   const db = banco(), o = db.ops[0];

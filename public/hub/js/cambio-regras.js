@@ -384,18 +384,28 @@
       const p = +px[out.dataRef];
       if (!(p > 0)) return Object.assign(out, { status: 'aguardando-ptax', motivo: `PTAX de ${out.dataRef} ainda não publicada` });
       const calc = calcularReajusteEvento(x, ev, p), alvo = parcelaAlvo(db, o.id, ev.parcelaAlvo);
-      return Object.assign(out, { status: calc.dentro ? 'dentro-da-faixa' : 'aguardando-samir', ptax: p, calculo: calc, alvo, novoValor: alvo ? r2(+alvo.valor + calc.valor) : null });
+      // Reajuste gravado antes por outro caminho (correção antiga, lançamento manual): nunca somar em cima sem o Samir decidir.
+      const outros = alvo ? (alvo.reajustes || []).filter(r => r && r.tipo !== 'evento') : [];
+      const conflito = outros.length ? { valor: r2(outros.reduce((a, r) => a + (+r.valor || 0), 0)), obs: outros.map(r => r.obs || r.tipo || 'reajuste').join(' · '), qtd: outros.length } : null;
+      const novoValor = alvo ? r2(+alvo.valor + calc.valor) : null;
+      return Object.assign(out, { status: calc.dentro ? 'dentro-da-faixa' : 'aguardando-samir', ptax: p, calculo: calc, alvo, novoValor, conflito,
+        novoValorSubstituindo: alvo && conflito ? r2(+alvo.valor - conflito.valor + calc.valor) : null });
     });
   }
   const obsReajuste = (rotulo, dataRef) => `reajuste ${rotulo} · PTAX ${String(dataRef).split('-').reverse().join('/')}`;
   /** Aprovação do Samir: grava "valor base + reajuste" na parcela seguinte (Financeiro e Desembolso). Só isto grava. */
-  function aprovarReajusteEvento(db, o, k, ptaxes, por, agora) {
+  function aprovarReajusteEvento(db, o, k, ptaxes, por, agora, opc) {
     const ev = eventosDaOp(db, o, ptaxes).find(e => e.k === k);
     if (!ev) return { ok: false, msg: 'Evento não encontrado.' };
     if (ev.status === 'aprovado') return { ok: false, msg: 'Este reajuste já foi aprovado.' };
     if (ev.status !== 'aguardando-samir') return { ok: false, msg: ev.motivo || 'Este evento não tem reajuste a aprovar.' };
     if (!ev.alvo) return { ok: false, msg: 'Nenhuma parcela em aberto para receber o reajuste.' };
+    if (ev.conflito && !(opc && opc.substituir)) return { ok: false, conflito: ev.conflito, msg: `A parcela já tem reajuste gravado (${ev.conflito.obs}: ${ev.conflito.valor}). Substitua ou confira antes; nunca soma duas vezes.` };
     const t = agora || new Date().toISOString(), l = ev.alvo, c = ev.calculo;
+    if (ev.conflito) {
+      l.alteracoes = (l.alteracoes || []).concat([{ em: t, por: por || '', acao: `reajuste anterior substituído pelo do evento (${ev.conflito.obs}: ${ev.conflito.valor})`, reajustesAnteriores: (l.reajustes || []).filter(r => r && r.tipo !== 'evento') }]);
+      l.reajustes = (l.reajustes || []).filter(r => r && r.tipo === 'evento');
+    }
     l.reajustes = (l.reajustes || []).filter(r => r.eventoId !== k).concat([{ tipo: 'evento', eventoId: k, rotulo: ev.rotulo, data: ev.dataRef, dataCredito: ev.dataCredito || '', ptax: c.ptax, limite: c.limite, variacao: r4(c.ptax - c.limite), excedente: c.excedente,
       porUnidade: c.porUnidade, quantidade: c.quantidade, valor: c.valor, dentro: false, obs: obsReajuste(ev.rotulo, ev.dataRef), por: por || '', em: t }]);
     recomporParcela(l);
