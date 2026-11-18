@@ -197,6 +197,30 @@
     return out;
   }
 
+  /**
+   * Cotações lidas pela IA (PDF/imagem) → valores para o formulário de frete, uma por opção de preço.
+   * Empresa: a da agenda com o mesmo nome; senão vem como nova ("Outra…"). Operação: citada no texto ou na legenda (op20, OP 20).
+   * O contêiner entra na rota ("Shanghai → Pecém · 1x40'HC"), para o benchmark comparar só o mesmo equipamento.
+   */
+  function cotacoesDaLeitura(lido, agentes, ops, texto) {
+    const l = lido || {}, nomes = Object.keys(agentes || {}), opsIds = (ops || []).map(String);
+    const numero = v => { if (typeof v === 'number') return isFinite(v) ? v : 0; const s = String(v == null ? '' : v).replace(/[^\d.,-]/g, ''); if (!s) return 0;
+      const x = s.includes(',') && s.includes('.') ? (s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '')) : s.includes(',') ? (/,\d{2}$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '')) : s;
+      return +x || 0; };
+    const cap = s => String(s || '').trim().toLowerCase().replace(/(^|[\s(\-/])\S/g, c => c.toUpperCase());
+    const mOp = /\bop\s*-?\s*(\d{1,5})\b/i.exec([texto, l.legenda].filter(Boolean).join(' '));
+    const op = mOp ? (opsIds.find(id => id.toUpperCase() === 'OP' + mOp[1]) || '') : '';
+    const iso = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '')); return m ? m[0] : ''; };
+    return (l.cotacoes || []).filter(Boolean).map(c => {
+      const emp = String(c.empresa || '').trim(), naAgenda = nomes.find(n => nrm(n) === nrm(emp)) || nomes.find(n => emp && nrm(emp).length >= 3 && (nrm(n).includes(nrm(emp)) || nrm(emp).includes(nrm(n))));
+      const modal = FRETE_MODAIS.find(m => nrm(m) === nrm(c.modal)) || (String(c.conteiner || '').trim() ? 'FCL' : '');
+      const rota = [c.origem, c.destino].filter(x => String(x || '').trim()).map(cap).join(' → ') + (String(c.conteiner || '').trim() ? ' · ' + String(c.conteiner).trim() : '');
+      const obs = [c.transito && 'trânsito ' + String(c.transito).trim(), String(c.observacoes || '').trim()].filter(Boolean).join(' · ');
+      return { empresa: naAgenda || emp, empresaNova: !!(emp && !naAgenda), modal: modal || 'FCL', rota, usd: +numero(c.usd).toFixed(2), brl: +numero(c.brl).toFixed(2),
+        validade: String(c.validade || '').trim(), chegada: iso(c.chegada), contato: String(c.contato || '').trim(), fone: String(c.fone || '').trim(), op, status: 'Cotado', obs: obs.slice(0, 300) };
+    });
+  }
+
   /** Pedido pronto de análise de mercado para colar no Claude (mesmo texto do sistema atual). */
   function promptMercadoFrete(fretes, data) {
     const linhas = (fretes || []).filter(Boolean).slice(0, 8).map(f => `- ${f.rota} · ${f.empresa} · ${fmtUSD(usdNum(f.usd))} · ${f.modal} · status ${f.status}`).join('\n');
@@ -216,6 +240,6 @@ Formato: análise curta por rota + tabela de alvos de negociação + recomendaç
   return {
     FRETE_STATUS, FRETE_MODAIS, FRETE_RESP, FRETE_CAMPOS, fmtUSD, fmtTaxa, hojeBR, usdNum, rotaKey, regraAgente, freteBRL, previaFreteBRL,
     estatisticasRotas, referenciaRota, regrasPtax, juntarNomes, empresasFrete, ptaxVigente, ptaxNaData, precisaTravarPtax,
-    novoFrete, editarFrete, garantirAgente, guardarContatoAgente, lerPropostaFrete, promptMercadoFrete
+    novoFrete, editarFrete, garantirAgente, guardarContatoAgente, lerPropostaFrete, cotacoesDaLeitura, promptMercadoFrete
   };
 });

@@ -97,7 +97,7 @@
 
     el.innerHTML = `
       <div class="head"><div><h1>Fretes & Benchmark</h1><p class="sub">Empresas em lista fechada · R$ automático pela PTAX do Banco Central · memória de preços por rota. Área do Matheus; o Samir aprova a negociação final.</p></div>
-        <div class="btns"><button class="btn ghost" id="fag">Agentes & regra da PTAX</button><button class="btn blue" id="fparse">Ler proposta (auto)</button><button class="btn pri" id="fnovo">+ Nova cotação de frete</button></div></div>
+        <div class="btns"><button class="btn ghost" id="fag">Agentes & regra da PTAX</button><button class="btn ghost" id="fparse">Colar texto da proposta</button><button class="btn blue" id="fenvia">Enviar cotações (PDF ou imagem)</button><button class="btn pri" id="fnovo">+ Nova cotação de frete</button></div></div>
       <div class="kpis">
         <div class="kpi"><span class="lbl">Cotações registradas</span><span class="v">${fretes.length}</span><span class="d">${rotas.length} rota(s) na memória</span></div>
         <div class="kpi"><span class="lbl">Em negociação</span><span class="v">${abertas}</span><span class="d">cotado ou negociando</span></div>
@@ -127,7 +127,7 @@
             const fab = f.fabContato || f.fabEmail || f.fabWhats;
             return `<tr><td class="mono">${esc(f.data || '—')}</td><td><b>${esc(f.op || '—')}</b></td>
               <td><b>${esc(f.empresa || '—')}</b>${f.contato ? `<br><small class="note">${esc(f.contato)}${f.fone ? ' · ' + esc(f.fone) : ''}</small>` : ''}</td>
-              <td>${esc(f.rota || '—')}${fab ? `<br><small class="note">Fábrica: ${esc([f.fabContato, f.fabWhats, f.fabEmail].filter(Boolean).join(' · '))}</small>` : ''}</td><td>${esc(f.modal || '—')}</td>
+              <td>${esc(f.rota || '—')}${fab ? `<br><small class="note">Fábrica: ${esc([f.fabContato, f.fabWhats, f.fabEmail].filter(Boolean).join(' · '))}</small>` : ''}${f.obs ? `<br><small class="note">${esc(f.obs)}</small>` : ''}${f.anexo ? `<br><a class="note" href="${esc(f.anexo)}" target="_blank" rel="noopener">📎 ${esc(f.anexoNome || 'cotação original')}</a>` : ''}</td><td>${esc(f.modal || '—')}</td>
               <td class="num mono">${usd(W.usdNum(f.usd))}</td><td class="num">${cel}</td>
               <td class="mono">${f.chegada ? W.dataBR(f.chegada) : '—'}</td><td>${esc(f.validade || '—')}</td>
               <td><span class="pill ${PILL[f.status] || ''}">${esc(f.status || '—')}</span></td><td>${esc(f.resp || '—')}</td>
@@ -154,6 +154,7 @@
     el.querySelector('#fnovo').onclick = () => abrirFrete({}, null);
     el.querySelector('#fag').onclick = abrirAgenda;
     el.querySelector('#fparse').onclick = abrirLeitura;
+    el.querySelector('#fenvia').onclick = abrirEnvio;
     el.querySelector('#fprompt').onclick = abrirPrompt;
     el.querySelector('#fptax').onclick = () => { ptaxFalhou = false; ultimaTrava = 0; carregarPtax(true); H.render(); };
     const pm = el.querySelector('#fpm');
@@ -192,21 +193,23 @@
   }
 
   /* ---------- Nova / editar (o mesmo formulário; `id` preenchido grava por cima) ---------- */
-  function abrirFrete(pref, id) {
+  /* opc: { fila: 'Cotação lida 1 de 3', depois: () => próxima, anexo, anexoNome } — usada pelo "Enviar cotações". */
+  function abrirFrete(pref, id, opc) {
     garantir();
-    pref = pref || {};
+    pref = pref || {}; opc = opc || {};
     const db = H.db, ag = db.agentes, grupos = W.empresasFrete(ag);
     const opt = (v, sel, rot) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(rot == null ? v : rot)}</option>`;
     const optEmp = ([k, v]) => opt(k, pref.empresa, k + (v && +v.regra ? ` (PTAX +${v.regra}%)` : ''));
     // Cotação antiga com empresa fora da agenda: aparece no seletor para não se perder ao editar.
-    const avulsa = pref.empresa && pref.empresa !== '__outra' && !ag[pref.empresa] ? opt(pref.empresa, pref.empresa, pref.empresa + ' (fora da agenda)') : '';
+    const avulsa = pref.empresa && !pref.empresaNova && pref.empresa !== '__outra' && !ag[pref.empresa] ? opt(pref.empresa, pref.empresa, pref.empresa + ' (fora da agenda)') : '';
     const ops = (db.ops || []).filter(o => o && o.id).map(o => o.id);
     if (pref.op && !ops.includes(pref.op)) ops.unshift(pref.op);
     const resp = W.FRETE_RESP.slice(); if (pref.resp && !resp.includes(pref.resp)) resp.push(pref.resp);
     const eu = H.nomeUsuario(H.userKey), respSel = pref.resp || (resp.includes(eu) ? eu : resp[0]);
     const lista = (arr, sel) => arr.map(v => opt(v, sel)).join('');
 
-    const m = H.modal(id ? 'Editar cotação de frete' : 'Nova cotação de frete', `<div class="fields">
+    const anexo = opc.anexo || pref.anexo || '', anexoNome = opc.anexoNome || pref.anexoNome || '';
+    const m = H.modal(id ? 'Editar cotação de frete' : opc.fila || 'Nova cotação de frete', `${opc.fila ? `<p class="banner" style="margin-bottom:10px">${pref.semLeitura ? 'A IA não leu esta cotação: preencha à mão' : 'Lido pela IA'}${anexo ? ` de <a href="${esc(anexo)}" target="_blank" rel="noopener">${esc(anexoNome || 'cotação original')}</a>` : ''}. <b>Confira antes de registrar</b>: nada é gravado sem o clique.</p>` : ''}<div class="fields">
       <div class="f"><label class="lbl" for="fe">Empresa (lista fechada)</label><select id="fe"><option value="">— selecione —</option>${avulsa}
         <optgroup label="Agentes de carga">${grupos.agentes.map(optEmp).join('')}</optgroup><optgroup label="Armadores diretos">${grupos.armadores.map(optEmp).join('')}</optgroup>
         <option value="__outra">Outra…</option></select></div>
@@ -228,13 +231,18 @@
       <div class="f"><label class="lbl" for="fch">Chegada prevista</label><input id="fch" type="date" value="${esc(pref.chegada || '')}"></div>
       <div class="f"><label class="lbl" for="fva">Validade</label><input id="fva" value="${esc(pref.validade || '')}" placeholder="Ex.: 15/08"></div>
       <div class="f"><label class="lbl" for="fst">Status</label><select id="fst">${lista(W.FRETE_STATUS, pref.status)}</select></div>
-      <div class="f"><label class="lbl" for="frp">Responsável</label><select id="frp">${lista(resp, respSel)}</select></div></div>
+      <div class="f"><label class="lbl" for="frp">Responsável</label><select id="frp">${lista(resp, respSel)}</select></div>
+      <div class="f w4"><label class="lbl" for="fob">Observações</label><input id="fob" value="${esc(pref.obs || '')}" placeholder="free time, trânsito, transbordo…"></div></div>
+      ${anexo && !opc.fila ? `<p class="note" style="margin-top:6px">📎 <a href="${esc(anexo)}" target="_blank" rel="noopener">${esc(anexoNome || 'cotação original')}</a></p>` : ''}
       <div class="banner" id="fref" style="display:none;margin-top:12px"></div>
       <p class="note" id="fprev" style="margin-top:8px"></p>
       ${id && pref.ptaxLock ? `<p class="note" style="margin-top:4px">PTAX da chegada travada: ${tx(pref.ptaxLock.rate)} (${esc(pref.ptaxLock.date || '')}). Mudar a data de chegada solta a trava para buscar a PTAX do novo dia.</p>` : ''}`,
-      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="fok">' + (id ? 'Salvar alterações' : 'Registrar') + '</button>');
+      '<button class="btn" data-x>Cancelar</button>' + (opc.depois ? '<button class="btn" id="fpula">Pular esta</button>' : '') + '<button class="btn pri" id="fok">' + (id ? 'Salvar alterações' : 'Registrar') + '</button>');
     m.querySelector('.modal').classList.add('larga');
     const sel = m.querySelector('#fe');
+    /* Empresa lida que não está na agenda: vem em "Outra…", com o nome preenchido. */
+    if (pref.empresaNova && pref.empresa) { sel.value = '__outra'; m.querySelector('#feob').style.display = ''; m.querySelector('#feo').value = pref.empresa; }
+    const pula = m.querySelector('#fpula'); if (pula) pula.onclick = () => { H.fecharModal(); opc.depois(); };
 
     const empresa = () => sel.value === '__outra' ? val(m, '#feo') : sel.value;
     const preencherContato = () => { const a = ag[sel.value]; if (a) { if (a.contato) m.querySelector('#fct').value = a.contato; if (a.fone) m.querySelector('#ffo').value = a.fone; } };
@@ -259,7 +267,7 @@
     ['#fus', '#fbr', '#fro', '#feo'].forEach(s => m.querySelector(s).addEventListener('input', dica));
     m.querySelector('#fch').addEventListener('change', dica);
     // Ao editar, o contato é o da cotação — buscar o da agenda apagaria o que foi ajustado só para aquele frete.
-    if (!id) preencherContato();
+    if (!id && !pref.contato && !pref.fone) preencherContato();
     dica();
 
     m.querySelector('#fok').onclick = () => {
@@ -274,14 +282,17 @@
         if (!f) { H.fecharModal(); H.toast('Cotação não encontrada — talvez tenha sido apagada. Nada foi gravado.'); H.render(); return; }
         if (sel.value === '__outra') W.garantirAgente(H.db.agentes, emp);
         W.guardarContatoAgente(H.db.agentes, emp, campos.contato, campos.fone);   // "já fica salvo" na agenda
-        W.editarFrete(f, campos);
+        W.editarFrete(f, campos); f.obs = val(m, '#fob');
         H.salvar(); H.fecharModal(); H.toast('Cotação de frete atualizada'); H.render();
         return;
       }
       if (sel.value === '__outra') W.garantirAgente(H.db.agentes, emp);
       W.guardarContatoAgente(H.db.agentes, emp, campos.contato, campos.fone);
-      H.db.fretes.unshift(W.novoFrete(campos));
+      const novo = W.novoFrete(campos); novo.obs = val(m, '#fob');
+      if (anexo) Object.assign(novo, { anexo, anexoNome, lidoPorIA: !!opc.fila, registradoPor: H.nomeUsuario(H.userKey) });
+      H.db.fretes.unshift(novo);
       H.salvar(); H.fecharModal(); H.toast('Cotação de frete registrada'); H.render();
+      if (opc.depois) opc.depois();
     };
   }
 
@@ -304,6 +315,60 @@
       if (inp.dataset.c === 'regra') { if (!podeRegra()) return; a.regra = +inp.value || 0; } else a[inp.dataset.c] = inp.value;
       H.salvar(); H.render();
     }));
+  }
+
+  /* ---------- Enviar cotações (PDF, imagem ou print) → IA lê → conferir e registrar ----------
+     Igual ao comprovante do Financeiro: a IA só sugere; cada cotação abre o formulário preenchido e só grava no Registrar. */
+  const paraBase64 = f => new Promise((ok, erro) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] || ''); fr.onerror = erro; fr.readAsDataURL(f); });
+  async function subir(f) {
+    const fd = new FormData(); fd.append('arquivo', f);
+    const r = await H.api('/api/upload', { method: 'POST', body: fd }); const j = await r.json().catch(() => ({}));
+    if (!j.success) throw new Error(j.message || 'falha no envio'); return H.linkDoUpload(j);
+  }
+  function abrirEnvio() {
+    garantir();
+    const m = H.modal('Enviar cotações de frete', `<p class="note" style="margin-bottom:10px">PDF ou imagem, várias de uma vez, ou cole um print aqui (Ctrl+V). A IA lê empresa, rota, contêiner, valores, validade e contato; cada opção de preço vira uma cotação. <b>Nada é gravado até você conferir e clicar em Registrar.</b></p>
+      <div class="fields"><div class="f w4"><label class="lbl" for="fca">Cotações</label><input id="fca" type="file" multiple accept=".pdf,image/*"></div>
+        <div class="f w4"><label class="lbl" for="fcl">Texto junto (opcional)</label><input id="fcl" placeholder="ex.: frete op20 — se citar a operação, a cotação já vai para ela"></div></div>
+      <div id="fccola" tabindex="0" style="margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:14px;text-align:center" class="note">Clique aqui e cole o print (Ctrl+V)</div>
+      <p class="note" id="fcst" style="margin-top:8px"></p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn blue" id="fcler">Ler cotações</button>');
+    const colados = [], st = m.querySelector('#fcst');
+    m.querySelector('#fccola').addEventListener('paste', e => {
+      const fs = [...((e.clipboardData || {}).items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+      fs.forEach((f, i) => colados.push(new File([f], `cotacao-frete-${Date.now()}-${i}.png`, { type: f.type || 'image/png' })));
+      const tx = (e.clipboardData && e.clipboardData.getData('text/plain')) || '', cl = m.querySelector('#fcl');
+      if (tx.trim() && cl && !cl.value.trim()) cl.value = tx.trim().replace(/\s+/g, ' ').slice(0, 160);
+      st.textContent = `${colados.length} print(s) colado(s).`; e.preventDefault();
+    });
+    m.querySelector('#fcler').onclick = async ev => {
+      const arquivos = [...(m.querySelector('#fca').files || [])].concat(colados), texto = val(m, '#fcl');
+      if (!arquivos.length) return H.toast('Escolha os arquivos ou cole um print.');
+      if (arquivos.some(f => !/pdf|image\//i.test(f.type || ''))) return H.toast('Só PDF ou imagem.');
+      ev.target.disabled = true;
+      const fila = [], ops = (H.db.ops || []).filter(o => o && o.id).map(o => o.id);
+      for (let i = 0; i < arquivos.length; i++) {
+        const f = arquivos[i]; st.textContent = `Lendo ${i + 1} de ${arquivos.length}: ${f.name}…`;
+        let link = '', lidas = [], aviso = '';
+        try { link = await subir(f); } catch (e) { aviso = 'arquivo não foi guardado (' + e.message + ')'; }
+        try {
+          const r = await H.api('/api/ia/frete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arquivo: { base64: await paraBase64(f), mime: f.type, nome: f.name } }) });
+          const j = await r.json().catch(() => ({}));
+          if (j.success) lidas = W.cotacoesDaLeitura(j.lido, H.db.agentes, ops, texto); else aviso = j.message || 'a IA não leu';
+        } catch (e) { aviso = 'a IA não leu (' + e.message + ')'; }
+        /* Sem leitura: o formulário abre vazio, com o arquivo anexado, para preencher à mão. */
+        if (!lidas.length) lidas = [{ status: 'Cotado', op: (W.cotacoesDaLeitura({ cotacoes: [{}] }, {}, ops, texto)[0] || {}).op || '', semLeitura: aviso || 'nenhuma cotação legível' }];
+        lidas.forEach(p => fila.push({ pref: p, anexo: link, anexoNome: f.name }));
+      }
+      H.fecharModal();
+      let k = 0;
+      const proxima = () => {
+        if (k >= fila.length) { H.toast(`${fila.length} cotação(ões) conferida(s).`); return; }
+        const x = fila[k++];
+        abrirFrete(x.pref, null, { fila: `Cotação lida ${k} de ${fila.length}${x.pref.semLeitura ? ' · preencher à mão: ' + x.pref.semLeitura : ''}`, anexo: x.anexo, anexoNome: x.anexoNome, depois: proxima });
+      };
+      proxima();
+    };
   }
 
   /* ---------- Leitura automática da proposta ---------- */

@@ -696,6 +696,17 @@ app.post('/api/ia/pedido', auth.exigirTokenSeAtiva, async (req, res) => {
   }
 });
 
+/* Cotação de frete em PDF ou imagem: só lê e devolve as cotações; quem registra é a pessoa, na tela de Fretes. */
+app.post('/api/ia/frete', auth.exigirTokenSeAtiva, async (req, res) => {
+  const { arquivo } = req.body || {};
+  if (!ia.ativa()) return res.json({ success: false, semIA: true, message: 'IA desligada: falta a chave no servidor. Preencha à mão; o arquivo fica anexado.' });
+  if (!arquivo || !arquivo.base64) return res.status(400).json({ success: false, message: 'Envie a cotação (PDF ou imagem).' });
+  try {
+    const lido = await ia.lerCotacaoFrete({ base64: arquivo.base64, mime: arquivo.mime });
+    res.json({ success: true, lido, modelo: ia.MODELO() });
+  } catch (e) { res.status(e.semIA ? 200 : 502).json({ success: false, semIA: !!e.semIA, message: e.message }); }
+});
+
 /* Grava uma parte do banco vinda do próprio servidor (integrações), pelo mesmo
    caminho seguro das gravações dos navegadores: mescla registro a registro. */
 async function gravarParcial(parcial) {

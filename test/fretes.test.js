@@ -13,6 +13,29 @@ const perto = (a, b, t) => Math.abs(a - b) < (t || 0.01);
 const clone = o => JSON.parse(JSON.stringify(o));
 
 (async () => {
+  console.log('\nCotação em PDF ou imagem lida pela IA → formulário:');
+  {
+    process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'sk-teste-falsa';
+    const ia = require('../src/services/ia.service');
+    const resposta = { cotacoes: [
+      { empresa: 'msc', modal: 'FCL', conteiner: "1x40'HC", origem: 'SHANGHAI', destino: 'pecém', usd: '3.250,00', brl: 'R$ 1.480,50', validade: '30/11/2026', chegada: '', transito: '38 dias', contato: 'Ana', fone: '+55 85 9999-0000', observacoes: 'free time 14 dias' },
+      { empresa: 'Nova Cargo Ltda', modal: '', conteiner: "1x20'GP", origem: 'Ningbo', destino: 'Pecém', usd: 2100, brl: 0, validade: '', chegada: '2026-12-20' }], legenda: 'frete op20' };
+    let pedido = null;
+    const falsoFetch = async (url, o) => { pedido = JSON.parse(o.body); return { ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(resposta) }] }) }; };
+    const lido = await ia.lerCotacaoFrete({ base64: 'AAAA', mime: 'application/pdf' }, falsoFetch);
+    ok(lido.cotacoes.length === 2 && pedido.messages[0].content[0].type === 'document' && /cotações de frete/.test(pedido.system), 'PDF vai como documento; a IA devolve uma cotação por opção de preço');
+    const img = await ia.lerCotacaoFrete({ base64: 'AAAA', mime: 'image/jpg' }, falsoFetch);
+    ok(img.cotacoes.length === 2 && pedido.messages[0].content[0].type === 'image' && pedido.messages[0].content[0].source.media_type === 'image/jpeg', 'print/imagem vai como imagem');
+    let erro = ''; try { await ia.lerCotacaoFrete({ base64: 'AAAA', mime: 'text/plain' }, falsoFetch); } catch (e) { erro = e.message; }
+    ok(/PDF ou imagem/.test(erro), 'outro tipo de arquivo é recusado');
+    const [a, b] = W.cotacoesDaLeitura(lido, { MSC: { tipo: 'Armador' }, NSL: { tipo: 'Agente de carga' } }, ['OP19', 'OP20']);
+    ok(a.empresa === 'MSC' && !a.empresaNova && a.modal === 'FCL' && a.rota === "Shanghai → Pecém · 1x40'HC" && a.usd === 3250 && a.brl === 1480.5, 'empresa da agenda pelo nome, rota com o contêiner, US$ 3.250 e R$ 1.480,50');
+    ok(a.validade === '30/11/2026' && a.contato === 'Ana' && /trânsito 38 dias · free time 14 dias/.test(a.obs) && a.status === 'Cotado' && a.op === 'OP20', 'validade, contato, observações, status Cotado e a operação citada na legenda');
+    ok(b.empresa === 'Nova Cargo Ltda' && b.empresaNova && b.modal === 'FCL' && b.chegada === '2026-12-20' && b.usd === 2100, 'empresa fora da agenda vem como nova; contêiner sem modal = FCL; chegada escrita');
+    ok(W.cotacoesDaLeitura({ cotacoes: [{ empresa: 'MSC' }] }, {}, ['OP20'], 'cotação OP 20')[0].op === 'OP20' && W.cotacoesDaLeitura({ cotacoes: [{}] }, {}, ['OP20'], 'op99')[0].op === '', 'operação pelo texto digitado; operação que não existe fica em branco');
+    ok(W.cotacoesDaLeitura({}, {}, []).length === 0, 'sem leitura: nenhuma cotação inventada');
+  }
+
   console.log('\nRotas e formatos:');
   ok(W.rotaKey('Shanghai → Pecém') === 'shanghai → pecem' && W.rotaKey('shanghai para pecem') === 'shanghai → pecem' && W.rotaKey('SHANGHAI x PECÉM') === 'shanghai → pecem' && W.rotaKey('Shanghai -> Pecem') === 'shanghai → pecem', 'rota normalizada: seta, "para", "x" e acento chegam à mesma chave');
   ok(W.rotaKey('Ningbo') === 'ningbo', 'rota sem destino fica como está (normalizada)');

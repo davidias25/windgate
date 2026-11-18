@@ -164,4 +164,24 @@ async function revisarContrato({ texto, oficial, fatos }, fetchImpl) {
   return (Array.isArray(d.alertas) ? d.alertas : []).slice(0, 40).map(a => ({ nivel: NIVEIS.includes(a && a.nivel) ? a.nivel : 'atencao', titulo: String((a && a.titulo) || '').slice(0, 200), detalhe: String((a && a.detalhe) || '').slice(0, 800), clausula: String((a && a.clausula) || '').slice(0, 40), origem: 'ia' }));
 }
 
-module.exports = { revisarContrato, ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, lerComprovante, extrairJSON, blocoImagem, MODELO };
+/* ---------- Cotação de frete (PDF, imagem ou print) → cotações para o cadastro de Fretes ----------
+   A IA só LÊ: a tela abre o formulário preenchido e uma pessoa registra. */
+const SISTEMA_FRETE = `Você lê cotações de frete internacional (proposta de agente de carga ou armador, e-mail, print de WhatsApp) para uma trading brasileira que importa da China.
+Responda SOMENTE com um objeto JSON, sem comentários:
+{"cotacoes":[{"empresa":"agente de carga ou armador que cotou","modal":"FCL|LCL|Aéreo|Cabotagem|Rodoviário","conteiner":"ex.: 1x40'HC, 2x20'GP; vazio se não for FCL",
+ "origem":"porto/aeroporto de origem","destino":"porto/aeroporto de destino no Brasil","usd":número (total em dólar: frete + taxas cobradas em US$),
+ "brl":número (total das taxas cobradas em reais; 0 se não houver),"validade":"DD/MM/AAAA até quando a cotação vale","chegada":"AAAA-MM-DD só se a data de chegada estiver escrita",
+ "transito":"tempo de trânsito como aparece, ex.: 35 dias","contato":"pessoa que enviou a cotação","fone":"telefone/WhatsApp de quem cotou","observacoes":"free time, armador, rota com transbordo, o que mais importar, curto"}],
+ "legenda":"texto escrito FORA da cotação (legenda de WhatsApp, anotação), copiado exatamente; vazio se não houver"}
+Regras: cada opção de preço é uma cotação (ex.: 20' e 40' na mesma proposta = duas; dois agentes no mesmo print = duas). Copie os números como estão e some só o que for da mesma opção.
+O que não aparecer fica vazio ("" ou null). Nunca invente valor, data ou empresa. Sem cotação legível: {"cotacoes":[],"legenda":""}.`;
+async function lerCotacaoFrete({ base64, mime }, fetchImpl) {
+  if (!ativa()) { const e = new Error('IA desligada: falta a chave ANTHROPIC_API_KEY no servidor.'); e.semIA = true; throw e; }
+  if (!base64 || !MIME_OK.test(mime || '')) throw new Error('Envie a cotação em PDF ou imagem (PNG, JPG, WEBP).');
+  const bloco = /pdf/i.test(mime) ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: String(mime).toLowerCase().replace('jpg', 'jpeg'), data: base64 } };
+  const d = extrairJSON(await chamar([bloco, { type: 'text', text: 'Leia esta cotação de frete.' }], SISTEMA_FRETE, fetchImpl, { max_tokens: 2500 }));
+  return { cotacoes: Array.isArray(d && d.cotacoes) ? d.cotacoes.filter(c => c && typeof c === 'object').slice(0, 12) : [], legenda: String((d && d.legenda) || '') };
+}
+
+module.exports = { revisarContrato, ativa, testar, lerPedido, buscarFornecedores, analisarEquipe, conferirDocumentos, lerComprovante, lerCotacaoFrete, extrairJSON, blocoImagem, MODELO };
