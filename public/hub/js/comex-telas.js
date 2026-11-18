@@ -565,9 +565,80 @@
   H.fichaComex = function (box, o) {
     fichaComexBase(box, o);
     if (!H.pode('fin.ver')) return;
+    const dr = document.createElement('div'); box.appendChild(dr);
+    blocoRegraEvento(dr, o);
+    /* Cláusula antiga (por câmbio da remessa / híbrida): só para quem ainda não está no padrão por evento. */
+    if (W.regraDaOp(opById(o.id) || o) && !(opById(o.id) || o).clausulaCambial) return;
     const div = document.createElement('div'); box.appendChild(div);
     blocoClausula(div, o);
   };
+
+  /* ---------- Reajuste cambial · padrão da casa (por evento), na ficha ----------
+     Faixa, tabela por evento e quantidade; os eventos saem das parcelas recebidas e do registro da DI.
+     O cálculo fica aguardando o Samir; só a aprovação grava na parcela seguinte. */
+  const ptaxDias = {};
+  H.ptaxDosDias = async function (datas) {
+    for (const d of datas) {
+      if (!d || ptaxDias[d]) continue;
+      try { const j = await (await H.api('/api/cambio/ptax/' + d)).json(); if (j.success && j.ptax) ptaxDias[d] = j.ptax.venda; } catch (e) { /* tenta de novo depois */ }
+    }
+    return ptaxDias;
+  };
+  const SIT_EVENTO = { 'aguardando-gatilho': ['aguardando', COR.cinza], 'aguardando-ptax': ['aguardando a PTAX', COR.cinza], 'dentro-da-faixa': ['dentro da faixa: sem reajuste', COR.ok], 'aguardando-samir': ['aguardando o Samir', COR.atencao], aprovado: ['aprovado', COR.ok], recusado: ['recusado', COR.vencido] };
+  async function blocoRegraEvento(div, o0) {
+    const o = opById(o0.id) || o0, r = W.regraDaOp(o), x = r || W.normalizarRegra({}), edita = H.pode('fin.lancar'), aprova = H.pode('fin.autorizar');
+    const faltas = r ? W.conferirRegra(r) : ['Regra não cadastrada.'], hist = (x.hist || []).slice(-1)[0], dec = v => (v ? String(v).replace('.', ',') : '');
+    const pre = W.eventosDaOp(H.db, o, {}, ptaxV());
+    const px = r && !x.naoSeAplica ? await H.ptaxDosDias([...new Set(pre.map(e => e.dataRef).filter(d => d && d <= W.hojeISO()))]) : {};
+    if (!div.isConnected) return;   // saiu da tela enquanto buscava a PTAX
+    if (r && W.registrarDentroDaFaixa(H.db, o, px)) H.salvar();
+    const evs = W.eventosDaOp(H.db, o, px, ptaxV());
+    div.innerHTML = `<div class="box"><div class="box-h"><h2>Reajuste cambial · padrão da casa</h2><span class="note">${!r ? 'regra não cadastrada' : x.naoSeAplica ? 'não se aplica a esta operação' : faltas.length ? 'regra incompleta' : 'regra completa'}${hist ? ` · editada por ${esc(hist.por)} em ${W.dataBR(String(hist.em).slice(0, 10))}` : ''}</span></div><div class="box-b">
+      <p class="note" style="margin-bottom:8px">Dentro da faixa, a parcela não muda. Fora dela, só o que exceder o limite, proporcional, pelo valor por unidade a cada R$ 0,10 de cada evento. Remessas: PTAX do dia útil seguinte ao crédito da parcela. DI: PTAX do dia do registro. A parcela final não tem ajuste.</p>
+      ${faltas.length && r && !x.naoSeAplica ? `<div class="banner" style="margin-bottom:8px">${esc(faltas.join(' '))}</div>` : ''}
+      <div class="fields">
+        <div class="f"><label class="lbl" for="rgref">Dólar de referência</label><input id="rgref" inputmode="decimal" value="${dec(x.referencia)}"></div>
+        <div class="f"><label class="lbl" for="rgpiso">Faixa: piso (PTAX)</label><input id="rgpiso" inputmode="decimal" value="${dec(x.piso)}"></div>
+        <div class="f"><label class="lbl" for="rgteto">Faixa: teto (PTAX)</label><input id="rgteto" inputmode="decimal" value="${dec(x.teto)}"></div>
+        <div class="f"><label class="lbl" for="rgqtd">Quantidade (unidades)</label><input id="rgqtd" inputmode="decimal" value="${x.quantidade || ''}"></div>
+        <div class="w4"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rgnsa" ${x.naoSeAplica ? 'checked' : ''}> Não se aplica a esta operação (sem reajuste cambial)</label></div></div>
+      <div class="tw" style="margin-top:8px"><table><thead><tr><th>Evento</th><th>PTAX de</th><th class="num">Alta (R$/un. a cada 0,10)</th><th class="num">Queda (R$/un. a cada 0,10)</th><th>Reajusta a</th><th>Situação</th><th class="num">Reajuste</th><th></th></tr></thead><tbody id="rgev">
+      ${x.eventos.map((v, i) => { const e = evs.find(y => y.k === v.k) || {}, sit = SIT_EVENTO[e.status] || ['—', COR.cinza], c = e.calculo || e.estimativa;
+        const det = e.calculo && !e.calculo.dentro ? `PTAX ${n4(e.calculo.ptax)} (${W.dataBR(e.dataRef)}) − ${e.calculo.sentido === 'alta' ? 'teto' : 'piso'} ${n4(e.calculo.limite)} = ${n4(e.calculo.excedente)} ÷ 0,10 × ${W.fmtBRL(e.calculo.porUnidade)} × ${e.calculo.quantidade}`
+          : e.calculo ? `PTAX ${n4(e.calculo.ptax)} (${W.dataBR(e.dataRef)})` : e.motivo || '';
+        return `<tr data-i="${i}"><td><input class="inp" data-rg="rotulo" value="${esc(v.rotulo)}" style="width:190px"></td>
+          <td><select class="inp" data-rg="gatilho">${W.GATILHOS_EVENTO.map(([k, l]) => `<option value="${k}" ${v.gatilho === k ? 'selected' : ''}>${k === 'parcela' ? 'crédito da' : esc(l)}</option>`).join('')}</select>${v.gatilho === 'parcela' ? ` <select class="inp" data-rg="parcelaGatilho">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${v.parcelaGatilho === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select>` : ''}</td>
+          <td class="num"><input class="inp" data-rg="alta" inputmode="decimal" value="${dec(v.alta)}" style="width:80px;text-align:right"></td><td class="num"><input class="inp" data-rg="queda" inputmode="decimal" value="${dec(v.queda)}" style="width:80px;text-align:right"></td>
+          <td><select class="inp" data-rg="parcelaAlvo">${[2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${v.parcelaAlvo === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select></td>
+          <td>${pill(sit[0], sit[1])}<br><small class="note">${esc(det)}</small>${e.status === 'aguardando-gatilho' && e.estimativa && !e.estimativa.dentro ? `<br><small class="note">estimativa pela PTAX de hoje: ${W.fmtBRL(e.estimativa.valor)}</small>` : ''}</td>
+          <td class="num">${e.calculo ? `<b>${W.fmtBRL(e.calculo.valor)}</b>${e.novoValor != null && e.status === 'aguardando-samir' ? `<br><small class="note">parcela ${W.fmtBRL(e.alvo.valor)} → ${W.fmtBRL(e.novoValor)}</small>` : ''}` : '—'}</td>
+          <td style="white-space:nowrap">${e.status === 'aguardando-samir' && aprova ? `<button class="btn pri sm" data-rgok="${esc(v.k)}">Aprovar</button> <button class="btn ghost sm" data-rgno="${esc(v.k)}">Recusar</button>` : ''}${edita ? ` <button class="btn ghost sm" data-rgrm="${i}" title="Remover evento">✕</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+      ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="rgadd">+ Evento</button><button class="btn blue sm" id="rgsal">Salvar regra</button></div>' : ''}
+      <p class="note" style="margin-top:8px">Ao cliente vai só a PTAX oficial do Banco Central: nunca o valor remetido, o contrato de câmbio, a DI ou custo interno.</p></div></div>`;
+    const ler = () => ({ referencia: numIn(div, '#rgref'), piso: numIn(div, '#rgpiso'), teto: numIn(div, '#rgteto'), quantidade: numIn(div, '#rgqtd'), naoSeAplica: div.querySelector('#rgnsa').checked,
+      eventos: [...div.querySelectorAll('#rgev tr[data-i]')].map(tr => { const g = k => { const el = tr.querySelector(`[data-rg="${k}"]`); return el ? el.value : ''; }, num = k => { const t = String(g(k)).trim(); return /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') || 0 : +t || 0; };
+        const v0 = x.eventos[+tr.dataset.i] || {}; return { k: v0.k || 'e' + W.novoId().slice(-6), rotulo: g('rotulo').trim(), gatilho: g('gatilho'), parcelaGatilho: +g('parcelaGatilho') || v0.parcelaGatilho || 1, parcelaAlvo: +g('parcelaAlvo'), alta: num('alta'), queda: num('queda') }; }) });
+    const regravar = nova => { const oa = opById(o.id); W.salvarRegraOp(oa, nova, H.nomeUsuario(H.userKey)); H.salvar(); blocoRegraEvento(div, oa); };
+    div.querySelectorAll('[data-rgok]').forEach(b => b.onclick = () => {
+      const oa = opById(o.id), res = W.aprovarReajusteEvento(H.db, oa, b.dataset.rgok, px, H.nomeUsuario(H.userKey));
+      if (!res.ok) return H.toast(esc(res.msg));
+      H.salvar(); H.toast(`Reajuste aprovado: ${W.fmtBRL(res.calculo.valor)} na parcela seguinte.`); blocoRegraEvento(div, oa);
+    });
+    div.querySelectorAll('[data-rgno]').forEach(b => b.onclick = () => {
+      const motivo = prompt('Motivo da recusa (fica registrado):'); if (motivo == null) return;
+      const oa = opById(o.id), res = W.recusarReajusteEvento(H.db, oa, b.dataset.rgno, motivo, H.nomeUsuario(H.userKey));
+      if (!res.ok) return H.toast(esc(res.msg));
+      H.salvar(); H.toast('Reajuste recusado: a parcela não muda.'); blocoRegraEvento(div, oa);
+    });
+    if (!edita) return;
+    div.querySelector('#rgadd').onclick = () => { const a = ler(); a.eventos.push({ k: 'e' + W.novoId().slice(-6), rotulo: 'Novo evento', gatilho: 'parcela', parcelaGatilho: a.eventos.length + 1, parcelaAlvo: a.eventos.length + 2, alta: 0, queda: 0 }); regravar(a); };
+    div.querySelectorAll('[data-rgrm]').forEach(b => b.onclick = () => { const a = ler(); a.eventos.splice(+b.dataset.rgrm, 1); regravar(a); });
+    div.querySelectorAll('[data-rg="gatilho"]').forEach(s => s.onchange = () => regravar(ler()));
+    div.querySelector('#rgsal').onclick = () => {
+      const nova = ler(), e = W.conferirRegra(nova);
+      regravar(nova); H.toast(e.length ? 'Regra salva, ainda incompleta: ' + esc(e[0]) : 'Regra de câmbio salva.');
+    };
+  }
   function blocoClausula(div, o0) {
     const o = opById(o0.id) || o0, salva = !!o.clausulaCambial, c = W.clausulaDaOp(H.db, o) || W.normalizarClausula({}), p = ptaxV(), rems = W.remessasDaOp(H.db, o.id, p), edita = H.pode('fin.lancar');
     const pct = v => (+v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 });

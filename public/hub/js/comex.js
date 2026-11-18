@@ -695,6 +695,13 @@ Modelo para revisão jurídica antes da assinatura.`;
     if ((meu(['documentos', 'operacoes']) || fin) && W.arquivosPerdidos) { const pa = W.arquivosPerdidos(db); if (pa.length) add({ tipo: 'arquivo', nivel: 2, titulo: `Arquivo perdido: reenviar (${pa.length})`, detalhe: pa.slice(0, 3).map(x => [x.op, x.nome].filter(Boolean).join(' · ')).join('; ') + (pa.length > 3 ? '…' : ''), ir: ['docs'] }); }
     if (fin) {
       if (W.pode(db, k, 'fin.autorizar')) { const n = (db.fin || []).filter(l => l && l.aprovacaoPendente).length; if (n) add({ tipo: 'aprovacao', nivel: 2, titulo: `${n} lançamento(s) aguardando sua aprovação`, detalhe: 'propostos pela conciliação', ir: ['torre'] }); }
+      /* Reajuste cambial por evento: o evento aconteceu (crédito ou DI) e falta a decisão do Samir. */
+      /* No navegador as regras de câmbio estão no mesmo WG; no Node, vêm do módulo (carregado só aqui, sem ciclo na carga). */
+      const C = W.eventosDaOp ? W : (typeof module === 'object' && module.exports && typeof require === 'function' ? require('./cambio-regras.js') : {});
+      if (W.pode(db, k, 'fin.autorizar') && C.eventosDaOp) {
+        const evs = (db.ops || []).filter(o => o && W.emAndamento(o) && C.regraDaOp(o)).flatMap(o => C.eventosDaOp(db, o, {}).filter(e => (e.status === 'aguardando-ptax' || e.status === 'aguardando-samir') && e.dataRef && e.dataRef <= h).map(e => o.id + ' · ' + e.rotulo));
+        if (evs.length) add({ tipo: 'aprovacao', nivel: 2, titulo: `${evs.length} reajuste(s) cambial(is) para conferir e aprovar`, detalhe: evs.slice(0, 3).join('; '), ir: ['contas', 'receber'] });
+      }
       const ext = (db.hubExtratos || []).filter(Boolean).sort((a, b) => String(b.mes).localeCompare(String(a.mes)))[0];
       if (ext && W.divergencias) { const dv = W.divergencias(db, ext); const n = dv.semLancamento.filter(t => !t.lancId && !t.decisao).length; if (n) add({ tipo: 'banco', nivel: 2, titulo: `${n} movimento(s) do banco sem lançamento`, detalhe: `${ext.banco || ''} ${ext.mes}`, ir: ['fiscal'] }); }
       (db.hubCambio || []).filter(c => c && c.status === 'previsto' && W.ehISO(c.liquidacao) && W.diasEntre(h, c.liquidacao) <= 7).forEach(c => add({ tipo: 'cambio', nivel: 2, titulo: `Fechar câmbio: US$ ${Math.round(num(c.valorME)).toLocaleString('pt-BR')} (${c.op || ''})`, detalhe: `pagamento em ${W.dataBR(c.liquidacao)}${ptax && num(c.taxaPrevista) ? ` · PTAX ${ptax.toFixed(4)} × prevista ${num(c.taxaPrevista).toFixed(4)}` : ''}`, op: c.op, ir: ['cambio'] }));

@@ -68,7 +68,8 @@
 
   /* ================= CONTAS A PAGAR E RECEBER ================= */
   let abaContas = 'pagar';
-  H.telas.contas = function (el) {
+  H.telas.contas = function (el, param) {
+    if (param === 'receber' || param === 'pagar') { abaContas = param; H.estado.param = null; }
     if (!H.podeFin()) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
     const db = H.db, hoje = W.hojeISO();
     const ate = W.mesSoma(F.mes, 0) + '-31';
@@ -88,10 +89,10 @@
         <div class="kpi"><span class="lbl">Próximos 7 dias</span><span class="v">${W.fmtBRLk(soma(prox7))}</span><span class="d">${prox7.length} conta(s)</span></div>
         <div class="kpi"><span class="lbl">${abaContas === 'pagar' ? 'Aguardando autorização' : 'Total em aberto'}</span><span class="v">${abaContas === 'pagar' ? aguardando.length : W.fmtBRLk(soma(lista))}</span><span class="d">${abaContas === 'pagar' ? 'Davi prepara · Samir autoriza' : lista.length + ' conta(s)'}</span></div>
       </div>
-      <div id="bcamb"></div>
+      <div id="bevt"></div><div id="bcamb"></div>
       <div class="box">${tabelaLanc(lista, { contas: true })}</div>`;
     ligarTopo(el); ligarLanc(el);
-    if (abaContas === 'receber') blocoCambio(el.querySelector('#bcamb'), hoje);
+    if (abaContas === 'receber') { blocoEventos(el.querySelector('#bevt'), hoje); blocoCambio(el.querySelector('#bcamb'), hoje); }
     el.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { abaContas = b.dataset.c; H.render(); });
   };
 
@@ -102,6 +103,31 @@
       if (ptaxesDia[d]) continue;
       try { const j = await (await H.api('/api/cambio/ptax/' + d)).json(); if (j.success && j.ptax) ptaxesDia[d] = j.ptax.venda; } catch (e) { /* tenta de novo ao voltar à tela */ }
     }
+  }
+  /* Padrão por evento: reajustes calculados aguardando o Samir e operações sem a regra completa. */
+  async function blocoEventos(box, hoje) {
+    if (!box) return;
+    const ops = (H.db.ops || []).filter(o => o && W.regraDaOp(o) && W.emAndamento(o));
+    const datas = [...new Set(ops.flatMap(o => W.eventosDaOp(H.db, o, {}).map(e => e.dataRef)).filter(d => d && d <= hoje))];
+    const px = H.ptaxDosDias ? await H.ptaxDosDias(datas) : {};
+    if (!box.isConnected) return;
+    if (ops.reduce((a, o) => a + W.registrarDentroDaFaixa(H.db, o, px), 0)) H.salvar();
+    const pend = ops.flatMap(o => W.eventosDaOp(H.db, o, px).filter(e => e.status === 'aguardando-samir').map(e => Object.assign(e, { o })));
+    const falta = W.opsSemRegraCambial(H.db), aprova = H.pode('fin.autorizar'), n = v => (+v || 0).toFixed(4).replace('.', ',');
+    if (!pend.length && !falta.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `${pend.length ? `<div class="box"><div class="box-h"><h2>Reajuste cambial aguardando o Samir</h2><span class="note">nada muda na parcela antes da aprovação</span></div><div class="tw"><table><thead><tr><th>Operação</th><th>Evento</th><th>PTAX</th><th class="num">Reajuste</th><th class="num">Parcela</th><th></th></tr></thead><tbody>
+      ${pend.map(e => `<tr><td><b class="mono">${esc(e.o.id)}</b><br><small class="note">${esc(e.o.cliente || '')}</small></td><td>${esc(e.rotulo)}${e.dataCredito ? `<br><small class="note">crédito ${W.dataBR(e.dataCredito)}</small>` : ''}</td>
+        <td class="mono">${n(e.calculo.ptax)}<br><small class="note">${W.dataBR(e.dataRef)} · ${e.calculo.sentido === 'alta' ? 'teto' : 'piso'} ${n(e.calculo.limite)}</small></td><td class="num"><b>${W.fmtBRL(e.calculo.valor)}</b></td>
+        <td class="num">${e.alvo ? `${W.numeroNaOp(H.db, e.alvo)}ª: ${W.fmtBRL(e.alvo.valor)} → <b>${W.fmtBRL(e.novoValor)}</b>` : '<span class="note">sem parcela em aberto</span>'}</td>
+        <td>${aprova && e.alvo ? `<button class="btn pri sm" data-evok="${esc(e.o.id)}|${esc(e.k)}">Aprovar</button>` : ''} <button class="btn ghost sm" data-evop="${esc(e.o.id)}">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+      ${falta.length ? `<div class="box"><div class="box-h"><h2>Completar regra de câmbio</h2><span class="note">${falta.length} operação(ões) · nenhum valor muda sozinho</span></div><div class="tw"><table><tbody>
+      ${falta.map(f => `<tr><td><b class="mono">${esc(f.o.id)}</b> ${esc(f.o.cliente || '')}</td><td class="note">${esc(f.faltas.slice(0, 2).join(' '))}</td><td><button class="btn ghost sm" data-evop="${esc(f.o.id)}">Completar</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
+    box.querySelectorAll('[data-evop]').forEach(b => b.onclick = () => H.ir('ficha', b.dataset.evop));
+    box.querySelectorAll('[data-evok]').forEach(b => b.onclick = () => {
+      const [opId, k] = b.dataset.evok.split('|'), o = H.db.ops.find(x => x && x.id === opId), r = o ? W.aprovarReajusteEvento(H.db, o, k, px, H.nomeUsuario(H.userKey)) : { ok: false, msg: 'Operação não encontrada.' };
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.toast(`Reajuste aprovado: ${W.fmtBRL(r.calculo.valor)} na parcela seguinte.`); H.render();
+    });
   }
   async function blocoCambio(box, hoje) {
     if (!box) return;
