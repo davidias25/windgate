@@ -117,10 +117,11 @@
       ${pend.map(e => `<tr><td><b class="mono">${esc(e.o.id)}</b><br><small class="note">${esc(e.o.cliente || '')}</small></td><td>${esc(e.rotulo)}${e.dataCredito ? `<br><small class="note">crédito ${W.dataBR(e.dataCredito)}</small>` : ''}</td>
         <td class="mono">${n(e.calculo.ptax)}<br><small class="note">${W.dataBR(e.dataRef)} · ${e.calculo.sentido === 'alta' ? 'teto' : 'piso'} ${n(e.calculo.limite)}</small></td><td class="num"><b>${W.fmtBRL(e.calculo.valor)}</b></td>
         <td class="num">${e.alvo ? `${W.numeroNaOp(H.db, e.alvo)}ª: ${W.fmtBRL(e.alvo.valor)} → <b>${W.fmtBRL(e.novoValor)}</b>${e.conflito ? `<br><small style="color:#b45309">⚠ já tem reajuste gravado (${W.fmtBRL(e.conflito.valor)}): substituindo, fica ${W.fmtBRL(e.novoValorSubstituindo)}</small>` : ''}` : '<span class="note">sem parcela em aberto</span>'}</td>
-        <td>${aprova && e.alvo ? `<button class="btn pri sm" data-evok="${esc(e.o.id)}|${esc(e.k)}">Aprovar</button>` : ''} <button class="btn ghost sm" data-evop="${esc(e.o.id)}">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        <td>${aprova && e.alvo ? `<button class="btn pri sm" data-evok="${esc(e.o.id)}|${esc(e.k)}">Aprovar</button>` : ''} <button class="btn ghost sm" data-evap="${esc(e.o.id)}|${esc(e.k)}">Apuração</button> <button class="btn ghost sm" data-evop="${esc(e.o.id)}">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}
       ${falta.length ? `<div class="box"><div class="box-h"><h2>Completar regra de câmbio</h2><span class="note">${falta.length} operação(ões) · nenhum valor muda sozinho</span></div><div class="tw"><table><tbody>
       ${falta.map(f => `<tr><td><b class="mono">${esc(f.o.id)}</b> ${esc(f.o.cliente || '')}</td><td class="note">${esc(f.faltas.slice(0, 2).join(' '))}</td><td><button class="btn ghost sm" data-evop="${esc(f.o.id)}">Completar</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
     box.querySelectorAll('[data-evop]').forEach(b => b.onclick = () => H.ir('ficha', b.dataset.evop));
+    box.querySelectorAll('[data-evap]').forEach(b => b.onclick = () => { const [opId, k] = b.dataset.evap.split('|'); if (H.apuracaoModal) H.apuracaoModal(opId, k, px); });
     box.querySelectorAll('[data-evok]').forEach(b => b.onclick = () => {
       const [opId, k] = b.dataset.evok.split('|'), o = H.db.ops.find(x => x && x.id === opId);
       let r = o ? W.aprovarReajusteEvento(H.db, o, k, px, H.nomeUsuario(H.userKey)) : { ok: false, msg: 'Operação não encontrada.' };

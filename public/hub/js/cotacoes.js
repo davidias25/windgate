@@ -662,6 +662,7 @@
       if (!r.ok && r.confirmarExistentes) { perguntarExistentes(r.filha.id, r.existentes, esc_ => { escolhas[r.filha.id] = esc_; executar(codigo); }); return true; }
       if (!r.ok) { if (r.semCodigo) return false; H.toast('⛔ ' + esc(r.msg)); return true; }
       if (H.db.quotes[ed.id]) H.db.quotes[ed.id].clientes = ed.clientes;
+      (r.filhas || []).forEach(f => W.aplicarPadraoNaOp(H.db, f, eu(), null, { referencia: ed.cambioProposta && ed.cambioProposta.referencia }));
       H.toast(r.jaLancado ? 'Tudo já estava lançado: nada foi duplicado.' : `Contêiner <b>${esc(r.mae.id)}</b>: ${r.filhas.length} filha(s) · ${r.lancamentos.length} lançamento(s) previstos.`);
       if (depois) depois(); else { W.negocioDaCotacao(H.db, H.db.quotes[ed.id], { por: eu() }); H.salvar(); }
       if (!r.jaLancado && H.gerarContratos) H.gerarContratos(r.filhas.map(f => f.id));
@@ -742,6 +743,7 @@
     if (r.op) {
       Object.assign(r.op, { status: 'contrato', statusEm: agora, statusPor: eu() });
       H.db.ops.unshift(r.op);
+      W.aplicarPadraoNaOp(H.db, r.op, eu(), agora, { referencia: ed.cambioProposta && ed.cambioProposta.referencia });   // regra de câmbio: cópia do padrão da casa
       if (!Array.isArray(H.db.opStatusHist)) H.db.opStatusHist = [];
       H.db.opStatusHist.push({ _id: W.novoId(), op: r.id, de: '', para: 'contrato', em: agora, deEm: '', por: eu(), tipo: 'mudanca', origem: 'hub2-cotacao', motivo: 'Cotação aprovada' });
       if (!H.db.checklists[r.id] && H.CHK_MODELO) H.db.checklists[r.id] = H.CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));

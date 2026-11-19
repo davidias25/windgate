@@ -88,7 +88,7 @@
     }
     if (cl) {
       const faixa = (a, b) => { doc.setFillColor(...FUNDO); doc.roundedRect(M + 12, yy - 9, wl - 24, 14, 4, 4, 'F'); f(7.5, false, CINZA); doc.text(a, M + 20, yy + 0.5); f(7.5, true, TINTA); doc.text(b, M + wl - 20, yy + 0.5, { align: 'right' }); yy += 17; };
-      faixa('PTAX de referência do contrato', 'R$ ' + taxa(cl.referencia, 2));
+      faixa('Dólar de referência do contrato', 'R$ ' + taxa(cl.referencia, 2));
       faixa('Faixa sem reajuste', `R$ ${taxa(cl.faixaMin, 2)} a R$ ${taxa(cl.faixaMax, 2)}`);
       (cp ? cp.reajustes.slice().sort((a, b) => a.ordem - b.ordem) : []).forEach(r => faixa(`${r.ordem}º câmbio (${dataBR(r.data).slice(0, 5)}): ${r.dentro ? 'dentro da faixa' : r.variacao > 0 ? 'acima da faixa' : 'abaixo da faixa'}`, r.dentro ? 'sem reajuste' : `${r.variacao >= 0 ? '+' : '–'} R$ ${taxa(Math.abs(r.variacao), 2)} / US$`));
       doc.setDrawColor(...LINHA); doc.line(M + 14, yy - 4, M + wl - 14, yy - 4); yy += 7;
@@ -122,6 +122,32 @@
     doc.text('Confirme os dados por telefone antes de qualquer transferência.', xr, A - 20, { align: 'right' });
 
     doc.save(`Desembolso_${String(dd.op).replace(/[^\w.-]+/g, '_')}_${String(dd.atualizado).slice(0, 10)}.pdf`);
+    return doc;
+  };
+
+  /* Apuração cambial de um evento (A4 em pé): os dados vêm de W.apuracaoCambial, que só tem a PTAX oficial. */
+  H.pdfApuracao = async function (ap) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' }), L = 595.28, M = 44;
+    const f = (tam, neg, cor) => { doc.setFont('helvetica', neg ? 'bold' : 'normal'); doc.setFontSize(tam); doc.setTextColor(...(cor || TINTA)); };
+    doc.setFillColor(...NAVY); doc.rect(0, 0, L, 92, 'F'); doc.setFillColor(...MAG); doc.rect(0, 92, L, 4, 'F');
+    try { doc.addImage(await carregarLogo(), 'PNG', M, 22, 168, 48.5); } catch (e) { f(22, true, [255, 255, 255]); doc.text('WindGate', M, 58); }
+    f(7, true, [255, 255, 255]); doc.text('APURAÇÃO CAMBIAL', L - M, 40, { align: 'right' });
+    f(15, true, [255, 255, 255]); doc.text(`${ap.op} · ${ap.cliente}`.slice(0, 60), L - M, 60, { align: 'right' });
+    let y = 132;
+    f(12, true, NAVY); doc.text(String(ap.evento), M, y); y += 22;
+    ap.linhas.forEach(([k, v], i) => {
+      const ult = i === ap.linhas.length - 1 && /Novo valor/.test(k);
+      if (ult) { doc.setFillColor(253, 243, 248); doc.roundedRect(M - 6, y - 14, L - 2 * M + 12, 26, 6, 6, 'F'); }
+      else if (i % 2 === 0) { doc.setFillColor(...FUNDO); doc.rect(M - 6, y - 14, L - 2 * M + 12, 22, 'F'); }
+      f(9, false, CINZA); doc.text(String(k), M, y);
+      f(ult ? 11 : 10, true, ult ? MAG : NAVY); doc.text(String(v), L - M, y, { align: 'right' }); y += ult ? 30 : 24;
+    });
+    y += 10; f(8, false, CINZA);
+    doc.text(doc.splitTextToSize(ap.dentro ? 'Dentro da faixa, a parcela não muda.' : 'Só o que excede o limite da faixa é reajustado, proporcional, pelo valor fixo por unidade a cada R$ 0,10 deste evento. A parcela final não tem ajuste.', L - 2 * M), M, y); y += 26;
+    doc.text('PTAX de venda oficial do Banco Central do Brasil, disponível para conferência em bcb.gov.br.', M, y);
+    f(7, false, CINZA); doc.text('WindGate · documento gerado pelo Hub', M, 810);
+    doc.save(`Apuracao_cambial_${String(ap.op).replace(/[^\w.-]+/g, '_')}_${String(ap.dataRef).slice(0, 10)}.pdf`);
     return doc;
   };
 })();

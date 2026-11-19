@@ -181,6 +181,7 @@
         <div class="box"><div class="box-h"><h2>Ponto · escritório e raio</h2></div><div class="box-b">
           <p class="note" style="margin-bottom:10px">Com o local cadastrado, cada ponto sai marcado como dentro ou fora do escritório. Só a diretoria altera.</p>
           <button class="btn" id="cfPonto">Escritório e raio</button></div></div></div>
+      <div id="cfCambio"></div>
       <div class="box"><div class="box-h"><h2>Prazos por etapa</h2><span class="note">${podePrazos ? 'dias corridos' : 'só quem tem Financeiro ajusta'}</span></div>
         <div class="box-b"><p class="note">Dias corridos que cada etapa deveria levar. A Torre fica em atenção perto do prazo e em atraso depois de estourar. Vazio ou zero = etapa sem prazo (conta os dias, não cobra atraso). <b>Em trânsito</b> e <b>Em produção</b>: estes dias são só o padrão; cada operação usa o próprio prazo quando tem ETA, transit time ou prazo de produção (aba Logística & contêineres).</p></div>
         <div class="tw"><table><thead><tr><th>Etapa</th><th>Prazo (dias)</th><th>Padrão</th></tr></thead><tbody>
@@ -193,7 +194,39 @@
     el.querySelector('#cfImp').onchange = e => importar(e.target);
     el.querySelector('#cfPonto').onclick = () => H.pontoConfigModal ? H.pontoConfigModal() : H.toast('Módulo do ponto não carregado');
     const pz = el.querySelector('#pzOk'); if (pz) pz.onclick = () => salvarPrazos(el, pz);
+    padraoCambio(el.querySelector('#cfCambio'));
   };
+
+  /* Reajuste cambial · padrão da casa: vai para cada operação nova; na operação, editável com registro. */
+  function padraoCambio(box, rascunho) {
+    if (!box || !W.padraoDaCasa) return;
+    const p = rascunho || W.padraoDaCasa(H.db), edita = H.pode('fin.autorizar'), dec = v => (v || v === 0 ? String(v).replace('.', ',') : ''), dis = edita ? '' : 'disabled';
+    const num = v => { const t = String(v || '').trim(); return /,/.test(t) ? +t.replace(/./g, '').replace(',', '.') || 0 : +t || 0; };
+    box.innerHTML = `<div class="box"><div class="box-h"><h2>Reajuste cambial · padrão da casa</h2><span class="note">${p.cadastrado ? `editado por ${esc(p.por)} em ${W.dataBR(String(p.em).slice(0, 10))}` : 'modelo Marquise (OP228): confira e salve'}${edita ? '' : ' · só o Samir altera'}</span></div><div class="box-b">
+      <div class="fields">
+        <div class="f"><label class="lbl" for="pcab">Faixa: piso = referência − R$</label><input id="pcab" inputmode="decimal" value="${dec(p.abaixo)}" ${dis}></div>
+        <div class="f"><label class="lbl" for="pcac">Faixa: teto = referência + R$</label><input id="pcac" inputmode="decimal" value="${dec(p.acima)}" ${dis}></div></div>
+      <div class="tw" style="margin-top:8px"><table><thead><tr><th>Evento</th><th>PTAX de</th><th class="num">Alta (R$/un. a cada 0,10)</th><th class="num">Queda (R$/un. a cada 0,10)</th><th>Reajusta a</th><th></th></tr></thead><tbody id="pcev">
+      ${p.eventos.map((v, i) => `<tr data-i="${i}"><td><input class="inp" data-pc="rotulo" value="${esc(v.rotulo)}" style="width:200px" ${dis}></td>
+        <td><select class="inp" data-pc="gatilho" ${dis}>${W.GATILHOS_EVENTO.map(([k, l]) => `<option value="${k}" ${v.gatilho === k ? 'selected' : ''}>${k === 'parcela' ? 'crédito da' : esc(l)}</option>`).join('')}</select>${v.gatilho === 'parcela' ? ` <select class="inp" data-pc="parcelaGatilho" ${dis}>${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${v.parcelaGatilho === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select>` : ''}</td>
+        <td class="num"><input class="inp" data-pc="alta" inputmode="decimal" value="${dec(v.alta)}" style="width:80px;text-align:right" ${dis}></td><td class="num"><input class="inp" data-pc="queda" inputmode="decimal" value="${dec(v.queda)}" style="width:80px;text-align:right" ${dis}></td>
+        <td><select class="inp" data-pc="parcelaAlvo" ${dis}>${[2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${v.parcelaAlvo === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select></td>
+        <td>${edita ? `<button class="btn ghost sm" data-pcrm="${i}" title="Remover evento">✕</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+      ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="pcadd">+ Evento</button><button class="btn blue sm" id="pcsal">Salvar padrão</button></div>' : ''}
+      <p class="note" style="margin-top:8px">Cada operação nova recebe uma cópia (referência = PTAX da proposta + R$ 0,05). Operação que já existe não muda: a ficha só sugere o padrão.</p></div></div>`;
+    if (!edita) return;
+    const ler = () => Object.assign({}, p, { abaixo: num(box.querySelector('#pcab').value), acima: num(box.querySelector('#pcac').value),
+      eventos: [...box.querySelectorAll('#pcev tr[data-i]')].map(tr => { const g = k => { const e = tr.querySelector(`[data-pc="${k}"]`); return e ? e.value : ''; }, v0 = p.eventos[+tr.dataset.i] || {};
+        return { k: v0.k || 'e' + W.novoId().slice(-6), rotulo: g('rotulo').trim(), gatilho: g('gatilho'), parcelaGatilho: +g('parcelaGatilho') || v0.parcelaGatilho || 1, parcelaAlvo: +g('parcelaAlvo'), alta: num(g('alta')), queda: num(g('queda')) }; }) });
+    box.querySelector('#pcadd').onclick = () => { const a = ler(); a.eventos.push({ k: 'e' + W.novoId().slice(-6), rotulo: 'Novo evento', gatilho: 'parcela', parcelaGatilho: a.eventos.length + 1, parcelaAlvo: a.eventos.length + 2, alta: 0, queda: 0 }); padraoCambio(box, a); };
+    box.querySelectorAll('[data-pcrm]').forEach(b => b.onclick = () => { const a = ler(); a.eventos.splice(+b.dataset.pcrm, 1); padraoCambio(box, a); });
+    box.querySelectorAll('[data-pc="gatilho"]').forEach(s => s.onchange = () => padraoCambio(box, ler()));
+    box.querySelector('#pcsal').onclick = () => {
+      const r = W.salvarPadraoDaCasa(H.db, ler(), H.nomeUsuario(H.userKey));
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.toast('Padrão da casa salvo: vale para as próximas operações.'); padraoCambio(box);
+    };
+  }
 
   function exportar() {
     const blob = new Blob([W.textoBackup(H.db)], { type: 'application/json' });

@@ -415,6 +415,7 @@
       H.db.checklists[id] = (H.db.checklists[id] && H.db.checklists[id].length) ? H.db.checklists[id] : CHK_MODELO.map(([fase, titulo]) => ({ fase, titulo, status: 'pendente', coletadoPor: '', revisadoPor: '' }));
       H.db.ops.push({ _id: W.novoId(), id, nome: m.querySelector('#nn').value.trim(), cliente: m.querySelector('#nc').value.trim(), status: 'cotacao', resp: m.querySelector('#nr').value.trim(), prox: '', obs: '', criadaEm: agora, statusEm: agora, statusPor: H.nomeUsuario(H.userKey) });
       if (mae) { W.virarMae(H.db, id); abaFicha = 'conteiner'; }
+      else if (W.aplicarPadraoNaOp && !/^(ESTUDO|EXPO)/i.test(id)) W.aplicarPadraoNaOp(H.db, H.db.ops.find(o => o.id === id), H.nomeUsuario(H.userKey), agora);
       H.salvar(); H.fecharModal(); H.ir('ficha', id);
     };
   }

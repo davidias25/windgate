@@ -384,6 +384,7 @@
       const p = +px[out.dataRef];
       if (!(p > 0)) return Object.assign(out, { status: 'aguardando-ptax', motivo: `PTAX de ${out.dataRef} ainda não publicada` });
       const calc = calcularReajusteEvento(x, ev, p), alvo = parcelaAlvo(db, o.id, ev.parcelaAlvo);
+      if (!calc) return Object.assign(out, { status: 'aguardando-gatilho', motivo: 'regra incompleta: informe a faixa' });
       // Reajuste gravado antes por outro caminho (correção antiga, lançamento manual): nunca somar em cima sem o Samir decidir.
       const outros = alvo ? (alvo.reajustes || []).filter(r => r && r.tipo !== 'evento') : [];
       const conflito = outros.length ? { valor: r2(outros.reduce((a, r) => a + (+r.valor || 0), 0)), obs: outros.map(r => r.obs || r.tipo || 'reajuste').join(' · '), qtd: outros.length } : null;
@@ -442,6 +443,92 @@
       .map(o => { const r = regraDaOp(o); return { o, faltas: r ? conferirRegra(r) : ['Regra de câmbio não cadastrada.'] }; }).filter(x => x.faltas.length);
   }
 
-  return { EVENTOS_PADRAO, GATILHOS_EVENTO, normalizarRegra, conferirRegra, calcularReajusteEvento, diaUtilSeguinte, regraDaOp, eventosDaOp, aprovarReajusteEvento, recusarReajusteEvento, registrarDentroDaFaixa, salvarRegraOp, opsSemRegraCambial,
+  /* ---------- Padrão da casa em Configurações (Parte 2.1) ----------
+     Faixa em R$ abaixo e acima do dólar de referência e a tabela por evento (alta e queda, R$/un. a cada R$ 0,10).
+     Vai para cada operação nova; na operação, é editável com registro de quem mudou. Operação antiga não muda sozinha:
+     a ficha só sugere o padrão, e vale quando alguém salva. Valores iniciais: o modelo Marquise (OP228). */
+  const PADRAO_CASA = { abaixo: 0.25, acima: 0.20, eventos: [
+    { k: 'rem1', rotulo: '1ª remessa à fábrica', gatilho: 'parcela', parcelaGatilho: 1, parcelaAlvo: 2, alta: 0.30, queda: 0.25 },
+    { k: 'rem2', rotulo: '2ª remessa à fábrica', gatilho: 'parcela', parcelaGatilho: 2, parcelaAlvo: 3, alta: 0.70, queda: 0.60 },
+    { k: 'di', rotulo: 'Registro da DI (frete e tributos)', gatilho: 'registroDI', parcelaAlvo: 4, alta: 0.95, queda: 0.85 }] };
+  const clone = v => JSON.parse(JSON.stringify(v));
+  function padraoDaCasa(db) {
+    const p = (((db || {}).hubPainel || {})._regraCambial) || null, base = p && Array.isArray(p.eventos) && p.eventos.length ? p : PADRAO_CASA;
+    return { abaixo: r4(base.abaixo != null ? base.abaixo : PADRAO_CASA.abaixo), acima: r4(base.acima != null ? base.acima : PADRAO_CASA.acima),
+      eventos: normalizarRegra({ eventos: clone(base.eventos) }).eventos, cadastrado: !!p, por: (p && p.por) || '', em: (p && p.em) || '', hist: (p && p.hist) || [] };
+  }
+  function conferirPadrao(p) {
+    const e = [];
+    if (!(+p.abaixo > 0) || !(+p.acima > 0)) e.push('Informe quanto a faixa vai abaixo e acima da referência.');
+    if (!(p.eventos || []).length) e.push('Informe os eventos cambiais.');
+    (p.eventos || []).forEach(v => { if (!(+v.alta > 0)) e.push((v.rotulo || v.k) + ': informe o valor por unidade na alta.'); else if (+v.queda < 0 || +v.queda >= +v.alta) e.push((v.rotulo || v.k) + ': o valor de queda tem de ser menor que o de alta.'); });
+    return e;
+  }
+  function salvarPadraoDaCasa(db, novo, por, agora) {
+    const e = conferirPadrao(novo || {}); if (e.length) return { ok: false, erros: e, msg: e[0] };
+    db.hubPainel = db.hubPainel || {};
+    const ant = db.hubPainel._regraCambial || {}, t = agora || new Date().toISOString();
+    db.hubPainel._regraCambial = { abaixo: r4(novo.abaixo), acima: r4(novo.acima), eventos: normalizarRegra({ eventos: novo.eventos }).eventos, por: por || '', em: t,
+      hist: (ant.hist || []).concat([{ por: por || '', em: t, antes: ant.eventos ? { abaixo: ant.abaixo, acima: ant.acima, eventos: ant.eventos } : null }]).slice(-30) };
+    return { ok: true };
+  }
+  /** Dólar de referência da operação: o da proposta aprovada (PTAX + R$ 0,05), se houver. */
+  function referenciaDaCotacao(db, o) {
+    const q = W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null, c = q && q.cambioProposta;
+    return c && +c.referencia > 0 ? r4(c.referencia) : 0;
+  }
+  /** A regra que o padrão da casa daria para esta referência e quantidade. Não grava nada. */
+  function regraDoPadrao(db, referencia, quantidade) {
+    const p = padraoDaCasa(db), ref = r4(referencia) || 0;
+    return normalizarRegra({ modelo: 'evento', origem: 'padrao', referencia: ref, piso: ref ? r4(ref - p.abaixo) : 0, teto: ref ? r4(ref + p.acima) : 0, quantidade: +quantidade || 0, eventos: clone(p.eventos) });
+  }
+  /** Operação nova: recebe a cópia do padrão (fica incompleta até ter referência e quantidade; aparece em "Completar regra"). */
+  function aplicarPadraoNaOp(db, o, por, agora, opc) {
+    if (!o || o.regraCambial || (W.ehMae && W.ehMae(o))) return false;
+    const x = opc || {}, ref = +x.referencia > 0 ? x.referencia : referenciaDaCotacao(db, o);
+    o.regraCambial = Object.assign(regraDoPadrao(db, ref, x.quantidade), { hist: [{ por: por || '', em: agora || new Date().toISOString(), acao: 'copiada do padrão da casa' }] });
+    return true;
+  }
+  /** O texto da regra, igual na ficha e no desembolso. Só a PTAX oficial: nada de valor remetido, contrato de câmbio ou custo. */
+  function textoRegra(r) {
+    const x = normalizarRegra(r), t4 = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    return `Dentro da faixa de R$ ${t4(x.piso)} a R$ ${t4(x.teto)} a parcela não muda. Fora dela, só o que exceder o limite reajusta a parcela seguinte, proporcional, por um valor fixo por unidade a cada R$ 0,10 em cada evento, pela PTAX-venda oficial do Banco Central do dia útil seguinte ao crédito de cada parcela e do dia do registro da DI. A parcela final não tem ajuste. PTAX oficial disponível para conferência.`;
+  }
+
+  /**
+   * Apuração cambial de um evento (PDF + texto de e-mail para o cliente). Só a PTAX oficial do Banco Central:
+   * nunca valor remetido, contrato de câmbio, DI ou custo interno. Não grava nada.
+   */
+  function apuracaoCambial(db, o, k, ptaxes) {
+    const x = regraDaOp(o); if (!x) return { ok: false, msg: 'Operação sem regra de câmbio.' };
+    const ev = eventosDaOp(db, o, ptaxes || {}).find(e => e.k === k); if (!ev) return { ok: false, msg: 'Evento não encontrado.' };
+    let c = ev.calculo, parcela = null, anterior = null, novo = null;
+    if (ev.status === 'aprovado') {
+      const reg = (o.reajustesEvento || {})[k] || {}, l = (db.fin || []).find(y => y && y._id === reg.lancId);
+      c = reg.calculo || c; if (l) { parcela = numeroNaOp(db, l); novo = r2(+l.valor); anterior = r2(novo - (+c.valor || 0)); }
+    } else if (ev.status === 'aguardando-samir' && ev.alvo) { parcela = numeroNaOp(db, ev.alvo); anterior = r2(+ev.alvo.valor); novo = ev.novoValor; }
+    else if (ev.status !== 'dentro-da-faixa') return { ok: false, msg: ev.motivo || 'Ainda não há apuração para este evento.' };
+    if (!c) return { ok: false, msg: 'Sem PTAX para apurar.' };
+    const d = v => String(v || '').slice(0, 10).split('-').reverse().join('/'), t4 = v => (+v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }), m = v => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const dados = { ok: true, op: o.id, cliente: o.cliente || '', evento: ev.rotulo, status: ev.status, dataCredito: ev.dataCredito || '', registroDI: ev.registroDI || '', dataRef: ev.dataRef, ptax: c.ptax,
+      piso: x.piso, teto: x.teto, dentro: !!c.dentro, sentido: c.sentido || '', limite: c.limite, excedente: c.excedente || 0, fracoes: c.fracoes || 0, porUnidade: c.porUnidade || 0, quantidade: c.quantidade || x.quantidade, valor: c.valor || 0, parcela, anterior, novo };
+    const calc = dados.dentro ? `A PTAX ficou dentro da faixa (R$ ${t4(x.piso)} a R$ ${t4(x.teto)}): a parcela não muda.`
+      : `Excedente sobre o ${dados.sentido === 'alta' ? 'teto' : 'piso'}: R$ ${t4(c.ptax)} − R$ ${t4(c.limite)} = R$ ${t4(c.excedente)}${dados.sentido === 'alta' ? '' : ' (queda)'}.\nCálculo: ${t4(c.excedente)} ÷ 0,10 × ${m(c.porUnidade)} por unidade × ${(+dados.quantidade).toLocaleString("pt-BR")} unidades = ${dados.sentido === 'alta' ? '' : '− '}${m(Math.abs(c.valor))}.`;
+    dados.linhas = [
+      [ev.registroDI ? 'Registro da DI' : 'Data do crédito', d(ev.registroDI || ev.dataCredito)],
+      ['Data de referência', d(ev.dataRef) + (ev.registroDI ? ' (dia do registro)' : ' (dia útil seguinte ao crédito)')],
+      ['PTAX oficial do Banco Central (venda)', 'R$ ' + t4(c.ptax)],
+      ['Faixa sem reajuste', `R$ ${t4(x.piso)} a R$ ${t4(x.teto)}`]].concat(dados.dentro ? [] : [
+      ['Excedente sobre o ' + (dados.sentido === 'alta' ? 'teto' : 'piso'), 'R$ ' + t4(c.excedente)],
+      ['Cálculo', `${t4(c.excedente)} ÷ 0,10 × ${m(c.porUnidade)}/un. × ${(+dados.quantidade).toLocaleString("pt-BR")} un.`],
+      ['Reajuste', (c.valor < 0 ? '− ' : '+ ') + m(Math.abs(c.valor))]]).concat(parcela && !dados.dentro ? [[`Novo valor da ${parcela}ª parcela`, `${m(anterior)} → ${m(novo)}`]] : []);
+    dados.assunto = `${o.id} · apuração cambial · ${ev.rotulo}`;
+    dados.texto = [`Prezados,`, '', `Segue a apuração cambial da operação ${o.id}, referente a: ${ev.rotulo}.`, '',
+      `${ev.registroDI ? 'Registro da DI' : 'Crédito da parcela'}: ${d(ev.registroDI || ev.dataCredito)}`, `Data de referência: ${d(ev.dataRef)}`, `PTAX oficial do Banco Central (venda): R$ ${t4(c.ptax)}`, `Faixa sem reajuste: R$ ${t4(x.piso)} a R$ ${t4(x.teto)}`, '', calc,
+      parcela && !dados.dentro ? `Novo valor da ${parcela}ª parcela: ${m(novo)} (antes ${m(anterior)}).` : '', '', 'A PTAX pode ser conferida no site do Banco Central (bcb.gov.br).', '', 'Atenciosamente,', 'WindGate'].filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n');
+    return dados;
+  }
+
+  return { EVENTOS_PADRAO, PADRAO_CASA, apuracaoCambial, padraoDaCasa, conferirPadrao, salvarPadraoDaCasa, referenciaDaCotacao, regraDoPadrao, aplicarPadraoNaOp, textoRegra, GATILHOS_EVENTO, normalizarRegra, conferirRegra, calcularReajusteEvento, diaUtilSeguinte, regraDaOp, eventosDaOp, aprovarReajusteEvento, recusarReajusteEvento, registrarDentroDaFaixa, salvarRegraOp, opsSemRegraCambial,
     SPREAD_PADRAO, QUANDO, normalizarClausula, conferirClausula, reajusteDaClausula, clausulaDaOp, spreadDe, remessasDaOp, numeroNaOp, parcelasDoCliente, valorContrato, parcelaAlvo, recomporParcela, aplicarReajusteCambio, previaReajuste, composicaoParcela, CENARIOS_CAMBIO, referenciaDaProposta, ajusteDaParcela, ehDiaUtil, diaUtilAnterior, datasDaParcela, ptaxQueVale, valoresPor010, simulacaoCambio, congelarCambio, tabelaCambio, textoCambio, numeroDaParcela, parcelasComCambio, calcularAjusteLancamento, confirmarAjusteCambial };
 });

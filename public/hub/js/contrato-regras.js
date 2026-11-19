@@ -284,13 +284,15 @@
     const total = parcelas.reduce((a, p) => a + p.valor, 0), pago = parcelas.filter(p => p.situacao === 'pago').reduce((a, p) => a + p.valor, 0);
     const reajuste = parcelas.reduce((a, p) => a + (p.composicao.total - p.composicao.contrato), 0);
     const comReaj = parcelas.filter(p => p.composicao.reajustes.length), escolhida = comReaj.find(p => p.situacao === 'proximo') || comReaj[comReaj.length - 1];
-    const cl = W.clausulaDaOp(db, o), est = estruturaDaOp(db, o), cfg = (db.hubPainel || {})._contrato || {}, ct = favorecidoDe(db, est);
+    /* Regra nova (padrão da casa, por evento) manda no texto; o modelo antigo só vale para quem ainda não tem a nova. */
+    const rg = W.regraDaOp ? W.regraDaOp(o) : null, cl = rg ? null : W.clausulaDaOp(db, o), est = estruturaDaOp(db, o), cfg = (db.hubPainel || {})._contrato || {}, ct = favorecidoDe(db, est);
     const n = prox ? W.numeroNaOp(db, prox) : null;
     return {
       op: o.id, cliente: o.cliente || '', obra: o.nome || '', atualizado: h, total, pago, aPagar: total - pago, reajuste, contrato: total - reajuste, parcelas,
       proxima: prox ? { vencimento: W.vencDe(prox), valor: +prox.valor || 0, rotulo: rot(prox), libera: prox.liberaCliente || (n ? LIBERA[n - 1] : '') || '' } : null,
       composicao: escolhida ? Object.assign({ rotulo: String(escolhida.rotulo).split(' — ')[0], rotuloContrato: 'Parcela contratual' + (String(escolhida.rotulo).includes(' — ') ? ' (' + String(escolhida.rotulo).split(' — ').slice(1).join(' — ') + ')' : '') }, escolhida.composicao) : null,
-      clausula: cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, ref: cl.clausulaRef || '', texto: textoClausula(cl) } : null,
+      clausula: rg ? (rg.naoSeAplica ? null : { referencia: rg.referencia, faixaMin: rg.piso, faixaMax: rg.teto, ref: rg.clausulaRef || '', texto: W.textoRegra(rg) })
+        : cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, ref: cl.clausulaRef || '', texto: textoClausula(cl) } : null,
       estrutura: est,
       pagamento: { asaas: !!(((db.hubPainel || {})._asaas) || {}).ativo, favorecido: ct.razao || '', cnpj: ct.cnpj || '', banco: ct.banco || '', agencia: ct.agencia || '', conta: ct.conta || '', pix: ct.pix || '' },
       contato: { nome: (cfg.contato || {}).nome || ct.socioNome || '', fone: (cfg.contato || {}).fone || '', email: (cfg.contato || {}).email || '' },

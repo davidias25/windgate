@@ -567,9 +567,11 @@
     if (!H.pode('fin.ver')) return;
     const dr = document.createElement('div'); box.appendChild(dr);
     blocoRegraEvento(dr, o);
-    /* Cláusula antiga (por câmbio da remessa / híbrida): só para quem ainda não está no padrão por evento. */
-    if (W.regraDaOp(opById(o.id) || o) && !(opById(o.id) || o).clausulaCambial) return;
-    const div = document.createElement('div'); box.appendChild(div);
+    /* A ficha mostra só a regra nova. O modelo antigo (repasse %, faixa ±1%) fica guardado e recolhido, só para consulta
+       e para as remessas do custo interno: nenhum valor dele muda. */
+    if (!(opById(o.id) || o).clausulaCambial) return;
+    const det = document.createElement('details'); det.className = 'box'; det.innerHTML = '<summary class="box-h" style="cursor:pointer"><h2 style="display:inline">Modelo antigo da cláusula (repasse %)</h2> <span class="note">guardado, só consulta · remessas do custo interno</span></summary>';
+    const div = document.createElement('div'); det.appendChild(div); box.appendChild(det);
     blocoClausula(div, o);
   };
 
@@ -585,15 +587,29 @@
     return ptaxDias;
   };
   const SIT_EVENTO = { 'aguardando-gatilho': ['aguardando', COR.cinza], 'aguardando-ptax': ['aguardando a PTAX', COR.cinza], 'dentro-da-faixa': ['dentro da faixa: sem reajuste', COR.ok], 'aguardando-samir': ['aguardando o Samir', COR.atencao], aprovado: ['aprovado', COR.ok], recusado: ['recusado', COR.vencido] };
+  /* Apuração cambial: PDF + texto de e-mail. Nada sai sozinho para o cliente: quem envia é o Samir, depois de conferir. */
+  H.apuracaoModal = function (opId, k, px) {
+    const o = opById(opId), ap = o ? W.apuracaoCambial(H.db, o, k, px || {}) : { ok: false, msg: 'Operação não encontrada.' };
+    if (!ap.ok) return H.toast(esc(ap.msg));
+    const m = H.modal('Apuração cambial · ' + esc(ap.op), `<div class="tw"><table class="mini"><tbody>${ap.linhas.map(([a, b]) => `<tr><td class="note">${esc(a)}</td><td class="num"><b>${esc(b)}</b></td></tr>`).join('')}</tbody></table></div>
+      ${ap.status === 'aguardando-samir' ? '<div class="banner" style="margin-top:8px">Reajuste ainda aguardando o Samir: aprove antes de enviar ao cliente.</div>' : ''}
+      <div class="f" style="margin-top:10px"><label class="lbl" for="apas">Assunto</label><input id="apas" value="${esc(ap.assunto)}"></div>
+      <div class="f" style="margin-top:6px"><label class="lbl" for="aptx">Texto para o e-mail</label><textarea id="aptx" rows="12" style="width:100%">${esc(ap.texto)}</textarea></div>
+      <p class="note" style="margin-top:6px">Só a PTAX oficial do Banco Central. Nada vai ao cliente sem a aprovação do Samir.</p>`,
+      '<button class="btn" data-x>Fechar</button><button class="btn" id="apcp">Copiar texto</button><button class="btn pri" id="appdf">Baixar PDF</button>');
+    m.querySelector('#apcp').onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector('#apas').value + String.fromCharCode(10, 10) + m.querySelector('#aptx').value); H.toast('Texto copiado.'); } catch (e) { m.querySelector('#aptx').select(); H.toast('Selecione e copie o texto.'); } };
+    m.querySelector('#appdf').onclick = async () => { try { await H.pdfApuracao(ap); } catch (e) { H.toast('Não consegui gerar o PDF.'); } };
+  };
   async function blocoRegraEvento(div, o0) {
-    const o = opById(o0.id) || o0, r = W.regraDaOp(o), x = r || W.normalizarRegra({}), edita = H.pode('fin.lancar'), aprova = H.pode('fin.autorizar');
+    const o = opById(o0.id) || o0, r = W.regraDaOp(o), x = r || W.regraDoPadrao(H.db, W.referenciaDaCotacao(H.db, o)), edita = H.pode('fin.lancar'), aprova = H.pode('fin.autorizar');
+    const est = W.estruturaDaOp(H.db, o), fav = W.favorecidoDe(H.db, est);
     const faltas = r ? W.conferirRegra(r) : ['Regra não cadastrada.'], hist = (x.hist || []).slice(-1)[0], dec = v => (v ? String(v).replace('.', ',') : '');
     const pre = W.eventosDaOp(H.db, o, {}, ptaxV());
     const px = r && !x.naoSeAplica ? await H.ptaxDosDias([...new Set(pre.map(e => e.dataRef).filter(d => d && d <= W.hojeISO()))]) : {};
     if (!div.isConnected) return;   // saiu da tela enquanto buscava a PTAX
     if (r && W.registrarDentroDaFaixa(H.db, o, px)) H.salvar();
     const evs = W.eventosDaOp(H.db, o, px, ptaxV());
-    div.innerHTML = `<div class="box"><div class="box-h"><h2>Reajuste cambial · padrão da casa</h2><span class="note">${!r ? 'regra não cadastrada' : x.naoSeAplica ? 'não se aplica a esta operação' : faltas.length ? 'regra incompleta' : 'regra completa'}${hist ? ` · editada por ${esc(hist.por)} em ${W.dataBR(String(hist.em).slice(0, 10))}` : ''}</span></div><div class="box-b">
+    div.innerHTML = `<div class="box"><div class="box-h"><h2>Reajuste cambial · padrão da casa</h2><span class="note">${!r ? 'não cadastrada: sugestão do padrão da casa, confira e salve' : x.naoSeAplica ? 'não se aplica a esta operação' : faltas.length ? 'regra incompleta' : 'regra completa'}${hist ? ` · editada por ${esc(hist.por)} em ${W.dataBR(String(hist.em).slice(0, 10))}` : ''}</span></div><div class="box-b">
       <p class="note" style="margin-bottom:8px">Dentro da faixa, a parcela não muda. Fora dela, só o que exceder o limite, proporcional, pelo valor por unidade a cada R$ 0,10 de cada evento. Remessas: PTAX do dia útil seguinte ao crédito da parcela. DI: PTAX do dia do registro. A parcela final não tem ajuste.</p>
       ${faltas.length && r && !x.naoSeAplica ? `<div class="banner" style="margin-bottom:8px">${esc(faltas.join(' '))}</div>` : ''}
       <div class="fields">
@@ -601,6 +617,7 @@
         <div class="f"><label class="lbl" for="rgpiso">Faixa: piso (PTAX)</label><input id="rgpiso" inputmode="decimal" value="${dec(x.piso)}"></div>
         <div class="f"><label class="lbl" for="rgteto">Faixa: teto (PTAX)</label><input id="rgteto" inputmode="decimal" value="${dec(x.teto)}"></div>
         <div class="f"><label class="lbl" for="rgqtd">Quantidade (unidades)</label><input id="rgqtd" inputmode="decimal" value="${x.quantidade || ''}"></div>
+        <div class="f"><span class="lbl">Favorecido (pelo tipo: ${est === 'jt' ? 'triangular' : 'direta'})</span><div style="padding:6px 0">${fav.razao ? `<b>${esc(fav.razao)}</b>${fav.cnpj ? ` · ${esc(fav.cnpj)}` : ''}${fav.banco || fav.pix ? '' : ' <span style="color:#b45309">· sem conta/PIX</span>'}` : `<span style="color:#b91c1c">${esc(W.ESTRUTURAS[est] ? W.ESTRUTURAS[est].nome : est)}: dados de pagamento pendentes em Contratos › Dados das contratadas</span>`}</div></div>
         <div class="w4"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rgnsa" ${x.naoSeAplica ? 'checked' : ''}> Não se aplica a esta operação (sem reajuste cambial)</label></div></div>
       <div class="tw" style="margin-top:8px"><table><thead><tr><th>Evento</th><th>PTAX de</th><th class="num">Alta (R$/un. a cada 0,10)</th><th class="num">Queda (R$/un. a cada 0,10)</th><th>Reajusta a</th><th>Situação</th><th class="num">Reajuste</th><th></th></tr></thead><tbody id="rgev">
       ${x.eventos.map((v, i) => { const e = evs.find(y => y.k === v.k) || {}, sit = SIT_EVENTO[e.status] || ['—', COR.cinza], c = e.calculo || e.estimativa;
@@ -612,7 +629,7 @@
           <td><select class="inp" data-rg="parcelaAlvo">${[2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${v.parcelaAlvo === n ? 'selected' : ''}>${n}ª parcela</option>`).join('')}</select></td>
           <td>${pill(sit[0], sit[1])}<br><small class="note">${esc(det)}</small>${e.status === 'aguardando-gatilho' && e.estimativa && !e.estimativa.dentro ? `<br><small class="note">estimativa pela PTAX de hoje: ${W.fmtBRL(e.estimativa.valor)}</small>` : ''}</td>
           <td class="num">${e.calculo ? `<b>${W.fmtBRL(e.calculo.valor)}</b>${e.novoValor != null && e.status === 'aguardando-samir' ? `<br><small class="note">parcela ${W.fmtBRL(e.alvo.valor)} → ${W.fmtBRL(e.novoValor)}</small>` : ''}${e.conflito && e.status === 'aguardando-samir' ? `<br><small style="color:#b45309">⚠ já tem reajuste gravado (${esc(e.conflito.obs)}: ${W.fmtBRL(e.conflito.valor)}); substituindo, fica ${W.fmtBRL(e.novoValorSubstituindo)}</small>` : ''}` : '—'}</td>
-          <td style="white-space:nowrap">${e.status === 'aguardando-samir' && aprova ? `<button class="btn pri sm" data-rgok="${esc(v.k)}">Aprovar</button> <button class="btn ghost sm" data-rgno="${esc(v.k)}">Recusar</button>` : ''}${edita ? ` <button class="btn ghost sm" data-rgrm="${i}" title="Remover evento">✕</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+          <td style="white-space:nowrap">${['aguardando-samir', 'aprovado', 'dentro-da-faixa'].includes(e.status) ? `<button class="btn ghost sm" data-rgap="${esc(v.k)}" title="Gerar apuração cambial (PDF + e-mail)">Apuração</button> ` : ''}${e.status === 'aguardando-samir' && aprova ? `<button class="btn pri sm" data-rgok="${esc(v.k)}">Aprovar</button> <button class="btn ghost sm" data-rgno="${esc(v.k)}">Recusar</button>` : ''}${edita ? ` <button class="btn ghost sm" data-rgrm="${i}" title="Remover evento">✕</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
       ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn sm" id="rgadd">+ Evento</button><button class="btn blue sm" id="rgsal">Salvar regra</button></div>' : ''}
       <p class="note" style="margin-top:8px">Ao cliente vai só a PTAX oficial do Banco Central: nunca o valor remetido, o contrato de câmbio, a DI ou custo interno.</p></div></div>`;
     const ler = () => ({ referencia: numIn(div, '#rgref'), piso: numIn(div, '#rgpiso'), teto: numIn(div, '#rgteto'), quantidade: numIn(div, '#rgqtd'), naoSeAplica: div.querySelector('#rgnsa').checked,
@@ -627,6 +644,7 @@
       if (!res.ok) return H.toast(esc(res.msg));
       H.salvar(); H.toast(`Reajuste aprovado: ${W.fmtBRL(res.calculo.valor)} na parcela seguinte.`); blocoRegraEvento(div, oa);
     });
+    div.querySelectorAll('[data-rgap]').forEach(b => b.onclick = () => H.apuracaoModal(o.id, b.dataset.rgap, px));
     div.querySelectorAll('[data-rgno]').forEach(b => b.onclick = () => {
       const motivo = prompt('Motivo da recusa (fica registrado):'); if (motivo == null) return;
       const oa = opById(o.id), res = W.recusarReajusteEvento(H.db, oa, b.dataset.rgno, motivo, H.nomeUsuario(H.userKey));

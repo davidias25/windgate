@@ -112,5 +112,44 @@ console.log('\nOperações antigas e a correção cambial de antes:');
   ok(W.conferirRegra(o.regraCambial).length === 0 && W.eventosDaOp(db, o, {}).length === 0, '"não se aplica": sai da lista e não gera eventos');
 }
 
+console.log('\nPadrão da casa em Configurações (Parte 2.1):');
+{
+  const p0 = W.padraoDaCasa({});
+  ok(!p0.cadastrado && p0.abaixo === 0.25 && p0.acima === 0.2 && p0.eventos.length === 3 && p0.eventos[1].alta === 0.7, 'sem cadastro: modelo Marquise (faixa −0,25/+0,20, 0,30/0,70/0,95 na alta)');
+  const r = W.regraDoPadrao({}, 5.30, 3200);
+  ok(r.piso === 5.05 && r.teto === 5.5 && W.conferirRegra(r).length === 0, 'referência 5,30 + 3.200 un. = a regra da OP228, completa');
+  const db = { hubPainel: {} };
+  ok(!W.salvarPadraoDaCasa(db, { abaixo: 0.2, acima: 0.2, eventos: [{ k: 'a', rotulo: 'x', alta: 0.5, queda: 0.5 }] }, 'Samir').ok, 'queda igual à alta: não salva');
+  ok(W.salvarPadraoDaCasa(db, { abaixo: 0.10, acima: 0.15, eventos: p0.eventos }, 'Samir', '2026-11-19T10:00:00Z').ok && W.padraoDaCasa(db).cadastrado && W.padraoDaCasa(db).por === 'Samir', 'salvo com quem e quando');
+  ok(W.regraDoPadrao(db, 5.40, 10).piso === 5.3 && W.regraDoPadrao(db, 5.40, 10).teto === 5.55, 'operação nova usa o padrão salvo');
+  const nova = { id: 'OP300', cliente: 'X' }, antiga = { id: 'OP200', regraCambial: JSON.parse(JSON.stringify(REGRA_228)) };
+  ok(W.aplicarPadraoNaOp(db, nova, 'Davi', '2026-11-19', { referencia: 5.40 }) && nova.regraCambial.piso === 5.3 && nova.regraCambial.hist[0].acao === 'copiada do padrão da casa', 'operação nova recebe a cópia, com registro');
+  const antes = JSON.stringify(antiga);
+  ok(!W.aplicarPadraoNaOp(db, antiga, 'Davi') && JSON.stringify(antiga) === antes, 'operação que já tem regra: nada muda');
+  ok(!W.aplicarPadraoNaOp(db, { id: 'M1', papel: 'mae' }, 'Davi'), 'contêiner (mãe) não recebe regra');
+  const semRef = { id: 'OP301', status: 'contrato' }; W.aplicarPadraoNaOp(db, semRef, 'Davi');
+  const dbx = { ops: [semRef], fin: [parc(1, '2026-11-13', { op: 'OP301', status: 'Realizado', liquidadoEm: '2026-11-13' }), parc(2, '2026-12-13', { op: 'OP301' })], quotes: {} };
+  ok(W.opsSemRegraCambial(dbx).some(f => f.o.id === 'OP301') && W.eventosDaOp(dbx, semRef, { '2026-11-16': 5.9 }).every(e => e.status === 'aguardando-gatilho'), 'sem referência: fica em "Completar regra" e não calcula nada (sem erro)');
+  ok(/dia útil seguinte ao crédito/.test(W.textoRegra(r)) && !/remetid|contrato de câmbio|spread/i.test(W.textoRegra(r)), 'texto da regra: PTAX oficial, dia útil seguinte ao crédito; nada interno');
+  const C = require('../public/hub/js/contrato-regras.js');
+  const d = banco(); d.ops[0].clausulaCambial = { referencia: 5.2, faixaMin: 5.15, faixaMax: 5.25, repasseAlta: 1, repasseQueda: 0.7, remessas: [] };
+  const dd = C.dadosDesembolso(d, 'OP228', '2026-11-19');
+  ok(dd.clausula.faixaMin === 5.05 && dd.clausula.faixaMax === 5.5 && /dia útil seguinte/.test(dd.clausula.texto) && !/repassad/.test(dd.clausula.texto), 'desembolso da OP228: regra nova (5,05 a 5,50), não o repasse % antigo');
+}
+
+console.log('\nApuração cambial (PDF + e-mail):');
+{
+  const db = banco(), o = db.ops[0], px = { '2026-11-16': 5.7324 };
+  const a = W.apuracaoCambial(db, o, 'rem1', px);
+  const txt = a.texto + JSON.stringify(a.linhas);
+  ok(a.ok && a.status === 'aguardando-samir' && perto(a.valor, 2231.04) && a.parcela === 2 && perto(a.novo, 110151.04), 'OP228: crédito 13/11, PTAX 16/11 R$ 5,7324, reajuste R$ 2.231,04 → 2ª parcela R$ 110.151,04');
+  ok(/13\/11\/2026/.test(txt) && /16\/11\/2026/.test(txt) && /5,7324/.test(txt) && /0,2324/.test(txt) && /3\.200/.test(txt), 'mostra data do crédito, data de referência, PTAX oficial, excedente e cálculo');
+  ok(!/remetid|contrato de câmbio|spread|custo|\bDI\b(?! \()/i.test(a.texto.replace('Registro da DI', '')), 'nunca valor remetido, contrato de câmbio, DI ou custo interno');
+  W.aprovarReajusteEvento(db, o, 'rem1', px, 'Samir', '2026-11-17T10:00:00Z');
+  const b = W.apuracaoCambial(db, o, 'rem1', px);
+  ok(b.ok && b.status === 'aprovado' && perto(b.novo, 110151.04) && perto(b.anterior, 107920), 'depois de aprovado: mesma apuração, pela parcela gravada');
+  ok(!W.apuracaoCambial(db, o, 'rem2', px).ok, 'evento que ainda não aconteceu: sem apuração');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
 process.exitCode = falhou ? 1 : 0;
