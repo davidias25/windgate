@@ -201,7 +201,7 @@
   function padraoCambio(box, rascunho) {
     if (!box || !W.padraoDaCasa) return;
     const p = rascunho || W.padraoDaCasa(H.db), edita = H.pode('fin.autorizar'), dec = v => (v || v === 0 ? String(v).replace('.', ',') : ''), dis = edita ? '' : 'disabled';
-    const num = v => { const t = String(v || '').trim(); return /,/.test(t) ? +t.replace(/./g, '').replace(',', '.') || 0 : +t || 0; };
+    const num = v => { const t = String(v || '').trim(); return /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') || 0 : +t || 0; };
     box.innerHTML = `<div class="box"><div class="box-h"><h2>Reajuste cambial · padrão da casa</h2><span class="note">${p.cadastrado ? `editado por ${esc(p.por)} em ${W.dataBR(String(p.em).slice(0, 10))}` : 'modelo Marquise (OP228): confira e salve'}${edita ? '' : ' · só o Samir altera'}</span></div><div class="box-b">
       <div class="fields">
         <div class="f"><label class="lbl" for="pcab">Faixa: piso = referência − R$</label><input id="pcab" inputmode="decimal" value="${dec(p.abaixo)}" ${dis}></div>

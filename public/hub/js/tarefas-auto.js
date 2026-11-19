@@ -339,9 +339,47 @@
   /** Marca o frete fechado no contêiner (na mãe, quando é filha). */
   function marcarFreteFechado(db, op, dados, quem, agora) {
     const alvo = alvoDe(db, op), d = dados || {};
+    const ant = alvo.freteFechado || {}, num = v => (v === '' || v == null ? null : +v);
     alvo.freteFechado = { em: d.em || agora || new Date().toISOString(), por: quem || '', agente: String(d.agente || '').trim(), booking: String(d.booking || '').trim(),
-      valor: d.valor === '' || d.valor == null ? null : +d.valor };
+      valor: num(d.valor), valorUSD: 'valorUSD' in d ? num(d.valorUSD) : (ant.valorUSD != null ? ant.valorUSD : null),
+      sobretaxas: Array.isArray(d.sobretaxas) ? d.sobretaxas.filter(x => x && SOBRETAXAS.includes(x.tipo)).map(x => ({ tipo: x.tipo, usd: +x.usd || 0 })) : (ant.sobretaxas || []),
+      comprovante: 'comprovante' in d ? String(d.comprovante || '').trim().slice(0, 500) : (ant.comprovante || '') };
+    /* Mudou o valor ou as sobretaxas: a decisão anterior do ajuste não vale mais (fica no histórico). */
+    if (ant.ajuste) { const mudou = ant.valorUSD !== alvo.freteFechado.valorUSD || JSON.stringify(ant.sobretaxas || []) !== JSON.stringify(alvo.freteFechado.sobretaxas);
+      if (mudou) alvo.freteFechado.ajustesAnteriores = (ant.ajustesAnteriores || []).concat([ant.ajuste]); else alvo.freteFechado.ajuste = ant.ajuste;
+      if (!mudou && ant.ajustesAnteriores) alvo.freteFechado.ajustesAnteriores = ant.ajustesAnteriores; }
     return alvo;
+  }
+
+  /* ---------- Frete internacional: variação até 5% absorvida (Parte 2.1) ----------
+     Acima de 5% sobre o frete da cotação, ou com GRI / Peak Season / War Risk, o ajuste precisa do comprovante do agente
+     e da aprovação do Samir. Nada muda em parcela nenhuma sozinho: a decisão fica registrada no frete fechado. */
+  const SOBRETAXAS = ['GRI', 'Peak Season', 'War Risk'], LIMITE_FRETE = 0.05;
+  function freteCotadoUSD(db, alvo) {
+    const q = W.cotacaoDaOp ? W.cotacaoDaOp(db, alvo) : ((db.quotes || {})[alvo && alvo.quoteId] || null);
+    const f = (q && q.fields) || {}, n = v => parseFloat(String(v == null ? '' : v).replace(',', '.')) || 0;
+    return { usd: n(f.freteUSD), tx: n(f.txFrete) };
+  }
+  function variacaoFrete(db, o) {
+    const alvo = alvoDe(db, o), fr = alvo && freteDe(db, alvo); if (!fr) return null;
+    const cot = freteCotadoUSD(db, alvo); if (!(cot.usd > 0)) return { alvo, fr, semCotacao: true };
+    const fechado = fr.valorUSD != null && fr.valorUSD > 0 ? +fr.valorUSD : (fr.valor > 0 && cot.tx > 0 ? Math.round(fr.valor / cot.tx * 100) / 100 : null);
+    if (fechado == null) return { alvo, fr, cotado: cot.usd, semValor: true };
+    const sob = (fr.sobretaxas || []).filter(x => x && x.usd > 0), totSob = sob.reduce((a, x) => a + x.usd, 0);
+    const dif = Math.round((fechado - cot.usd) * 100) / 100, pct = dif / cot.usd, acima = pct > LIMITE_FRETE;
+    const precisa = acima || sob.length > 0;
+    return { alvo, fr, cotado: cot.usd, fechado, diferenca: dif, pct, sobretaxas: sob, totalSobretaxas: totSob, absorvida: !precisa, precisaAprovacao: precisa,
+      ajusteSugeridoUSD: precisa ? Math.round(((acima ? dif : 0) + totSob) * 100) / 100 : 0, decisao: fr.ajuste || null, pendente: precisa && !fr.ajuste, semComprovante: precisa && !fr.comprovante };
+  }
+  /** Decisão do Samir: 'aprovado' (com valor e comprovante do agente) ou 'absorvido'. */
+  function decidirAjusteFrete(db, o, decisao, dados, quem, agora) {
+    const v = variacaoFrete(db, o); if (!v || !v.fr || !v.precisaAprovacao) return { ok: false, msg: 'Frete dentro de 5%, sem sobretaxa: nada a aprovar.' };
+    if (!['aprovado', 'absorvido'].includes(decisao)) return { ok: false, msg: 'Decisão inválida.' };
+    if (decisao === 'aprovado' && !v.fr.comprovante) return { ok: false, msg: 'Anexe ou informe o comprovante do agente antes de aprovar o ajuste.' };
+    const d = dados || {};
+    v.fr.ajuste = { decisao, valorUSD: decisao === 'aprovado' ? Math.round((+d.valorUSD > 0 ? +d.valorUSD : v.ajusteSugeridoUSD) * 100) / 100 : 0, pct: Math.round(v.pct * 10000) / 10000, cotado: v.cotado, fechado: v.fechado,
+      obs: String(d.obs || '').slice(0, 300), por: quem || '', em: agora || new Date().toISOString() };
+    return { ok: true, ajuste: v.fr.ajuste };
   }
 
   /* ---------- Torre ---------- */
@@ -390,5 +428,5 @@
 
   return { PRAZOS_PADRAO, ROTULOS_PRAZO, GATILHOS, GESTORES, MARCAM_FRETE, configTarefas, nomeDeUsuario: nomeDe, chaveDeUsuario, alvoDe, chaveDe, idTarefa, tarefaDe, freteDe, ehAuto,
     garantirTarefa, avaliarG4, reconciliar, aoGravar, semTarefaAuto, limparTarefasInativas, garantirFreteDasAtivas, escalonar, rodadaDiaria, previaBackfill, aplicarBackfill,
-    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, marcarFreteFechado, tarefasNaTorre, tarefasDaOp, rankingTarefas };
+    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, marcarFreteFechado, SOBRETAXAS, LIMITE_FRETE, freteCotadoUSD, variacaoFrete, decidirAjusteFrete, tarefasNaTorre, tarefasDaOp, rankingTarefas };
 });

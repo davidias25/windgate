@@ -567,6 +567,8 @@
     if (!H.pode('fin.ver')) return;
     const dr = document.createElement('div'); box.appendChild(dr);
     blocoRegraEvento(dr, o);
+    const da = document.createElement('div'); box.appendChild(da);
+    blocoAditivos(da, o);
     /* A ficha mostra só a regra nova. O modelo antigo (repasse %, faixa ±1%) fica guardado e recolhido, só para consulta
        e para as remessas do custo interno: nenhum valor dele muda. */
     if (!(opById(o.id) || o).clausulaCambial) return;
@@ -588,8 +590,10 @@
   };
   const SIT_EVENTO = { 'aguardando-gatilho': ['aguardando', COR.cinza], 'aguardando-ptax': ['aguardando a PTAX', COR.cinza], 'dentro-da-faixa': ['dentro da faixa: sem reajuste', COR.ok], 'aguardando-samir': ['aguardando o Samir', COR.atencao], aprovado: ['aprovado', COR.ok], recusado: ['recusado', COR.vencido] };
   /* Apuração cambial: PDF + texto de e-mail. Nada sai sozinho para o cliente: quem envia é o Samir, depois de conferir. */
-  H.apuracaoModal = function (opId, k, px) {
-    const o = opById(opId), ap = o ? W.apuracaoCambial(H.db, o, k, px || {}) : { ok: false, msg: 'Operação não encontrada.' };
+  H.apuracaoModal = function (opId, k, px, adId) {
+    const o0 = opById(opId), a = adId && o0 ? W.aditivosDaOp(o0).find(x => x.id === adId) : null, o = a ? W.vistaDoAditivo(o0, a) : o0;
+    const ap = o ? W.apuracaoCambial(H.db, o, k, px || {}) : { ok: false, msg: 'Operação não encontrada.' };
+    if (ap.ok && a) { ap.evento = a.rotulo + ' · ' + ap.evento; ap.assunto = ap.op + ' · ' + a.rotulo + ' · apuração cambial'; ap.texto = ap.texto.replace('da operação ' + ap.op, 'da operação ' + ap.op + ' (' + a.rotulo + ')'); }
     if (!ap.ok) return H.toast(esc(ap.msg));
     const m = H.modal('Apuração cambial · ' + esc(ap.op), `<div class="tw"><table class="mini"><tbody>${ap.linhas.map(([a, b]) => `<tr><td class="note">${esc(a)}</td><td class="num"><b>${esc(b)}</b></td></tr>`).join('')}</tbody></table></div>
       ${ap.status === 'aguardando-samir' ? '<div class="banner" style="margin-top:8px">Reajuste ainda aguardando o Samir: aprove antes de enviar ao cliente.</div>' : ''}
@@ -600,6 +604,77 @@
     m.querySelector('#apcp').onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector('#apas').value + String.fromCharCode(10, 10) + m.querySelector('#aptx').value); H.toast('Texto copiado.'); } catch (e) { m.querySelector('#aptx').select(); H.toast('Selecione e copie o texto.'); } };
     m.querySelector('#appdf').onclick = async () => { try { await H.pdfApuracao(ap); } catch (e) { H.toast('Não consegui gerar o PDF.'); } };
   };
+  /* ---------- Aditivos da operação (mesmo cliente, mesmos contêineres) ---------- */
+  H.aditivoModal = function (opId, pre) {
+    const o = opById(opId); if (!o) return H.toast('Operação não encontrada.');
+    if (!H.pode('fin.lancar')) return H.toast('Só quem lança no Financeiro cria aditivo.');
+    const p = pre || {}, base = W.regraDaOp(o), sug = W.regraDoPadrao(H.db, (base && base.referencia) || W.referenciaDaCotacao(H.db, o), p.quantidade);
+    const dec = v => (v ? String(v).replace('.', ',') : ''), num = t => { t = String(t || '').trim(); return /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') || 0 : +t || 0; };
+    const linha = (v, d) => `<tr><td><input class="inp" data-adv inputmode="decimal" value="${v ? String(v).replace('.', ',') : ''}" style="width:130px;text-align:right"></td><td><input class="inp" data-add type="date" value="${d || ''}"></td></tr>`;
+    const m = H.modal(`Aditivo na ${esc(o.id)} · ${esc(o.cliente || '')}`, `<p class="note">Mesmo cliente e mesmos contêineres. Entra no desembolso como bloco separado; a cobertura olha a operação inteira.</p>
+      <div class="fields" style="margin-top:8px"><div class="f"><label class="lbl" for="adq">Quantidade (un.)</label><input id="adq" inputmode="decimal" value="${p.quantidade || ''}"></div>
+        <div class="f"><label class="lbl" for="adp">Preço do aditivo (R$)</label><input id="adp" inputmode="decimal" value="${p.preco ? String(p.preco).replace('.', ',') : ''}"></div>
+        <div class="f w4"><label class="lbl" for="ado">Observação</label><input id="ado" value=""></div></div>
+      <h3 class="h3" style="margin-top:10px">Parcelas</h3><div class="tw"><table class="mini"><thead><tr><th>Valor (R$)</th><th>Vencimento</th></tr></thead><tbody id="adps">${linha('', '')}${linha('', '')}</tbody></table></div>
+      <button class="btn sm" id="adpl" style="margin-top:6px">+ Parcela</button>
+      <h3 class="h3" style="margin-top:10px">Regra de câmbio do aditivo</h3>
+      <div class="fields"><div class="f"><label class="lbl" for="adrr">Dólar de referência</label><input id="adrr" inputmode="decimal" value="${dec(sug.referencia)}"></div>
+        <div class="f"><label class="lbl" for="adrp">Piso</label><input id="adrp" inputmode="decimal" value="${dec(sug.piso)}"></div>
+        <div class="f"><label class="lbl" for="adrt">Teto</label><input id="adrt" inputmode="decimal" value="${dec(sug.teto)}"></div></div>
+      <p class="note" style="margin-top:4px">Tabela por evento: ${sug.eventos.map(e => `${esc(e.rotulo)} ${dec(e.alta)}/${dec(e.queda)}`).join(' · ')} (padrão da casa; edite depois no bloco do aditivo).</p>`,
+      '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="adok">Criar aditivo</button>');
+    m.querySelector('#adpl').onclick = () => m.querySelector('#adps').insertAdjacentHTML('beforeend', linha('', ''));
+    m.querySelector('#adok').onclick = () => {
+      const q = num(m.querySelector('#adq').value), regra = Object.assign({}, sug, { referencia: num(m.querySelector('#adrr').value), piso: num(m.querySelector('#adrp').value), teto: num(m.querySelector('#adrt').value), quantidade: q });
+      const vs = [...m.querySelectorAll('[data-adv]')], ds = [...m.querySelectorAll('[data-add]')];
+      const parcelas = vs.map((v, i) => ({ valor: num(v.value), vencimento: ds[i].value })).filter(x => x.valor || x.vencimento);
+      const oa = opById(opId), r = W.criarAditivo(H.db, oa, { quantidade: q, preco: num(m.querySelector('#adp').value), parcelas, obs: m.querySelector('#ado').value, regraCambial: regra, quoteId: p.quoteId || '' }, H.nomeUsuario(H.userKey));
+      if (!r.ok) return H.toast(esc(r.msg));
+      H.salvar(); H.fecharModal(); H.toast(`<b>${esc(r.aditivo.rotulo)}</b> criado: ${r.lancamentos.length} parcela(s) prevista(s) no Financeiro.`); H.render();
+    };
+  };
+  async function blocoAditivos(div, o0) {
+    const o = opById(o0.id) || o0, ads = W.aditivosDaOp(o), edita = H.pode('fin.lancar'), aprova = H.pode('fin.autorizar');
+    if (!ads.length && !edita) { div.innerHTML = ''; return; }
+    const datas = [...new Set(ads.flatMap(a => W.eventosDaOp(H.db, W.vistaDoAditivo(o, a), {}).map(e => e.dataRef)).filter(d => d && d <= W.hojeISO()))];
+    const px = datas.length ? await H.ptaxDosDias(datas) : {};
+    if (!div.isConnected) return;
+    let gravou = 0; ads.forEach(a => { gravou += W.noAditivo(o, a.id, v => W.registrarDentroDaFaixa(H.db, v, px)); }); if (gravou) H.salvar();
+    const n4b = v => (+v || 0).toFixed(4).replace('.', ',');
+    div.innerHTML = `<div class="box"><div class="box-h"><h2>Aditivos</h2><span class="note">${ads.length ? ads.length + ' aditivo(s) · cobertura pela operação inteira' : 'mesmo cliente, mesmos contêineres'}</span></div><div class="box-b">
+      ${ads.map(a => { const v = W.vistaDoAditivo(o, a), r = W.regraDaOp(a), falta = r ? W.conferirRegra(r) : ['Regra não cadastrada.'], evs = W.eventosDaOp(H.db, v, px, ptaxV());
+        const ps = W.parcelasDoCliente(H.db, o.id, a.id);
+        return `<div style="margin-bottom:12px"><h3 class="h3">${esc(a.rotulo)} · ${(+a.quantidade).toLocaleString('pt-BR')} un. · ${W.fmtBRL(a.preco)}</h3>${a.obs ? `<p class="note">${esc(a.obs)}</p>` : ''}
+          <div class="tw"><table class="mini"><tbody>${ps.map(l => `<tr><td>${esc(l.descCliente || l.desc)}</td><td>${W.dataBR(W.vencDe(l))}</td><td class="num">${W.fmtBRL(l.valor)}</td><td>${W.realizado(l) ? pill('recebido', COR.ok) : pill('previsto', COR.cinza)}</td></tr>`).join('')}</tbody></table></div>
+          <p class="note" style="margin-top:4px">Regra: ${r ? `faixa ${n4b(r.piso)} a ${n4b(r.teto)} · ${(+r.quantidade).toLocaleString('pt-BR')} un.` : '—'}${falta.length ? ` · <span style="color:#b45309">${esc(falta[0])}</span>` : ''}</p>
+          ${evs.length ? `<div class="tw"><table class="mini"><tbody>${evs.map(e => { const sit = SIT_EVENTO[e.status] || ['—', COR.cinza]; return `<tr><td>${esc(e.rotulo)}</td><td>${pill(sit[0], sit[1])}<br><small class="note">${esc(e.calculo ? 'PTAX ' + n4b(e.calculo.ptax) + ' (' + W.dataBR(e.dataRef) + ')' : e.motivo || '')}</small></td>
+            <td class="num">${e.calculo ? W.fmtBRL(e.calculo.valor) : '—'}</td><td style="white-space:nowrap">${['aguardando-samir', 'aprovado', 'dentro-da-faixa'].includes(e.status) ? `<button class="btn ghost sm" data-adap="${esc(a.id)}|${esc(e.k)}">Apuração</button> ` : ''}${e.status === 'aguardando-samir' && aprova ? `<button class="btn pri sm" data-adok="${esc(a.id)}|${esc(e.k)}">Aprovar</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : ''}
+          ${edita ? `<button class="btn ghost sm" data-adrg="${esc(a.id)}" style="margin-top:6px">Editar regra do aditivo</button>` : ''}</div>`; }).join('')}
+      ${edita ? '<button class="btn sm" id="adnovo">+ Aditivo</button>' : ''}</div></div>`;
+    const nv = div.querySelector('#adnovo'); if (nv) nv.onclick = () => H.aditivoModal(o.id);
+    div.querySelectorAll('[data-adap]').forEach(b => b.onclick = () => { const [ad, k] = b.dataset.adap.split('|'); H.apuracaoModal(o.id, k, px, ad); });
+    div.querySelectorAll('[data-adok]').forEach(b => b.onclick = () => {
+      const [ad, k] = b.dataset.adok.split('|'), oa = opById(o.id), por = H.nomeUsuario(H.userKey);
+      let res = W.noAditivo(oa, ad, v => W.aprovarReajusteEvento(H.db, v, k, px, por));
+      if (!res.ok && res.conflito && confirm(`A parcela já tem um reajuste gravado antes (${res.conflito.obs}: ${W.fmtBRL(res.conflito.valor)}).\n\nSubstituir? O anterior fica no histórico da parcela.`)) res = W.noAditivo(oa, ad, v => W.aprovarReajusteEvento(H.db, v, k, px, por, null, { substituir: true }));
+      if (!res.ok) return H.toast(esc(res.msg));
+      H.salvar(); H.toast(`Reajuste do aditivo aprovado: ${W.fmtBRL(res.calculo.valor)}.`); blocoAditivos(div, oa);
+    });
+    div.querySelectorAll('[data-adrg]').forEach(b => b.onclick = () => {
+      const oa = opById(o.id), a = W.aditivosDaOp(oa).find(x => x.id === b.dataset.adrg), r = W.normalizarRegra(a.regraCambial || {}), dec = v => (v ? String(v).replace('.', ',') : '');
+      const num = t => { t = String(t || '').trim(); return /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') || 0 : +t || 0; };
+      const m = H.modal('Regra de câmbio · ' + esc(a.rotulo), `<div class="fields"><div class="f"><label class="lbl" for="arr">Dólar de referência</label><input id="arr" inputmode="decimal" value="${dec(r.referencia)}"></div>
+        <div class="f"><label class="lbl" for="arp">Piso</label><input id="arp" inputmode="decimal" value="${dec(r.piso)}"></div><div class="f"><label class="lbl" for="art">Teto</label><input id="art" inputmode="decimal" value="${dec(r.teto)}"></div>
+        <div class="f"><label class="lbl" for="arq">Quantidade</label><input id="arq" inputmode="decimal" value="${r.quantidade || ''}"></div></div>
+        <div class="tw" style="margin-top:8px"><table class="mini"><thead><tr><th>Evento</th><th class="num">Alta</th><th class="num">Queda</th></tr></thead><tbody>${r.eventos.map((e, i) => `<tr><td>${esc(e.rotulo)}</td><td class="num"><input class="inp" data-ara="${i}" value="${dec(e.alta)}" style="width:70px;text-align:right"></td><td class="num"><input class="inp" data-arq="${i}" value="${dec(e.queda)}" style="width:70px;text-align:right"></td></tr>`).join('')}</tbody></table></div>`,
+        '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="arok">Salvar regra</button>');
+      m.querySelector('#arok').onclick = () => {
+        const nova = Object.assign({}, r, { referencia: num(m.querySelector('#arr').value), piso: num(m.querySelector('#arp').value), teto: num(m.querySelector('#art').value), quantidade: num(m.querySelector('#arq').value),
+          eventos: r.eventos.map((e, i) => Object.assign({}, e, { alta: num(m.querySelector(`[data-ara="${i}"]`).value), queda: num(m.querySelector(`[data-arq="${i}"]`).value) })) });
+        W.salvarRegraOp(a, nova, H.nomeUsuario(H.userKey)); H.salvar(); H.fecharModal(); H.toast('Regra do aditivo salva.'); blocoAditivos(div, oa);
+      };
+    });
+  }
   async function blocoRegraEvento(div, o0) {
     const o = opById(o0.id) || o0, r = W.regraDaOp(o), x = r || W.regraDoPadrao(H.db, W.referenciaDaCotacao(H.db, o)), edita = H.pode('fin.lancar'), aprova = H.pode('fin.autorizar');
     const est = W.estruturaDaOp(H.db, o), fav = W.favorecidoDe(H.db, est);

@@ -175,13 +175,26 @@
     const veValor = H.pode('fin.ver') || W.podeMarcarFrete(H.userKey);
     const sit = t => t.status === 'feita' ? '<span class="pill ok">concluída</span>' : t.auto && t.auto.suspensa ? '<span class="pill">suspensa</span>' : t.prazo && t.prazo < hoje ? '<span class="pill crit">atrasada</span>' : '<span class="pill info">aberta</span>';
     return `<div class="box"><div class="box-h"><h2>Frete fechado${alvo.id !== o.id ? ` · contêiner ${esc(alvo.id)}` : ''}</h2>${W.podeMarcarFrete(H.userKey) ? `<button class="btn sm ${fr ? '' : 'blue'}" id="frmk">${fr ? 'Editar' : 'Marcar frete fechado'}</button>` : ''}</div>
-      <div class="box-b">${fr ? `<p><b>Fechado em ${W.dataBR(String(fr.em).slice(0, 10))}</b> por ${esc(H.nomeUsuario(fr.por) || fr.por || '—')}${fr.agente ? ' · ' + esc(fr.agente) : ''}${fr.booking ? ' · booking <span class="mono">' + esc(fr.booking) + '</span>' : ''}${veValor && fr.valor != null ? ' · ' + W.fmtBRL(fr.valor) : ''}</p>` : '<p class="note">Ainda não marcado. É um marco, não uma etapa: a sequência de etapas continua a mesma.</p>'}</div></div>
+      <div class="box-b">${fr ? `<p><b>Fechado em ${W.dataBR(String(fr.em).slice(0, 10))}</b> por ${esc(H.nomeUsuario(fr.por) || fr.por || '—')}${fr.agente ? ' · ' + esc(fr.agente) : ''}${fr.booking ? ' · booking <span class="mono">' + esc(fr.booking) + '</span>' : ''}${veValor && fr.valor != null ? ' · ' + W.fmtBRL(fr.valor) : ''}</p>${linhaVariacaoFrete(o)}` : '<p class="note">Ainda não marcado. É um marco, não uma etapa: a sequência de etapas continua a mesma.</p>'}</div></div>
       <div class="box"><div class="box-h"><h2>Tarefas da operação</h2><span class="note">automáticas e manuais ligadas a ${esc(alvo.id)}</span></div><div class="box-b tl">
         ${ts.length ? ts.map(t => `<div class="ev"><span class="when">${W.dataBR(String(t.criadaEm || '').slice(0, 10))}</span><span class="rail"><i></i></span><div class="what"><b>${esc(t.t)}</b> ${sit(t)}${t.auto && t.auto.retroativo ? ' <span class="pill">retroativa</span>' : ''}
           <small>${esc(t.resp || '')}${(t.copia || []).length ? ' · cópia ' + esc(t.copia.join(', ')) : ''}${t.prazo ? ' · prazo ' + W.dataBR(t.prazo) : ''}${t.status === 'feita' ? ` · concluída${t.feitaPor ? ' por ' + esc(t.feitaPor) : ''}${t.doneAt ? ' em ' + W.dataBR(String(t.doneAt).slice(0, 10)) : ''}${t.obsConclusao ? ' · ' + esc(t.obsConclusao) : ''}` : ''}</small></div></div>`).join('')
         : '<p class="empty">Nenhuma tarefa ligada a esta operação.</p>'}</div></div>`;
   }
+  /* Variação do frete internacional sobre a cotação: absorvida até 5%; acima, ou com sobretaxa, decisão do Samir. */
+  function linhaVariacaoFrete(o) {
+    const v = W.variacaoFrete ? W.variacaoFrete(H.db, o) : null; if (!v || v.semCotacao || v.semValor || !H.pode('fin.ver')) return '';
+    const us = x => 'US$ ' + (+x || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), pc = (v.pct * 100).toFixed(1).replace('.', ',') + '%';
+    const cor = v.absorvida ? 'ok' : v.decisao ? 'info' : 'crit';
+    return `<p style="margin-top:6px"><span class="pill ${cor}">${v.absorvida ? 'absorvida' : v.decisao ? (v.decisao.decisao === 'aprovado' ? 'ajuste aprovado' : 'absorvida pelo Samir') : 'aguardando o Samir'}</span>
+      Cotado ${us(v.cotado)} · fechado ${us(v.fechado)} (${v.diferenca >= 0 ? '+' : ''}${pc})${v.sobretaxas.length ? ' · ' + v.sobretaxas.map(x => esc(x.tipo) + ' ' + us(x.usd)).join(' · ') : ''}
+      ${v.decisao && v.decisao.decisao === 'aprovado' ? ` · ajuste ${us(v.decisao.valorUSD)} por ${esc(v.decisao.por)}` : ''}${v.semComprovante ? ' · <span style="color:#b45309">sem comprovante do agente</span>' : ''}</p>
+      ${v.pendente && H.pode('fin.autorizar') ? `<div class="btns" style="margin-top:6px"><button class="btn pri sm" id="frajok">Aprovar ajuste de ${us(v.ajusteSugeridoUSD)}</button><button class="btn ghost sm" id="frajab">Absorver</button></div>` : ''}`;
+  }
   function ligarFrete(box, o) {
+    const decidir = dec => { const oa = (H.db.ops || []).find(x => x && x.id === o.id) || o, r = W.decidirAjusteFrete(H.db, oa, dec, {}, H.nomeUsuario(H.userKey)); if (!r.ok) return H.toast(esc(r.msg)); H.salvar(); H.render(); H.toast(dec === 'aprovado' ? 'Ajuste do frete aprovado.' : 'Variação do frete absorvida.'); };
+    const ok1 = box.querySelector('#frajok'); if (ok1) ok1.onclick = () => decidir('aprovado');
+    const ab1 = box.querySelector('#frajab'); if (ab1) ab1.onclick = () => decidir('absorvido');
     const b = box.querySelector('#frmk'); if (!b) return;
     b.onclick = () => {
       const alvo = W.alvoDe(H.db, o), fr = W.freteDe(H.db, alvo) || {};
@@ -189,12 +202,19 @@
         <div class="fields" style="margin-top:8px"><div class="f"><label class="lbl" for="fre">Data</label><input id="fre" type="date" value="${esc(String(fr.em || W.hojeISO()).slice(0, 10))}"></div>
           <div class="f"><label class="lbl" for="fra">Agente / armador</label><input id="fra" value="${esc(fr.agente || '')}"></div>
           <div class="f"><label class="lbl" for="frb">Booking</label><input id="frb" value="${esc(fr.booking || '')}"></div>
-          <div class="f"><label class="lbl" for="frv">Valor do frete (opcional)</label><input id="frv" inputmode="decimal" value="${fr.valor != null ? esc(fr.valor) : ''}"></div></div>`,
+          <div class="f"><label class="lbl" for="frv">Valor do frete em R$ (opcional)</label><input id="frv" inputmode="decimal" value="${fr.valor != null ? esc(fr.valor) : ''}"></div>
+          <div class="f"><label class="lbl" for="fru">Frete fechado (US$)</label><input id="fru" inputmode="decimal" value="${fr.valorUSD != null ? esc(fr.valorUSD) : ''}"></div></div>
+        <h3 class="h3" style="margin-top:10px">Sobretaxas do agente</h3>
+        <div class="fields">${W.SOBRETAXAS.map((t, i) => { const x = (fr.sobretaxas || []).find(y => y.tipo === t); return `<div class="f"><label class="lbl" for="frs${i}">${esc(t)} (US$)</label><input id="frs${i}" data-frs="${esc(t)}" inputmode="decimal" value="${x ? esc(x.usd) : ''}"></div>`; }).join('')}
+          <div class="f w4"><label class="lbl" for="frc">Comprovante do agente (link ou nº do documento)</label><input id="frc" value="${esc(fr.comprovante || '')}"></div></div>
+        <p class="note" style="margin-top:6px">Até 5% acima do frete da cotação, a WindGate absorve. Acima disso, ou com GRI, Peak Season ou War Risk, o ajuste precisa do comprovante do agente e da aprovação do Samir.</p>`,
         '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="frok">Salvar</button>');
       m.querySelector('#frok').onclick = () => {
         const v = s => m.querySelector(s).value.trim(), val = v('#frv');
         const oa = (H.db.ops || []).find(x => x && x.id === o.id) || o;
-        W.marcarFreteFechado(H.db, oa, { em: v('#fre') ? v('#fre') + 'T12:00:00-03:00' : '', agente: v('#fra'), booking: v('#frb'), valor: val === '' ? '' : +val.replace(/\./g, '').replace(',', '.') }, H.userKey, new Date().toISOString());
+        const nb = t => (t === '' ? '' : /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : +t), usd = v('#fru');
+        const sobretaxas = [...m.querySelectorAll('[data-frs]')].map(i => ({ tipo: i.dataset.frs, usd: nb(i.value.trim()) || 0 })).filter(x => x.usd > 0);
+        W.marcarFreteFechado(H.db, oa, { em: v('#fre') ? v('#fre') + 'T12:00:00-03:00' : '', agente: v('#fra'), booking: v('#frb'), valor: val === '' ? '' : +val.replace(/\./g, '').replace(',', '.'), valorUSD: nb(usd), sobretaxas, comprovante: v('#frc') }, H.userKey, new Date().toISOString());
         H.salvar(); H.fecharModal(); H.render(); H.toast('Frete fechado marcado.');
       };
     };

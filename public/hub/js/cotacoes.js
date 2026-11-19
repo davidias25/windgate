@@ -656,10 +656,11 @@
   }
   /* Cria o que falta para os clientes aprovados. Pede o código do contêiner só se não der para saber. */
   function criarOperacoesMulti(depois) {
-    const escolhas = {};
+    const escolhas = {}, duplicados = {};
     const executar = codigo => {
-      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: codigo, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO, lancExistentes: escolhas });
+      const r = W.criarOperacoesDaMulti(H.db, ed, { maeId: codigo, por: eu(), hoje: W.hojeISO(), modeloChecklist: H.CHK_MODELO, lancExistentes: escolhas, duplicados });
       if (!r.ok && r.confirmarExistentes) { perguntarExistentes(r.filha.id, r.existentes, esc_ => { escolhas[r.filha.id] = esc_; executar(codigo); }); return true; }
+      if (!r.ok && r.confirmarDuplicado) { perguntarDuplicado(r.cliente, r.preco, r.parecidas, () => { duplicados[r.clienteId] = 'nova'; executar(codigo); }); return true; }
       if (!r.ok) { if (r.semCodigo) return false; H.toast('⛔ ' + esc(r.msg)); return true; }
       if (H.db.quotes[ed.id]) H.db.quotes[ed.id].clientes = ed.clientes;
       (r.filhas || []).forEach(f => W.aplicarPadraoNaOp(H.db, f, eu(), null, { referencia: ed.cambioProposta && ed.cambioProposta.referencia }));
@@ -673,6 +674,17 @@
       <div class="f" style="margin-top:8px"><label class="lbl" for="mcod">Código do contêiner</label><input id="mcod"></div>`,
       '<button class="btn" data-x>Cancelar</button><button class="btn pri" id="mcok">Criar</button>');
     m.querySelector('#mcok').onclick = () => { const cod = m.querySelector('#mcod').value.trim(); if (!cod) return H.toast('Informe o código.'); ed.fields.opMae = cod.toUpperCase(); H.fecharModal(); executar(cod); };
+  }
+  /** Cliente já tem operação com o mesmo valor: aditivo, nova operação ou duplicado. A decisão fica registrada na cotação. */
+  function perguntarDuplicado(cliente, preco, parecidas, seguirNova) {
+    const p = parecidas[0], reg = escolha => { ed.decisoesDuplicado = (ed.decisoesDuplicado || []).concat([{ cliente, op: p.op, preco, escolha, por: eu(), em: new Date().toISOString() }]); if (H.db.quotes[ed.id]) H.db.quotes[ed.id].decisoesDuplicado = ed.decisoesDuplicado; H.salvar(); };
+    const m = H.modal('Mesmo cliente, mesmo valor', `<p><b>${esc(cliente)}</b> já tem a operação <b>${esc(p.op)}</b> com o mesmo valor (${fmt(p.valor)}; esta cotação: ${fmt(preco)}).</p>
+      <p style="margin-top:6px">É aditivo, nova operação ou duplicado?</p>
+      <p class="note" style="margin-top:8px"><b>Aditivo</b>: nada é criado aqui; abre a ${esc(p.op)} para lançar o aditivo (mesmos contêineres). <b>Nova operação</b>: cria normalmente. <b>Duplicado</b>: cancela, nada é criado.</p>`,
+      `<button class="btn" id="dupdup">Duplicado</button><button class="btn" id="dupad">Aditivo da ${esc(p.op)}</button><button class="btn pri" id="dupnova">Nova operação</button>`);
+    m.querySelector('#dupdup').onclick = () => { reg('duplicado'); H.fecharModal(); H.toast('Nada foi criado.'); };
+    m.querySelector('#dupad').onclick = () => { reg('aditivo'); H.fecharModal(); if (H.aditivoModal) { H.ir('ficha', p.op); setTimeout(() => H.aditivoModal(p.op, { preco, quoteId: ed.id }), 300); } };
+    m.querySelector('#dupnova').onclick = () => { reg('nova'); H.fecharModal(); seguirNova(); };
   }
   /** A operação já tem lançamentos que não vieram desta cotação: nunca criar em dobro sem a decisão de quem aprova. */
   function perguntarExistentes(opId, existentes, escolher) {
@@ -704,9 +716,13 @@
       '<button class="btn" data-x>Agora não</button><button class="btn pri" id="mop">Criar operação + previsto</button>');
     m.querySelector('#mop').onclick = () => { H.fecharModal(); criarOperacao(); };
   }
-  function criarOperacao(confirmado) {
+  function criarOperacao(confirmado, dupOk) {
     if (W.ehMultiCliente(ed)) return criarOperacoesMulti();
     const r = W.operacaoDaCotacao(H.db, ed, R, eu(), W.hojeISO());
+    if (r.op && !dupOk) {
+      const preco = Math.round(r.lancamentos.filter(l => l.tipo === 'Receita').reduce((a, l) => a + (+l.valor || 0), 0) * 100) / 100, par = W.operacoesParecidas(H.db, F('cliente'), preco, [r.id]);
+      if (par.length) return perguntarDuplicado(F('cliente'), preco, par, () => criarOperacao(confirmado, true));
+    }
     if (r.jaTemOutros && confirmado !== 'substituir' && confirmado !== 'manter') return perguntarExistentes(r.id, r.daOperacao, criarOperacao);
     if (r.jaTemOutros && confirmado === 'manter') {
       const oe = H.db.ops.find(o => o && o.id === r.id); if (oe && !oe.quoteId) oe.quoteId = ed.id;

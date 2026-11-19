@@ -692,6 +692,13 @@ Modelo para revisão jurídica antes da assinatura.`;
     });
     if (meu(['operacoes', 'frete'])) conteineres(db, h).filter(c => c.status === 'vencido' || c.status === 'atencao').forEach(c => add({ tipo: 'conteiner', nivel: c.status === 'vencido' ? 3 : 2, titulo: `Contêiner ${c.c.numero} (${c.op}) ${c.status === 'vencido' ? `em demurrage há ${c.excedidos} dia(s)` : `vence o free time em ${c.restantes} dia(s)`}`, detalhe: `limite ${W.dataBR(c.limite)}${c.status === 'vencido' ? ` · ≈ US$ ${Math.round(c.custoUSD)} até hoje` : ''}`, op: c.op, ir: ['conteineres'] }));
     if (meu(['documentos', 'operacoes'])) (db.docs || []).filter(d => d && /rejeit/i.test(d.status || '')).slice(0, 10).forEach(d => add({ tipo: 'doc', nivel: 2, titulo: `Documento rejeitado: ${d.nome || d.grupo}`, detalhe: `${d.op || ''} · ${d.motivo || d.rejeicao || ''}`, op: d.op, ir: ['docs'] }));
+    /* Frete internacional acima de 5% da cotação, ou com GRI / Peak Season / War Risk: decisão do Samir (Parte 2.1). */
+    const TF = W.variacaoFrete ? W : (typeof module === 'object' && module.exports && typeof require === 'function' ? require('./tarefas-auto.js') : {});
+    if (TF.variacaoFrete && (p === 'diretoria' || W.pode(db, k, 'fin.autorizar'))) (db.ops || []).filter(o => o && W.emAndamento(o) && !o.maeId).forEach(o => {
+      const v = TF.variacaoFrete(db, o); if (!v || !v.pendente) return;
+      add({ tipo: 'frete', nivel: 3, titulo: `${o.id}: frete ${v.diferenca >= 0 ? '+' : ''}${(v.pct * 100).toFixed(1).replace('.', ',')}% sobre a cotação${v.sobretaxas.length ? ' + ' + v.sobretaxas.map(x => x.tipo).join(', ') : ''}`,
+        detalhe: `ajuste sugerido US$ ${v.ajusteSugeridoUSD.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${v.semComprovante ? ' · falta o comprovante do agente' : ''}`, op: o.id, ir: ['ficha', o.id] });
+    });
     /* Canal da DUIMP que pede ação (amarelo, vermelho, cinza), até o desembaraço. */
     if (meu(['operacoes', 'documentos']) && W.canaisComAcao) W.canaisComAcao(db).forEach(x => add({ tipo: 'canal', nivel: x.canal.k === 'amarelo' ? 2 : 3, titulo: `${x.o.id}: DUIMP no canal ${x.canal.l.toLowerCase()}`,
       detalhe: `${x.o.duimp || ''}${x.canal.em ? ' · consultado em ' + W.dataBR(String(x.canal.em).slice(0, 10)) : ''} · acompanhar com o despachante`, op: x.o.id, ir: ['ficha', x.o.id] }));

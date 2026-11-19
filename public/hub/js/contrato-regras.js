@@ -268,8 +268,11 @@
   function dadosDesembolso(db, opId, hoje) {
     const o = (db.ops || []).find(x => x && x.id === opId); if (!o) return null;
     const h = hoje || W.hojeISO(), ps = W.parcelasDoCliente(db, opId), difal = (db.fin || []).filter(l => l && l.op === opId && W.ehReceita(l) && /reembolso do difal/i.test(l.desc || ''));
-    const todas = ps.concat(difal).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
-    const prox = todas.find(l => !W.realizado(l)) || null;
+    /* Aditivos: bloco separado, depois do contrato principal, cada um na ordem dos seus vencimentos. */
+    const porVenc = (a, b) => W.vencDe(a).localeCompare(W.vencDe(b));
+    const doAditivo = (W.aditivosDaOp ? W.aditivosDaOp(o) : []).flatMap(a => W.parcelasDoCliente(db, opId, a.id).sort(porVenc));
+    const todas = ps.concat(difal.filter(l => !l.aditivo)).sort(porVenc).concat(doAditivo);
+    const prox = todas.filter(l => !W.realizado(l)).sort(porVenc)[0] || null;
     const rot = l => { if (l.descCliente) return l.descCliente; if (difal.includes(l)) return 'Reembolso do DIFAL'; const n = W.numeroNaOp(db, l); return n ? n + 'ª parcela' : 'Parcela'; };
     /* Cada câmbio ganha o seu número pela data (1º, 2º...), igual em todas as parcelas. */
     const datasCambio = [...new Set(todas.flatMap(l => (l.reajustes || []).filter(x => x.cambioId).map(x => x.data + '|' + x.cambioId)))].sort();
@@ -278,7 +281,7 @@
       comp.reajustes.forEach(r => { r.ordem = datasCambio.indexOf(r.data + '|' + r.cambioId) + 1 || null; });
       comp.reajustes.sort((a, b) => String(b.data).localeCompare(String(a.data)));
       const reaj = comp.total - comp.contrato;
-      return { id: l._id, n: W.numeroNaOp(db, l), rotulo: rot(l), vencimento: W.vencDe(l), valor: +l.valor || 0, situacao: W.realizado(l) ? 'pago' : l === prox ? 'proximo' : 'aPagar', composicao: comp,
+      return { id: l._id, n: W.numeroNaOp(db, l), bloco: l.aditivo || '', rotulo: rot(l), vencimento: W.vencDe(l), valor: +l.valor || 0, situacao: W.realizado(l) ? 'pago' : l === prox ? 'proximo' : 'aPagar', composicao: comp,
         sub: Math.abs(reaj) > 0.004 ? `${W.fmtBRL(comp.contrato)} ${reaj >= 0 ? '+' : '–'} reajuste cambial líquido ${W.fmtBRL(Math.abs(reaj))}` : (l.subCliente || '') };
     });
     const total = parcelas.reduce((a, p) => a + p.valor, 0), pago = parcelas.filter(p => p.situacao === 'pago').reduce((a, p) => a + p.valor, 0);
@@ -289,7 +292,7 @@
     const n = prox ? W.numeroNaOp(db, prox) : null;
     return {
       op: o.id, cliente: o.cliente || '', obra: o.nome || '', atualizado: h, total, pago, aPagar: total - pago, reajuste, contrato: total - reajuste, parcelas,
-      proxima: prox ? { vencimento: W.vencDe(prox), valor: +prox.valor || 0, rotulo: rot(prox), libera: prox.liberaCliente || (n ? LIBERA[n - 1] : '') || '' } : null,
+      proxima: prox ? { vencimento: W.vencDe(prox), valor: +prox.valor || 0, rotulo: rot(prox), libera: prox.liberaCliente || (n && !prox.aditivo ? LIBERA[n - 1] : '') || '' } : null,
       composicao: escolhida ? Object.assign({ rotulo: String(escolhida.rotulo).split(' — ')[0], rotuloContrato: 'Parcela contratual' + (String(escolhida.rotulo).includes(' — ') ? ' (' + String(escolhida.rotulo).split(' — ').slice(1).join(' — ') + ')' : '') }, escolhida.composicao) : null,
       clausula: rg ? (rg.naoSeAplica ? null : { referencia: rg.referencia, faixaMin: rg.piso, faixaMax: rg.teto, ref: rg.clausulaRef || '', texto: W.textoRegra(rg) })
         : cl ? { referencia: cl.referencia, faixaMin: cl.faixaMin, faixaMax: cl.faixaMax, ref: cl.clausulaRef || '', texto: textoClausula(cl) } : null,

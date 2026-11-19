@@ -1222,6 +1222,20 @@ function triCalcular(e){
     db.fin = novos.concat((db.fin || []).filter(l => !l || !sobra.includes(l._id)));
     return { novos, removidos: sobra.length };
   }
+  /**
+   * Mesmo cliente com operação de mesmo valor de contrato (±0,5%): pode ser aditivo, nova operação ou duplicado.
+   * Ex.: OP229.1 (Marquise) com o mesmo preço da OP228 (R$ 431.680). Só avisa: quem decide é quem aprova.
+   */
+  const semAcento = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  function operacoesParecidas(db, cliente, preco, exceto) {
+    const c = semAcento(cliente), fora = exceto || [];
+    if (c.length < 3 || !(+preco > 0)) return [];
+    const mesmo = o => { const x = semAcento(o.cliente); return x.length >= 3 && (x === c || x.startsWith(c) || c.startsWith(x)); };
+    return (db.ops || []).filter(o => o && o.id && !fora.includes(o.id) && !W.ehMae(o) && !/^(ESTUDO|EXPO)/i.test(o.id) && mesmo(o))
+      .map(o => ({ op: o.id, cliente: o.cliente, status: o.status, valor: Math.round((db.fin || []).filter(l => l && l.op === o.id && l.tipo === 'Receita' && !l.aditivo && !/reembolso do difal/i.test(l.desc || ''))
+        .reduce((a, l) => a + (l.valorContrato != null ? +l.valorContrato : +l.valor || 0), 0) * 100) / 100 }))
+      .filter(x => x.valor > 0 && Math.abs(x.valor - preco) <= Math.max(1, preco * 0.005));
+  }
   /** Cria a mãe, se faltar, e a filha do cliente aprovado, com os lançamentos dele. */
   function criarOperacaoDoCliente(db, q, clienteId, opcoes) {
     const o = opcoes || {}, t = o.agora || new Date().toISOString(), por = o.por || '';
@@ -1238,6 +1252,13 @@ function triCalcular(e){
     let f = (db.ops || []).find(x => x && x.quoteId === q.id && (x.clienteCotId || x.quoteClienteId) === cc.id), criouFilha = false;
     /* Operação solta com o mesmo código, sem outra cotação: passa a ser a filha, em vez de dar erro. */
     if (!f && cod) { const solta = (db.ops || []).find(x => x && x.id === cod && !W.ehMae(x) && (!x.maeId || x.maeId === maeId) && (!x.quoteId || x.quoteId === q.id)); if (solta) { f = solta; f.maeId = maeId; f.quoteId = q.id; if (!f.cliente) f.cliente = cc.nome; } }
+    /* Filha nova de cliente que já tem operação com o mesmo valor: perguntar antes (aditivo, nova operação ou duplicado). */
+    if (!f) {
+      const decidido = (o.duplicados || {})[cc.id], linhas0 = linhasDoCliente(cc), preco = Math.round(linhas0.filter(x => x.tipo === 'Receita' && !/difal/i.test(x.desc || '')).reduce((a, x) => a + (+x.valor || 0), 0) * 100) / 100;
+      const parecidas = decidido === 'nova' ? [] : operacoesParecidas(db, cc.nome, preco, [maeId]);
+      if (parecidas.length && criouMae) db.ops = db.ops.filter(x => x !== mae);   // nada fica criado antes da resposta
+      if (parecidas.length) return { ok: false, confirmarDuplicado: true, clienteId: cc.id, cliente: cc.nome, preco, parecidas, msg: `${cc.nome} já tem a operação ${parecidas[0].op} com o mesmo valor: é aditivo, nova operação ou duplicado?` };
+    }
     if (!f) {
       const r = W.criarFilha(db, maeId, { id: cod, cliente: cc.nome, nome: c.mercadoria || '', quoteId: q.id }, por, t, o.modeloChecklist);
       if (!r.ok) return { ok: false, msg: (cc.nome || cc.id) + ': ' + r.msg };
@@ -1363,7 +1384,7 @@ function triCalcular(e){
      Aprovada pelo Samir = proposta liberada: o negócio entra (ou avança) para "Proposta enviada".
      Já virou operação: o negócio fica Ganho. Negócio em Negociação, Ganho ou Perdido não volta de fase.
      O _id sai da cotação ("cot-<id>"): dois usuários gravando ao mesmo tempo caem no mesmo negócio. */
-  const nomeNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+  const nomeNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
   function clienteDoCrm(db, nome) {
     const alvo = nomeNorm(nome); if (!alvo) return null;
     const cs = (db.crm || []).filter(Boolean), nomes = c => [nomeNorm(c.empresa), nomeNorm(c.nome)].filter(Boolean);
@@ -1509,5 +1530,5 @@ function triCalcular(e){
 
   return { recalcularMargem5291, recalcularAprovadas5291, ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, definirParcelasCliente, cotacaoSozinho, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, inferirModoMargem, parcelasComEta, entradaIndice, prepararGravacao,
-    separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
+    separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, operacoesParecidas, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });

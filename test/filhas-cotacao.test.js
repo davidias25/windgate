@@ -285,6 +285,22 @@ console.log('\nConferência 18/11: filha que já existe com lançamentos (OP26.2
   ok(de2.ok && de(d, 'OP300.1', 'Receita').length === rec.length, 'aprovar de novo: só sincroniza, sem perguntar e sem duplicar');
 }
 
+console.log('\nParte 2.1: mesmo cliente com operação de mesmo valor (OP229.1 × OP228) pergunta antes de criar:');
+{
+  const q = cotacao(), d = banco(q);
+  W.aprovarCliente(q, 'c1', 'Samir', T);
+  const cc = W.calcularPorCliente(q).clientes[0], preco = W.linhasDoCliente(cc).filter(x => x.tipo === 'Receita' && !/difal/i.test(x.desc)).reduce((a, x) => a + x.valor, 0);
+  d.ops.push({ id: 'OP228', cliente: 'Marcos', status: 'producao' });
+  [0.25, 0.25, 0.25, 0.25].forEach((f, i) => d.fin.push({ _id: 'm' + i, op: 'OP228', tipo: 'Receita', desc: (i + 1) + 'º recebimento', valor: Math.round(preco * f * 100) / 100, vencimento: '2026-12-0' + (i + 1), status: 'Previsto' }));
+  const n0 = d.fin.length, r = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T });
+  ok(!r.ok && r.confirmarDuplicado && r.parecidas[0].op === 'OP228' && /aditivo, nova operação ou duplicado/.test(r.msg), '"cliente já tem a operação OP228 com o mesmo valor: é aditivo, nova operação ou duplicado?"');
+  ok(d.fin.length === n0 && !d.ops.some(o => o.id === 'OP300.1') && !d.ops.some(o => W.ehMae(o)), 'antes da resposta, nada é criado (nem o contêiner)');
+  const r2 = W.criarOperacaoDoCliente(d, q, 'c1', { por: 'Samir', hoje: HJ, agora: T, duplicados: { c1: 'nova' } });
+  ok(r2.ok && d.ops.some(o => o.id === 'OP300.1'), '"nova operação": cria normalmente');
+  ok(!W.operacoesParecidas(d, 'Outro Cliente', preco, []).length && !W.operacoesParecidas(d, 'Marcos', preco * 1.1, ['OP300.1']).length, 'outro cliente ou outro valor: não pergunta');
+  ok(W.operacoesParecidas(d, 'marcos', preco + 0.5, ['OP300.1']).length === 1, 'mesmo cliente (sem diferença de maiúsculas) e valor igual: avisa');
+}
+
 console.log('\nDIFAL 52/91 (24/11): compartilhada aprovada mantém o preço de cada cliente:');
 {
   const q = cotacao(); q.status = 'ok'; q.items.forEach(i => { i.c5291 = true; });

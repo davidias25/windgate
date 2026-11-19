@@ -105,28 +105,32 @@
   /* Padrão por evento: reajustes calculados aguardando o Samir e operações sem a regra completa. */
   async function blocoEventos(box, hoje) {
     if (!box) return;
-    const ops = (H.db.ops || []).filter(o => o && W.regraDaOp(o) && W.emAndamento(o));
-    const datas = [...new Set(ops.flatMap(o => W.eventosDaOp(H.db, o, {}).map(e => e.dataRef)).filter(d => d && d <= hoje))];
+    const ativas = (H.db.ops || []).filter(o => o && W.emAndamento(o)), ops = ativas.filter(o => W.regraDaOp(o));
+    /* Aditivos: o mesmo motor, cada um com a sua regra e as suas parcelas. */
+    const ads = ativas.flatMap(o => W.aditivosDaOp(o).filter(a => W.regraDaOp(a)).map(a => ({ o, a })));
+    const datas = [...new Set(ops.flatMap(o => W.eventosDaOp(H.db, o, {}).map(e => e.dataRef)).concat(ads.flatMap(x => W.eventosDaOp(H.db, W.vistaDoAditivo(x.o, x.a), {}).map(e => e.dataRef))).filter(d => d && d <= hoje))];
     const px = H.ptaxDosDias ? await H.ptaxDosDias(datas) : {};
     if (!box.isConnected) return;
-    if (ops.reduce((a, o) => a + W.registrarDentroDaFaixa(H.db, o, px), 0)) H.salvar();
-    const pend = ops.flatMap(o => W.eventosDaOp(H.db, o, px).filter(e => e.status === 'aguardando-samir').map(e => Object.assign(e, { o })));
+    if (ops.reduce((a, o) => a + W.registrarDentroDaFaixa(H.db, o, px), 0) + ads.reduce((a, x) => a + W.noAditivo(x.o, x.a.id, v => W.registrarDentroDaFaixa(H.db, v, px)), 0)) H.salvar();
+    const pend = ops.flatMap(o => W.eventosDaOp(H.db, o, px).filter(e => e.status === 'aguardando-samir').map(e => Object.assign(e, { o, ad: '' })))
+      .concat(ads.flatMap(x => W.eventosDaOp(H.db, W.vistaDoAditivo(x.o, x.a), px).filter(e => e.status === 'aguardando-samir').map(e => Object.assign(e, { o: x.o, ad: x.a.id, rotulo: x.a.rotulo + ' · ' + e.rotulo }))));
     const falta = W.opsSemRegraCambial(H.db), aprova = H.pode('fin.autorizar'), n = v => (+v || 0).toFixed(4).replace('.', ',');
     if (!pend.length && !falta.length) { box.innerHTML = ''; return; }
     box.innerHTML = `${pend.length ? `<div class="box"><div class="box-h"><h2>Reajuste cambial aguardando o Samir</h2><span class="note">nada muda na parcela antes da aprovação</span></div><div class="tw"><table><thead><tr><th>Operação</th><th>Evento</th><th>PTAX</th><th class="num">Reajuste</th><th class="num">Parcela</th><th></th></tr></thead><tbody>
       ${pend.map(e => `<tr><td><b class="mono">${esc(e.o.id)}</b><br><small class="note">${esc(e.o.cliente || '')}</small></td><td>${esc(e.rotulo)}${e.dataCredito ? `<br><small class="note">crédito ${W.dataBR(e.dataCredito)}</small>` : ''}</td>
         <td class="mono">${n(e.calculo.ptax)}<br><small class="note">${W.dataBR(e.dataRef)} · ${e.calculo.sentido === 'alta' ? 'teto' : 'piso'} ${n(e.calculo.limite)}</small></td><td class="num"><b>${W.fmtBRL(e.calculo.valor)}</b></td>
         <td class="num">${e.alvo ? `${W.numeroNaOp(H.db, e.alvo)}ª: ${W.fmtBRL(e.alvo.valor)} → <b>${W.fmtBRL(e.novoValor)}</b>${e.conflito ? `<br><small style="color:#b45309">⚠ já tem reajuste gravado (${W.fmtBRL(e.conflito.valor)}): substituindo, fica ${W.fmtBRL(e.novoValorSubstituindo)}</small>` : ''}` : '<span class="note">sem parcela em aberto</span>'}</td>
-        <td>${aprova && e.alvo ? `<button class="btn pri sm" data-evok="${esc(e.o.id)}|${esc(e.k)}">Aprovar</button>` : ''} <button class="btn ghost sm" data-evap="${esc(e.o.id)}|${esc(e.k)}">Apuração</button> <button class="btn ghost sm" data-evop="${esc(e.o.id)}">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        <td>${aprova && e.alvo ? `<button class="btn pri sm" data-evok="${esc(e.o.id)}|${esc(e.k)}|${esc(e.ad)}">Aprovar</button>` : ''} <button class="btn ghost sm" data-evap="${esc(e.o.id)}|${esc(e.k)}|${esc(e.ad)}">Apuração</button> <button class="btn ghost sm" data-evop="${esc(e.o.id)}">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}
       ${falta.length ? `<div class="box"><div class="box-h"><h2>Completar regra de câmbio</h2><span class="note">${falta.length} operação(ões) · nenhum valor muda sozinho</span></div><div class="tw"><table><tbody>
-      ${falta.map(f => `<tr><td><b class="mono">${esc(f.o.id)}</b> ${esc(f.o.cliente || '')}</td><td class="note">${esc(f.faltas.slice(0, 2).join(' '))}</td><td><button class="btn ghost sm" data-evop="${esc(f.o.id)}">Completar</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
+      ${falta.map(f => `<tr><td><b class="mono">${esc(f.o.id)}</b>${f.aditivo ? ' · ' + esc(f.aditivo.rotulo) : ''} ${esc(f.o.cliente || '')}</td><td class="note">${esc(f.faltas.slice(0, 2).join(' '))}</td><td><button class="btn ghost sm" data-evop="${esc(f.o.id)}">Completar</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
     box.querySelectorAll('[data-evop]').forEach(b => b.onclick = () => H.ir('ficha', b.dataset.evop));
-    box.querySelectorAll('[data-evap]').forEach(b => b.onclick = () => { const [opId, k] = b.dataset.evap.split('|'); if (H.apuracaoModal) H.apuracaoModal(opId, k, px); });
+    box.querySelectorAll('[data-evap]').forEach(b => b.onclick = () => { const [opId, k, ad] = b.dataset.evap.split('|'); if (H.apuracaoModal) H.apuracaoModal(opId, k, px, ad || ''); });
     box.querySelectorAll('[data-evok]').forEach(b => b.onclick = () => {
-      const [opId, k] = b.dataset.evok.split('|'), o = H.db.ops.find(x => x && x.id === opId);
-      let r = o ? W.aprovarReajusteEvento(H.db, o, k, px, H.nomeUsuario(H.userKey)) : { ok: false, msg: 'Operação não encontrada.' };
+      const [opId, k, ad] = b.dataset.evok.split('|'), o = H.db.ops.find(x => x && x.id === opId), por = H.nomeUsuario(H.userKey);
+      const aprovar = opc => (ad ? W.noAditivo(o, ad, v => W.aprovarReajusteEvento(H.db, v, k, px, por, null, opc)) : W.aprovarReajusteEvento(H.db, o, k, px, por, null, opc));
+      let r = o ? aprovar() : { ok: false, msg: 'Operação não encontrada.' };
       if (!r.ok && r.conflito && confirm(`A parcela já tem um reajuste gravado antes (${r.conflito.obs}: ${W.fmtBRL(r.conflito.valor)}).\n\nSubstituir pelo reajuste deste evento? O anterior fica no histórico da parcela. Cancelar não muda nada.`))
-        r = W.aprovarReajusteEvento(H.db, o, k, px, H.nomeUsuario(H.userKey), null, { substituir: true });
+        r = aprovar({ substituir: true });
       if (!r.ok) return H.toast(esc(r.msg));
       H.salvar(); H.toast(`Reajuste aprovado: ${W.fmtBRL(r.calculo.valor)} na parcela seguinte.`); H.render();
     });

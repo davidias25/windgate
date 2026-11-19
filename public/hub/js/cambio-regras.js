@@ -100,15 +100,16 @@
   function numeroNaOp(db, l) {
     const m = /([1-8])\s*[ºªo°]\s*(recebimento|parcela)|parcela\s*([1-8])\b/i.exec(String((l && (l.descCliente || l.desc)) || ''));
     if (m) return +(m[1] || m[3]);
-    const ps = parcelasDoCliente(db, l.op);
+    const ps = parcelasDoCliente(db, l.op, l.aditivo);
     return ps.indexOf(l) + 1 || null;
   }
-  const parcelasDoCliente = (db, opId) => (db.fin || []).filter(l => l && l.op === opId && W.ehReceita(l) && !/reembolso do difal/i.test(l.desc || '')).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
+  /* Parcelas do contrato principal; com `ad`, as do aditivo (bloco próprio, numeração própria). */
+  const parcelasDoCliente = (db, opId, ad) => (db.fin || []).filter(l => l && l.op === opId && W.ehReceita(l) && !/reembolso do difal/i.test(l.desc || '') && (l.aditivo || '') === (ad || '')).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
   /** Valor do contrato da parcela, sem nenhum reajuste. */
   const valorContrato = l => (l.valorContrato != null ? +l.valorContrato : l.ajusteCambial ? +l.ajusteCambial.valorOriginal : +l.valor || 0);
   /** Onde o reajuste entra: a parcela indicada; já recebida, a próxima em aberto. */
-  function parcelaAlvo(db, opId, n) {
-    const ps = parcelasDoCliente(db, opId);
+  function parcelaAlvo(db, opId, n, ad) {
+    const ps = parcelasDoCliente(db, opId, ad);
     return ps.find(l => !W.realizado(l) && numeroNaOp(db, l) >= n) || null;
   }
   /** Recalcula a parcela com os reajustes guardados. */
@@ -360,7 +361,7 @@
     return iso(d);
   }
   const regraDaOp = o => (o && o.regraCambial && o.regraCambial.modelo === 'evento' ? normalizarRegra(o.regraCambial) : null);
-  const parcelaN = (db, opId, n) => parcelasDoCliente(db, opId).find(l => numeroNaOp(db, l) === n) || null;
+  const parcelaN = (db, opId, n, ad) => parcelasDoCliente(db, opId, ad).find(l => numeroNaOp(db, l) === n) || null;
   /**
    * Eventos cambiais da operação, com a situação de cada um:
    * aguardando-gatilho (parcela não recebida / DI não registrada) · aguardando-ptax · dentro-da-faixa · aguardando-samir · aprovado · recusado.
@@ -376,14 +377,14 @@
         if (!di) return Object.assign(out, { status: 'aguardando-gatilho', motivo: 'aguardando o registro da DI', estimativa: ptaxHoje ? calcularReajusteEvento(x, ev, ptaxHoje) : null });
         out.dataRef = ehDiaUtil(di) ? di : diaUtilAnterior(di); out.registroDI = di;
       } else {
-        const l = parcelaN(db, o.id, ev.parcelaGatilho);
+        const l = parcelaN(db, o.id, ev.parcelaGatilho, o._aditivo);
         if (!l || !W.realizado(l) || !l.liquidadoEm) return Object.assign(out, { status: 'aguardando-gatilho', motivo: `aguardando o crédito da ${ev.parcelaGatilho}ª parcela`, estimativa: ptaxHoje ? calcularReajusteEvento(x, ev, ptaxHoje) : null });
         out.dataCredito = W.soData(l.liquidadoEm); out.dataRef = diaUtilSeguinte(out.dataCredito);
       }
       if (reg && (reg.status === 'aprovado' || reg.status === 'recusado' || reg.status === 'dentro-da-faixa')) return Object.assign(out, { status: reg.status, ptax: reg.ptax, calculo: reg.calculo || null });
       const p = +px[out.dataRef];
       if (!(p > 0)) return Object.assign(out, { status: 'aguardando-ptax', motivo: `PTAX de ${out.dataRef} ainda não publicada` });
-      const calc = calcularReajusteEvento(x, ev, p), alvo = parcelaAlvo(db, o.id, ev.parcelaAlvo);
+      const calc = calcularReajusteEvento(x, ev, p), alvo = parcelaAlvo(db, o.id, ev.parcelaAlvo, o._aditivo);
       if (!calc) return Object.assign(out, { status: 'aguardando-gatilho', motivo: 'regra incompleta: informe a faixa' });
       // Reajuste gravado antes por outro caminho (correção antiga, lançamento manual): nunca somar em cima sem o Samir decidir.
       const outros = alvo ? (alvo.reajustes || []).filter(r => r && r.tipo !== 'evento') : [];
@@ -437,10 +438,51 @@
     o.regraCambial = Object.assign(x, { hist: ((o.regraCambial || {}).hist || []).concat([{ por: por || '', em: agora || new Date().toISOString() }]).slice(-30) });
     return { ok: true, mudou: true };
   }
-  /** Operações em andamento sem a regra de câmbio completa: a lista "completar regra de câmbio" do Samir. */
+  /** Operações em andamento sem a regra de câmbio completa: a lista "completar regra de câmbio" do Samir. Aditivos entram também. */
   function opsSemRegraCambial(db) {
-    return (db.ops || []).filter(o => o && o.id && W.emAndamento(o) && !W.ehMae(o) && (db.fin || []).some(l => l && l.op === o.id && W.ehReceita(l)))
-      .map(o => { const r = regraDaOp(o); return { o, faltas: r ? conferirRegra(r) : ['Regra de câmbio não cadastrada.'] }; }).filter(x => x.faltas.length);
+    const ativas = (db.ops || []).filter(o => o && o.id && W.emAndamento(o) && !W.ehMae(o));
+    return ativas.filter(o => (db.fin || []).some(l => l && l.op === o.id && W.ehReceita(l) && !l.aditivo))
+      .map(o => { const r = regraDaOp(o); return { o, faltas: r ? conferirRegra(r) : ['Regra de câmbio não cadastrada.'] }; })
+      .concat(ativas.flatMap(o => aditivosDaOp(o).map(a => { const r = regraDaOp(a); return { o, aditivo: a, faltas: r ? conferirRegra(r) : ['Regra de câmbio do aditivo não cadastrada.'] }; })))
+      .filter(x => x.faltas.length);
+  }
+
+  /* ---------- Aditivo dentro da operação (Parte 2.1) ----------
+     Mesmo cliente, mesmos contêineres: quantidade, preço, parcelas e regra de câmbio próprios. As parcelas do aditivo
+     são lançamentos da mesma operação marcados com `aditivo` (bloco separado no desembolso, numeração própria);
+     a cobertura continua olhando a operação inteira. */
+  const aditivosDaOp = o => (o && Array.isArray(o.aditivos) ? o.aditivos.filter(Boolean) : []);
+  /** A operação "vista" pelo aditivo: o mesmo motor de eventos, só com a regra e as parcelas dele. */
+  const vistaDoAditivo = (o, a) => ({ id: o.id, cliente: o.cliente, status: o.status, regraCambial: a.regraCambial, reajustesEvento: a.reajustesEvento || {}, _aditivo: a.id });
+  /** Roda uma função de evento no aditivo e guarda o que ela gravar (aprovação, recusa, dentro da faixa) no próprio aditivo. */
+  function noAditivo(o, adId, fn) {
+    const a = aditivosDaOp(o).find(x => x.id === adId); if (!a) return { ok: false, msg: 'Aditivo não encontrado.' };
+    const v = vistaDoAditivo(o, a), r = fn(v); a.reajustesEvento = v.reajustesEvento; return r;
+  }
+  function criarAditivo(db, o, dados, por, agora) {
+    const d = dados || {}, t = agora || new Date().toISOString(), hoje = t.slice(0, 10);
+    if (!o || !o.id) return { ok: false, msg: 'Operação não encontrada.' };
+    if (W.ehMae && W.ehMae(o)) return { ok: false, msg: 'Aditivo vai na operação do cliente, não no contêiner.' };
+    const ps = (d.parcelas || []).map(p => ({ valor: r2(p.valor), vencimento: String(p.vencimento || '').slice(0, 10) })).filter(p => p.valor > 0 || p.vencimento);
+    const e = [];
+    if (!(+d.quantidade > 0)) e.push('Informe a quantidade do aditivo.');
+    if (!ps.length) e.push('Informe ao menos uma parcela.');
+    ps.forEach((p, i) => { if (!(p.valor > 0)) e.push(`${i + 1}ª parcela sem valor.`); if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vencimento)) e.push(`${i + 1}ª parcela sem vencimento.`); });
+    const soma = r2(ps.reduce((a, p) => a + p.valor, 0)), preco = +d.preco > 0 ? r2(d.preco) : soma;
+    if (ps.length && Math.abs(soma - preco) > 0.01) e.push(`As parcelas somam ${soma.toFixed(2)} e o preço do aditivo é ${preco.toFixed(2)}.`);
+    if (e.length) return { ok: false, erros: e, msg: e[0] };
+    const lista = aditivosDaOp(o); let n = lista.length + 1; while (lista.some(a => a.id === 'AD' + n)) n++;
+    const id = 'AD' + n, rot = 'Aditivo ' + n;
+    const ref = (regraDaOp(o) || {}).referencia || referenciaDaCotacao(db, o);
+    const regra = Object.assign(d.regraCambial ? normalizarRegra(Object.assign({}, d.regraCambial, { modelo: 'evento' })) : regraDoPadrao(db, ref, d.quantidade), { hist: [{ por: por || '', em: t, acao: d.regraCambial ? 'cadastrada no aditivo' : 'copiada do padrão da casa' }] });
+    const a = { id, n, rotulo: rot, quantidade: +d.quantidade, preco, obs: String(d.obs || '').slice(0, 300), quoteId: d.quoteId || '', regraCambial: regra, reajustesEvento: {}, criadoEm: t, por: por || '' };
+    o.aditivos = lista.concat([a]);
+    const emp = ((db.fin || []).find(l => l && l.op === o.id && W.ehReceita(l)) || {}).empresa || 'WindGate';
+    const lancs = ps.map((p, i) => ({ _id: W.novoId(), data: hoje, vencimento: p.vencimento, op: o.id, tipo: 'Receita', categoria: '', fixo: false, empresa: emp, desc: `${rot} · ${i + 1}º recebimento do cliente`, descCliente: `${rot} · ${i + 1}ª parcela`,
+      valor: p.valor, status: 'Previsto', comp: '', nf: '', por: por || '', origem: `aditivo:${o.id}:${id}`, aditivo: id }));
+    db.fin = lancs.concat(db.fin || []);
+    o.alteracoes = (o.alteracoes || []).concat([{ em: t, por: por || '', acao: `${rot}: ${a.quantidade} un., ${preco.toFixed(2)} em ${ps.length} parcela(s)` }]);
+    return { ok: true, aditivo: a, lancamentos: lancs };
   }
 
   /* ---------- Padrão da casa em Configurações (Parte 2.1) ----------
@@ -529,6 +571,6 @@
     return dados;
   }
 
-  return { EVENTOS_PADRAO, PADRAO_CASA, apuracaoCambial, padraoDaCasa, conferirPadrao, salvarPadraoDaCasa, referenciaDaCotacao, regraDoPadrao, aplicarPadraoNaOp, textoRegra, GATILHOS_EVENTO, normalizarRegra, conferirRegra, calcularReajusteEvento, diaUtilSeguinte, regraDaOp, eventosDaOp, aprovarReajusteEvento, recusarReajusteEvento, registrarDentroDaFaixa, salvarRegraOp, opsSemRegraCambial,
+  return { EVENTOS_PADRAO, PADRAO_CASA, apuracaoCambial, aditivosDaOp, vistaDoAditivo, noAditivo, criarAditivo, padraoDaCasa, conferirPadrao, salvarPadraoDaCasa, referenciaDaCotacao, regraDoPadrao, aplicarPadraoNaOp, textoRegra, GATILHOS_EVENTO, normalizarRegra, conferirRegra, calcularReajusteEvento, diaUtilSeguinte, regraDaOp, eventosDaOp, aprovarReajusteEvento, recusarReajusteEvento, registrarDentroDaFaixa, salvarRegraOp, opsSemRegraCambial,
     SPREAD_PADRAO, QUANDO, normalizarClausula, conferirClausula, reajusteDaClausula, clausulaDaOp, spreadDe, remessasDaOp, numeroNaOp, parcelasDoCliente, valorContrato, parcelaAlvo, recomporParcela, aplicarReajusteCambio, previaReajuste, composicaoParcela, CENARIOS_CAMBIO, referenciaDaProposta, ajusteDaParcela, ehDiaUtil, diaUtilAnterior, datasDaParcela, ptaxQueVale, valoresPor010, simulacaoCambio, congelarCambio, tabelaCambio, textoCambio, numeroDaParcela, parcelasComCambio, calcularAjusteLancamento, confirmarAjusteCambial };
 });
