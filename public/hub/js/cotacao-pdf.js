@@ -100,18 +100,19 @@ const PROPOSTA_CUSTOS=[
   {k:'cPorto',     l:'Despesas portuárias e de nacionalização', v:R=>R.comp.portuarias, sub:'capatazia, Siscomex, AFRMM e despesas do processo'},
   {k:'cHonor',     l:'Honorários e despachante',         v:R=>R.comp.honorarios}
 ];
-/* DIFAL na proposta: não aparece. Triangular: está dentro do preço (a JeT recolhe). Contribuinte: ele recolhe o
-   dele, e o investimento sai sem esse valor, igual à soma das parcelas. Os blocos de DIFAL abaixo ficam desligados. */
+/* DIFAL na proposta. Triangular: não aparece, está dentro do preço cheio (a JeT recolhe). Direta: o cliente paga o
+   DIFAL à SEFAZ do destino em guia própria; aparece à parte, fora do investimento (que é igual à soma das parcelas). */
 function dadosDaProposta(){
   const triProposta=V('tipoOp')==='triangular'&&!!R.tri;
   /* Triangular (não contribuinte): o DIFAL está dentro do preço e quem recolhe é a JeT. A proposta mostra só o preço
-     cheio, tudo incluído, sem falar em DIFAL. Contribuinte: preço sem o DIFAL, que ele recolhe em guia própria. */
-  const difalV=0;
+     cheio, tudo incluído, sem falar em DIFAL. Direta: preço sem o DIFAL, que o cliente paga à SEFAZ (Samir, 23/11). */
+  const difalV=triProposta?0:Math.max(0,+(R.st||0));
   const totalWG=triProposta?(R.preco||0):(R.preco||0)-(+(R.st||0));
   const campo=k=>{ try{ return V(k); }catch(e){ return ''; } };
   const descontoV=parseFloat(String(campo('descontoProposta')||'').replace(',','.'))||0;
   const prazoTxt=String(campo('prazoProposta')||'').trim()||'90 a 100';
-  return {difalV,totalWG,triProposta,descontoV,prazoTxt};
+  const ufD=String(campo('ufDestino')||'').trim().toUpperCase(), sefaz=ufD?'SEFAZ-'+ufD:'SEFAZ do estado de destino';
+  return {difalV,totalWG,triProposta,descontoV,prazoTxt,sefaz};
 }
 /* Previsão de cada parcela: os mesmos dias do cronograma lançado no Financeiro. */
 function previsaoParcela(i){ const d=new Date(); d.setDate(d.getDate()+[5,35,95][i]); return d.toLocaleDateString('pt-BR'); }
@@ -194,7 +195,7 @@ async function gerarPropostaPDF(){
     const hj=new Date(); const mesAno=MESES[hj.getMonth()]+' · '+hj.getFullYear();
     const cliente=V('cliente')||'—', merc=V('mercadoria')||'mercadoria importada';
     const origemChina=/china|xangai|shanghai|ningbo|shantou|qingdao|tianjin/i.test(V('origem'));
-    const {difalV,totalWG,triProposta,descontoV,prazoTxt}=dadosDaProposta();
+    const {difalV,totalWG,triProposta,descontoV,prazoTxt,sefaz}=dadosDaProposta();
     const itens=propostaItens(totalWG+descontoV);
 
     /* ===== PÁGINA 1 ===== */
@@ -278,7 +279,7 @@ async function gerarPropostaPDF(){
       doc.text('+ ICMS-DIFAL · valor previsto',44,y+17);
       doc.setFontSize(12); doc.text(fmt(difalV),551,y+17,{align:'right'});
       doc.setFont('helvetica','normal'); doc.setFontSize(7.8);
-      const dtxt=doc.splitTextToSize((triProposta?'Não está incluído no investimento acima: é pago em guia à SEFAZ e reembolsado junto à 3ª parcela. ':'Não está incluído no investimento acima: é imposto do estado de destino, recolhido em guia própria à SEFAZ e não é receita da WindGate. ')+'O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.',505);
+      const dtxt=doc.splitTextToSize((triProposta?'Não está incluído no investimento acima: é pago em guia à SEFAZ e reembolsado junto à 3ª parcela. ':'Não está incluído no investimento acima: é pago pelo cliente diretamente à '+sefaz+', em guia própria, e não é receita da WindGate. ')+'O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.',505);
       doc.text(dtxt,44,y+29);
       y+=62;
       doc.setFillColor(...PDF_NAVY); doc.rect(36,y,523,26,'F');
@@ -445,7 +446,7 @@ async function gerarPropostaPDF(){
       doc.setFont('helvetica','bold'); doc.setFontSize(8.3); doc.setTextColor(120,95,20);
       doc.text('+ ICMS-DIFAL na chegada · '+fmt(difalV)+' (previsto)',44,yN+2);
       doc.setFont('helvetica','normal'); doc.setFontSize(7.3);
-      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado junto à '+(state.nChegada||3)+'ª parcela. Valor sujeito à alíquota da guia definitiva.':'Recolhido em guia à SEFAZ, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
+      doc.text(triProposta?'Pago em guia à SEFAZ e reembolsado junto à '+(state.nChegada||3)+'ª parcela. Valor sujeito à alíquota da guia definitiva.':'Pago pelo cliente à '+sefaz+' em guia própria, fora das parcelas acima. Valor sujeito à alíquota da guia definitiva.',44,yN+13);
       yN+=34;
     }
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_GRAY);
@@ -563,7 +564,7 @@ async function gerarPropostaPDF(){
 
 /* fallback: janela de impressão no mesmo padrão */
 function gerarPropostaPrint(){
-  const {difalV,totalWG,descontoV,triProposta}=dadosDaProposta();
+  const {difalV,totalWG,descontoV,triProposta,sefaz}=dadosDaProposta();
   const DP=contaPagamento(triProposta);
   const itens=propostaItens(totalWG+descontoV); const hj=new Date(); const B=propostaBlocos();
   const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -581,7 +582,7 @@ function gerarPropostaPrint(){
       ${descontoV>0?`<div style="display:flex;justify-content:space-between;padding:8px;font-size:11px;font-weight:700;color:#1B2A5B"><span>Desconto comercial</span><span style="color:#B5106B">− ${fmt(descontoV)}</span></div>`:''}<div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:12px 16px;margin-top:10px;font-weight:800"><span style="font-size:11px">INVESTIMENTO TOTAL</span><span style="font-size:16px">${fmt(totalWG)}</span></div>
       ${difalV>0?`<div style="background:#FCF7E3;color:#785F14;padding:10px 14px;margin-top:8px;font-size:10px;line-height:1.6">
         <div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px"><span>+ ICMS-DIFAL · valor previsto</span><span>${fmt(difalV)}</span></div>
-        Não está incluído no investimento acima: é imposto do estado de destino, recolhido em guia própria à SEFAZ e não é receita da WindGate. O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.</div>
+        Não está incluído no investimento acima: é pago pelo cliente diretamente à ${esc(sefaz)}, em guia própria, e não é receita da WindGate. O valor é previsto pela alíquota vigente e pode variar até a emissão da guia.</div>
       <div style="background:#1B2A5B;color:#fff;display:flex;justify-content:space-between;padding:10px 16px;margin-top:6px;font-weight:800"><span style="font-size:10px">TOTAL ESTIMADO DA OPERAÇÃO</span><span style="font-size:14px">${fmt(R.preco||0)}</span></div>`:''}`:''}
       ${(B.fotos&&(state.fotos||[]).length)?`<div style="background:#1B2A5B;color:#fff;font-weight:800;font-size:11px;padding:5px 10px;margin:14px 0 8px">FOTOS DO PRODUTO</div>
       <div style="display:grid;grid-template-columns:repeat(${(state.fotos||[]).length<=2?1:2},1fr);gap:10px">${(state.fotos||[]).map(f=>`<img src="${esc(f.url)}" style="width:100%;border:1px solid #DDE4EA;object-fit:contain;background:#F5F7FA">`).join('')}</div>`:''}

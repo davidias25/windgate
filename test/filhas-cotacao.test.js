@@ -180,6 +180,11 @@ console.log('\nItem 10: proposta e contrato por cliente:');
   ok(W.calcularPorCliente(q).clientes[0].q.items.length === 1, 'o outro cliente não aparece');
   const dc = W.dadosDoContrato(d, 'OP300.2');
   ok(dc.estrutura === 'jt' && dc.itens.length === 1 && perto(dc.parcelas.reduce((a, p) => a + p.valor, 0), res.investimento, 0.05) && perto(dc.difalNaTerceira, res.difal), 'contrato da filha: J&T, itens dela, parcelas sem o DIFAL e o DIFAL em linha própria (igual à cotação de um cliente)');
+  ok(!res.pagaCliente && res.difal > 0, 'triangular: o DIFAL é da JeT (reembolso no contrato), não é pago pelo cliente');
+  const qd = cotacao([cliente('c1', 'Direto', 'direta', { aliqST: '16' }), cliente('c2', 'Empresa Azul', 'triangular')]), cd = W.calcularPorCliente(qd).clientes[0], rd = W.resumoProposta(cd.q, cd.R);
+  ok(cd.R.st > 0 && rd.pagaCliente && perto(rd.difal, cd.R.st) && rd.sefaz === 'SEFAZ-CE' && perto(rd.investimento, cd.R.preco - cd.R.st), 'direta: DIFAL à parte, pago pelo cliente à SEFAZ-CE; investimento sem ele');
+  const pg = require('../src/services/proposta-link.service.js').pagina(rd, 'tok');
+  ok(/pago pelo cliente diretamente à SEFAZ-CE/.test(pg) && !/reembolsado/.test(pg), 'página do link da proposta: "pago pelo cliente diretamente à SEFAZ-CE"');
   const qs = cotacao([cliente('c1', 'U', 'direta', { aliqST: '0' }), cliente('c2', 'V', 'direta', { aliqST: '0' })]);
   ok(W.dadosDoContrato(banco(qs), 'x') === null, 'operação inexistente não gera dados');
 }

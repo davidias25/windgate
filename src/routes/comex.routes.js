@@ -224,7 +224,7 @@ module.exports = function registrar(app, ctx) {
     let p = W.resumoProposta(c.q, c.R, reg && reg.criadoEm);
     /* Triangular (não contribuinte): o cliente vê só o preço cheio, tudo incluído, sem DIFAL (está dentro do preço e a
        JeT recolhe). Os preços dos itens fecham com esse total. */
-    if (p.difal > 0) p = Object.assign({}, p, { itens: W.propostaItens(c.q, c.R, p.total + (p.desconto || 0)).map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })), investimento: p.total, difal: 0 });
+    if (p.difal > 0 && !p.pagaCliente) p = Object.assign({}, p, { itens: W.propostaItens(c.q, c.R, p.total + (p.desconto || 0)).map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })), investimento: p.total, difal: 0 });
     p.cambio = W.textoCambio(W.tabelaCambio(c.q));
     res.send(propostaLink.pagina(p, req.params.token));
   });

@@ -165,7 +165,10 @@ const CHAVES_TRI = ['P', 'nfSF', 'nfJT', 'difal', 'icmsES', 'custoGrupo', 'dEff'
     const it = (d, q, u, pf) => Object.assign(C.ITEM_PADRAO(), { d, q, u, p: 10, ii: 14, ipi: 5, pf });
     const nova = (extra, itens) => { const q = { fields: Object.assign({}, C.PADRAO, { txDesp: '5.5', txFrete: '5.61', cliente: 'Cliente', freteUSD: '3000', aliqST: '16' }, extra), items: itens || [it('Empilhadeira', 4, 5000)], exps: [] }; Object.assign(q.fields, C.desemSugerir(q, C.calcular(q))); return q; };
     const dir = await gerar(nova({ tipoOp: 'direta' }));
-    ok(dir.R.st > 0 && !dir.txt.includes('ICMS-DIFAL'), 'cliente contribuinte: sem o bloco de DIFAL, mesmo com valor');
+    const fmtB = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    ok(dir.R.st > 0 && dir.txt.includes('ICMS-DIFAL') && dir.txt.includes(fmtB(dir.R.st)) && /pago pelo cliente diretamente à SEFAZ-CE/.test(dir.txt) && dir.txt.includes(fmtB(dir.R.preco)),
+      'operação direta: o DIFAL aparece à parte, pago pelo cliente à SEFAZ-CE, fora do investimento, com o total estimado (Samir, 23/11)');
+    ok(dir.txt.includes(fmtB(dir.R.preco - dir.R.st)), 'o investimento continua sem o DIFAL (igual à soma das parcelas)');
     const zero = await gerar(nova({ tipoOp: 'triangular', ufDestino: 'ES', icmsDest: '17' }));
     const tri = await gerar(nova({ tipoOp: 'triangular' }));
     ok(!tri.txt.includes('DIFAL') && tri.R.tri.difal > 0, 'cliente não contribuinte: sem falar em DIFAL (está dentro do preço e a JeT recolhe)');

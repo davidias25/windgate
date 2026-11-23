@@ -1421,15 +1421,16 @@ function triCalcular(e){
   }
   /**
    * Tudo o que o cliente vê na página da proposta. Só valores ao cliente: é a lista de campos que sai daqui,
-   * não a cotação. Mesma regra do PDF: DIFAL só para não contribuinte; o contribuinte recolhe o dele.
+   * não a cotação. Triangular: o DIFAL é da JeT (o contrato o reembolsa na 3ª parcela; a página do link mostra só o
+   * preço cheio). Direta: o cliente paga o DIFAL à SEFAZ do destino (pagaCliente) e ele aparece à parte, fora do investimento.
    */
   function resumoProposta(q, R, dataBase) {
-    const f = camposDe(q), tri = V(f, 'tipoOp') === 'triangular' && !!R.tri, difal = tri ? +(R.tri.difal || 0) : 0;
-    const investimento = (R.preco || 0) - (tri ? difal : +(R.st || 0));
+    const f = camposDe(q), tri = V(f, 'tipoOp') === 'triangular' && !!R.tri, difal = tri ? +(R.tri.difal || 0) : Math.max(0, +(R.st || 0));
+    const investimento = (R.preco || 0) - difal, uf = String(f.ufDestino || '').trim().toUpperCase();
     const desconto = parseFloat(String(f.descontoProposta || '').replace(',', '.')) || 0;
     const base = String(dataBase || W.hojeISO()).slice(0, 10);
     return { cliente: V(f, 'cliente'), mercadoria: V(f, 'mercadoria') || 'mercadoria importada', incoterm: V(f, 'incoterm') || 'da operação', destino: V(f, 'destino'), validade: V(f, 'validade') || '7', prazo: String(f.prazoProposta || '').trim() || '90 a 100',
-      itens: propostaItens(q, R, investimento + desconto).map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })), desconto, investimento, difal, total: investimento + difal,
+      itens: propostaItens(q, R, investimento + desconto).map(i => ({ d: i.d, q: i.q, unit: i.unit, total: i.total })), desconto, investimento, difal, pagaCliente: !tri && difal > 0, sefaz: uf ? 'SEFAZ-' + uf : 'SEFAZ do estado de destino', total: investimento + difal,
       parcelas: (() => { const ps = parcelasDe(q), venc = vencimentosDasParcelas(ps, base), propria = temListaPropria(q), iCheg = Math.max(0, ps.findIndex(p => p.vinculo === 'chegada')), soma = ps.reduce((a, p) => a + p.valor, 0);
         return ps.map((p, i) => Object.assign({ n: i + 1, valor: p.valor, previsao: venc[i] }, propria ? { nome: p.nome, gatilho: p.gatilho, prazo: prazoDaParcela(p), pct: soma > 0 ? p.valor / soma * 100 : 0, reajuste: p.reajuste, reajusteObs: p.reajusteObs, propria: true } : {}, i === iCheg ? { chegada: true } : {})); })() };
   }
