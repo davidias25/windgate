@@ -8543,8 +8543,9 @@ const triNum = v => (typeof v === 'number' && isFinite(v)) ? v : (parseFloat(v) 
    da NF de saída e a operação passa a fechar alguns centavos abaixo do custo. */
 const triCent = v => Math.round((+v || 0) * 100) / 100;
 
-/* Alíquota interna do destino. Com Convênio 52/91 a carga cai para 8,8%; sem
-   UF cadastrada não há palpite possível — quem decide é a TRAVA 2. */
+/* Alíquota interna do destino. Com Convênio 52/91 a carga cai para 8,8% (parâmetro
+   editável: cargaConv5291); sem UF cadastrada não há palpite possível — quem
+   decide é a TRAVA 2. O DIFAL do 52/91 NÃO é "carga − 4%": ver bloco 5. */
 function triInternaDestino(uf, tabela, conv5291, cargaConv){
   if (conv5291) return triNum(cargaConv != null ? cargaConv : TRI_PADRAO.cargaConv5291);
   const v = tabela ? tabela[uf] : undefined;
@@ -8726,13 +8727,27 @@ function triCalcular(e){
   const internaDestino = internaTabela === null ? null
     : ((convGlobal && !itensConv) ? cargaConv : internaTabela);
 
-  let difalPct = 0;
+  /* 52/91 no destino (SEFAZ-CE, conferido na OP20: R$ 7.795,40 sobre NF de R$ 110.730,10): a base é reduzida
+     na proporção carga ÷ interna e se aplica a diferença CHEIA (interna − interestadual):
+       DIFAL% = (carga 52/91 ÷ interna da UF) × (interna − 4%)   → CE: (8,8 ÷ 20) × 16% = 7,04%
+     A conta antiga (carga − 4% = 4,8%) fica só em opcoes.difal5291Legado, para recalcular cotações aprovadas.
+     DIFAL manual (difalManualPct > 0) vale por cima do automático. */
+  let difalPct = 0, difalFormula = '';
+  const manualPct = triNum(e.difalManualPct);
   if (internaTabela !== null) {
     const cheia = Math.max(triPct(internaTabela) - icmsInterPct, 0);
-    const reduzida = Math.max(triPct(cargaConv) - icmsInterPct, 0);
+    const reducao = internaTabela > 0 ? Math.min(cargaConv / internaTabela, 1) : 0;
+    const reduzida = op.difal5291Legado ? Math.max(triPct(cargaConv) - icmsInterPct, 0) : reducao * cheia;
     difalPct = itensConv
       ? itens.reduce((a, it) => a + it.share * (it.conv5291 ? reduzida : cheia), 0)
       : (convGlobal ? reduzida : cheia);
+    const pc = v => triCent(v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+    const n1 = v => (+v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+    const todos52 = convGlobal || (itensConv && itens.every(it => it.conv5291));
+    difalFormula = !conv ? `DIFAL ${e.ufDestino} · ${pc(difalPct)} (${n1(internaTabela)}% − ${n1(icmsInterPct * 100)}%)`
+      : todos52 ? `DIFAL 52/91 ${e.ufDestino} · ${pc(difalPct)} ((${n1(cargaConv)} ÷ ${n1(internaTabela)}) × ${n1(internaTabela - icmsInterPct * 100)}%)`
+      : `DIFAL ${e.ufDestino} ponderado · ${pc(difalPct)} (52/91 ${pc(reduzida)} e cheio ${pc(cheia)}, pelo FOB)`;
+    if (manualPct > 0) { difalPct = triPct(manualPct); difalFormula = `DIFAL manual · ${pc(difalPct)} (automático seria ${difalFormula.split(' · ')[1]})`; }
   }
   // Interna efetiva reconstituída da ponderação — é ela que a base dupla usa.
   const internaPct = difalPct + icmsInterPct;
@@ -8772,8 +8787,7 @@ function triCalcular(e){
   reg('5. DIFAL', `Alíquota interna ${e.ufDestino || '?'}`, internaDestino,
       conv ? 'carga reduzida do Convênio 52/91' : 'tabela por UF',
       conv ? TRI_FONTES.conv5291 : TRI_FONTES.icmsInterno);
-  reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100),
-      `${triCent(internaPct*100)}% interna − ${triCent(icmsInterPct*100)}% interestadual`, TRI_FONTES.difal);
+  reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100), difalFormula || 'sem DIFAL', TRI_FONTES.difal);
   reg('5. DIFAL', 'Base do DIFAL', baseDifal,
       op.difalBaseDupla ? '(NF JeT→cliente − ICMS destacado) ÷ (1 − interna) — base dupla, Conv. 236/2021' : 'NF da JeT ao cliente — base simples',
       TRI_FONTES.difal);
@@ -8863,7 +8877,7 @@ function triCalcular(e){
     bloco2: { nfEntrada },
     bloco3: { pisoSaida, nfSaida, icmsDestacado, markup },
     bloco4: { baseSaida, PISsai, COFsai, IPIsai, creditos, resultante, creditoAcumulado },
-    bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, baseDifal, DIFAL, FECOP,
+    bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, difalFormula, cargaConv5291: cargaConv, difalManual: manualPct > 0, baseDifal, DIFAL, FECOP,
             markupJet, nfJetCliente, icmsJetLiquido,
               clienteContribuinte: contribuinte, difalNoCusto, baseDupla: !!op.difalBaseDupla },
     bloco6: { parcelas: parcelasCusto, custo, freteTerrestre },

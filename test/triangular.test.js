@@ -133,7 +133,7 @@ secao('DIFAL não é alíquota fixa');
 
   const conv = tri(diagonal({ conv5291: true }));
   assert(conv.bloco5.internaDestino === 8.8, 'Convênio 52/91: carga interna 8,8%');
-  perto(conv.bloco5.difalPct, 4.8, '★ DIFAL com Convênio 52/91 = 8,8 − 4 = 4,8%', 1e-9);
+  perto(conv.bloco5.difalPct, 7.04, '★ DIFAL com Convênio 52/91 no CE = (8,8 ÷ 20) × (20 − 4) = 7,04% (SEFAZ-CE, OP20: R$ 7.795,40 sobre R$ 110.730,10)', 1e-9);
   assert(conv.alertas.some(a => a.codigo === 'CONV_5291'), 'e avisa para validar a NCM contra o Anexo I');
 }
 

@@ -34,8 +34,9 @@ function gerada(i) {
 /* Tudo o que sai da cotação e vai para a tela, a proposta, o desembolso e o custeio. */
 const CHAVES = ['custoReal', 'preco', 'st', 'margem', 'fob', 'compra', 'impostos', 'despesas', 'resultante', 'nfSaida', 'chTot', 'margemPctCampo', 'margemBRLCampo', '__ii', '__ipi', '__pis', '__cof', '__icms'];
 const n6 = v => (v == null ? null : +(+v).toFixed(6));
-function resultado(q) {
-  const R = C.calcular(q), out = {};
+/* opcoes: { difal5291Legado: true } refaz a conta do DIFAL 52/91 de antes de 24/11 (a das fotos). */
+function resultado(q, opcoes) {
+  const R = C.calcular(q, opcoes), out = {};
   CHAVES.forEach(k => { out[k] = n6(R[k]); });
   if (R.tri) { out.triCusto = n6(R.tri.custoGrupo); out.triNfSF = n6(R.tri.nfSF); out.triNfJT = n6(R.tri.nfJT); out.triDifal = n6(R.tri.difal); }
   const d = C.desemOuts(q, R); out.o1 = n6(d.o1); out.o2 = n6(d.o2); out.o3 = n6(d.o3);
@@ -62,13 +63,20 @@ if (process.argv.includes('--gravar')) {
 const iguais = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 console.log('\nRegressão das cotações:');
 const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
-const dif = golden.filter(([id, r], i) => !iguais(resultado(geradas[i]), r)).map(x => x[0]);
-ok(golden.length === 200 && !dif.length, '200 cotações geradas (direta e triangular): nenhum número mudou' + (dif.length ? ' — mudou: ' + dif.slice(0, 5).join() : ''));
+/* DIFAL do 52/91 corrigido em 24/11 ((carga ÷ interna) × (interna − 4%), SEFAZ-CE): com a conta antiga as fotos
+   batem centavo a centavo; com a nova, só mudam as triangulares que têm item 52/91 e o que depende do DIFAL. */
+const LEG = { difal5291Legado: true };
+const tem5291 = q => q.fields.tipoOp === 'triangular' && (q.items || []).some(it => it && it.c5291);
+const dif = golden.filter(([id, r], i) => !iguais(resultado(geradas[i], LEG), r)).map(x => x[0]);
+ok(golden.length === 200 && !dif.length, '200 cotações geradas (direta e triangular): com a conta antiga do 52/91, nenhum número mudou' + (dif.length ? ' — mudou: ' + dif.slice(0, 5).join() : ''));
+const mudaram = golden.filter(([id, r], i) => !iguais(resultado(geradas[i]), r)).map(x => x[0]), esperadas = geradas.filter(tem5291).map(q => q.id);
+ok(mudaram.length > 0 && mudaram.every(id => esperadas.includes(id)), `com a conta nova, só mudam triangulares com 52/91 (${mudaram.length} de ${esperadas.length})`);
+ok(golden.every(([id, r], i) => tem5291(geradas[i]) || iguais(resultado(geradas[i]), r)), 'direta e triangular sem 52/91: nenhum número mudou');
 
 if (fs.existsSync(FOTO)) {
   const foto = JSON.parse(fs.readFileSync(FOTO, 'utf8')), reais = cotacoesReais();
   const chaves = Object.keys(foto).filter(k => reais[k]);
-  const mudou = chaves.filter(k => !iguais(resultado(reais[k]), foto[k]));
+  const mudou = chaves.filter(k => !iguais(resultado(reais[k], LEG), foto[k]));
   ok(chaves.length > 0 && !mudou.length, `${chaves.length} cotações reais do backup local: nenhum número mudou` + (mudou.length ? ' — mudou: ' + mudou.length : ''));
   // Margem do Custeio igual à do motor, nas cotações reais do backup local (que não vão para o repositório).
   const CX = require('../public/hub/js/comex.js'), MOT = require('../public/hub/js/cotacao-regras.js');

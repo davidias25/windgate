@@ -734,6 +734,11 @@ const gestorTarefas = req => { const k = req.usuario && req.usuario.k; return k 
 async function rodarTarefas(forcar) {
   await bancoPronto;
   if (!memoryDB) throw new Error('Banco central indisponível.');
+  /* DIFAL 52/91 corrigido em 24/11: cotação aprovada mantém o preço e só a margem é recalculada, uma vez (q.ajuste5291). */
+  try {
+    const aj = require('../public/hub/js/cotacao-regras.js').recalcularAprovadas5291(memoryDB, 'sistema', new Date().toISOString());
+    if (aj.length) { await dbStore.salvar(memoryDB, DB_FILE_PATH); console.log(`🧮 DIFAL 52/91: margem recalculada em ${aj.length} cotação(ões) aprovada(s), preço mantido: ${aj.map(x => x.id).join(', ')}`); }
+  } catch (e) { console.warn('⚠️ Recalcular margem 52/91:', e.message); }
   const r = tarefasAuto.rodadaDiaria(memoryDB, new Date().toISOString(), forcar);
   if (r.iniciou || r.rodou) {
     await dbStore.salvar(memoryDB, DB_FILE_PATH);

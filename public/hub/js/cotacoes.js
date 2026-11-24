@@ -127,7 +127,9 @@
           ${inp('txFrete', 'Taxa USD: frete')}${inp('txDesp', 'Taxa USD: despesas/FOB')}${inp('pctInv', '% Invoice (base impostos)')}${inp('icmsEnt', 'ICMS entrada AL (%)')}
           ${inp('icmsDest', 'ICMS destacado saída (%)')}${inp('pisS', 'PIS saída (%)')}${inp('cofS', 'COFINS saída (%)')}${inp('ipiS', 'IPI saída (%)', { titulo: 'IPI destacado na nota de saída: entra por fora, sobre o valor da NF' })}
           ${inp('mkp', 'Mark-up NF (%)')}${inp('mkSF', 'Mark-up SF → JeT (R$)', { hidden: !tri })}${inp('mkJT', 'Mark-up JeT → cliente (R$)', { hidden: !tri })}
-          ${inp('outrasAdu', 'Outras desp. aduaneiras (R$)', { titulo: 'Armazenagem, scanner, THC e demais despesas aduaneiras: entram na base do ICMS de importação' })}${multi ? '' : inp('aliqST', 'Alíq. efetiva DIFAL (%)')}
+          ${inp('outrasAdu', 'Outras desp. aduaneiras (R$)', { titulo: 'Armazenagem, scanner, THC e demais despesas aduaneiras: entram na base do ICMS de importação' })}${multi ? '' : inp('aliqST', 'Alíq. efetiva DIFAL (%)', { hidden: tri })}${(() => { const comTri = tri || (multi && (ed.clientes || []).some(c => c && c.tipoOperacao === 'triangular'));
+            return inp('cargaConv', 'Carga 52/91 no destino (%)', { hidden: !comTri, titulo: 'Carga reduzida do Convênio 52/91 (8,8% padrão). O DIFAL do item 52/91 = (carga ÷ interna da UF) × (interna − 4%). Ex.: CE (8,8 ÷ 20) × 16 = 7,04%' })
+              + inp('difalManual', 'DIFAL manual (%) · vazio = automático', { hidden: !comTri, titulo: 'Preenchido, vale por cima do cálculo automático do DIFAL da triangular' }); })()}
           <p class="note w4" id="cnotadifal"></p>
           <p class="note w4" id="cavisoinv" style="color:var(--warn)"></p></div></div>
         <div class="box"><div class="box-h"><h2>Itens da invoice</h2>${bloq ? '' : '<button class="btn sm" id="citem">+ Item</button>'}</div>
@@ -234,7 +236,7 @@
       ${linha('1 · Compra (FOB + frete + seguro)', R.compra)}${linha('2 · Impostos de nacionalização', R.impostos)}${linha('3 · Despesas de nacionalização', R.despesas)}
       ${linha('Resultante saída (impostos − créditos)', R.resultante)}${linha(tri ? 'Custo SF (nacionalização AL)' : 'Custo real WindGate', R.custoReal, true)}
       ${tri ? `${linha('NF de ENTRADA (SF nacionaliza)', R.tri.nfEntrada)}${linha('Piso da NF de saída', R.tri.piso)}${linha('NF de saída SF → JeT (piso + mark-up)', R.tri.nfSF)}${linha('NF da JeT ao cliente (base do DIFAL)', R.tri.nfJT)}
-        ${linha('DIFAL (JeT → cliente)' + (t.bloco5.internaDestino != null ? ' · ' + t.bloco5.difalPct.toFixed(2).replace('.', ',') + '%' : ' · sem DIFAL'), R.tri.difal)}${linha('ICMS líquido da perna ES (s/ mark-up da JeT)', R.tri.icmsES)}
+        ${linha(esc(t.bloco5.internaDestino != null && t.bloco5.difalFormula ? t.bloco5.difalFormula : 'DIFAL (JeT → cliente) · sem DIFAL'), R.tri.difal)}${linha('ICMS líquido da perna ES (s/ mark-up da JeT)', R.tri.icmsES)}
         ${linha('Resultante de impostos (saída − créditos)', R.tri.resultante)}${linha('Custo total do grupo (SF + JeT)', R.tri.custoGrupo, true)}`
         : linha(W.ICMS_INTERNO[F('ufDestino')] != null ? `ICMS DIFAL (cliente ${esc(F('ufDestino'))})` : 'ICMS DIFAL', R.st)}</div>
       ${t && (t.travas.length || t.alertas.length) ? `<div style="margin-top:8px">${t.travas.map(x => `<p class="note" style="color:var(--crit);font-weight:700">⛔ ${esc(x.msg)}</p>`).join('')}${t.alertas.map(x => `<p class="note" style="color:${x.gravidade === 'alta' ? 'var(--crit)' : 'var(--warn)'}">⚠ ${esc(x.msg)}</p>`).join('')}</div>` : ''}`;
@@ -242,7 +244,7 @@
       <div class="row"><span class="note">Margem % s/ preço</span><span class="num">${pct(R.margemSobrePreco)}</span></div>
       ${R.warnMargem ? '<div class="banner" style="margin-top:6px">Margem abaixo de 10%: confirmar com o Samir se é estratégico.</div>' : ''}`;
     const uf = F('ufDestino'), interna = W.ICMS_INTERNO[uf];
-    el.querySelector('#cnotadifal').innerHTML = (interna == null ? 'Destino <b>sem DIFAL</b>: nada é calculado de ICMS de destino.' : `DIFAL ${esc(uf)} = ${interna.toLocaleString('pt-BR')}% interna − ${(parseFloat(F('icmsDest')) || 0).toLocaleString('pt-BR')}% destacado. Não inclui FCP/FECP nem produto com alíquota própria.`)
+    el.querySelector('#cnotadifal').innerHTML = (interna == null ? 'Destino <b>sem DIFAL</b>: nada é calculado de ICMS de destino.' : t && t.bloco5.difalFormula ? `<b>${esc(t.bloco5.difalFormula)}</b>. Item 52/91: (carga ÷ interna) × (interna − 4%). Não inclui FCP/FECP.` : `DIFAL ${esc(uf)} = ${interna.toLocaleString('pt-BR')}% interna − ${(parseFloat(F('icmsDest')) || 0).toLocaleString('pt-BR')}% destacado. Não inclui FCP/FECP nem produto com alíquota própria.`)
       + ' PIS/COFINS de <b>saída</b>; os de importação vêm da NCM de cada item. Ajuste só com validação da contadora.';
     el.querySelector('#cavisoinv').innerHTML = (parseFloat(F('pctInv')) || 0) < 100 ? '⚠ <b>% Invoice</b> abaixo de 100% calcula os tributos sobre menos que o valor da invoice. O Simulador Siscomex usa sempre o valor aduaneiro integral.' : '';
     el.querySelector('#cncmcurto').textContent = R.ncmCurto ? '⚠ Existe NCM com menos de 8 dígitos: confira antes de aprovar.' : '';

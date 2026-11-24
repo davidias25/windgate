@@ -285,5 +285,15 @@ console.log('\nConferência 18/11: filha que já existe com lançamentos (OP26.2
   ok(de2.ok && de(d, 'OP300.1', 'Receita').length === rec.length, 'aprovar de novo: só sincroniza, sem perguntar e sem duplicar');
 }
 
+console.log('\nDIFAL 52/91 (24/11): compartilhada aprovada mantém o preço de cada cliente:');
+{
+  const q = cotacao(); q.status = 'ok'; q.items.forEach(i => { i.c5291 = true; });
+  const leg = W.calcularPorCliente(q, { difal5291Legado: true }).clientes, c1Antes = JSON.stringify(q.clientes[0]);
+  const aj = W.recalcularMargem5291(q, 'sistema', T), agora = W.calcularPorCliente(q).clientes;
+  ok(aj && aj.clientes.length === 1 && aj.clientes[0].cliente === 'Empresa Azul', 'só o cliente triangular com 52/91 é recalculado');
+  ok(perto(agora[1].R.preco, leg[1].R.preco, 0.02) && agora[1].R.margem < leg[1].R.margem, 'Empresa Azul: preço igual, margem menor');
+  ok(JSON.stringify(q.clientes[0]) === c1Antes && perto(agora[0].R.preco, leg[0].R.preco), 'o cliente direto não muda');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
 process.exit(falhou ? 1 : 0);

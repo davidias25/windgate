@@ -40,7 +40,9 @@
   const PADRAO = { tipoOp: 'direta', servFora: '0', fabSinal: '30', desR1: '', desR2: '', desR3: '', opNum: '', cliente: '', ufDestino: 'CE', mercadoria: '', origem: '', destino: 'Fortaleza/CE',
     incoterm: 'FOB', modalCntr: 'FCL', qtdCntr: '1', prazo: '60', validade: '7', validadeFrete: '', txFrete: '5.3', txDesp: '5.1', pctInv: '70', icmsEnt: '1.6', icmsDest: '4', pisS: '1.65',
     cofS: '7.6', ipiS: '0', mkp: '1', mkSF: '2000', mkJT: '1000', outrasAdu: '0', aliqST: '16', freteUSD: '0', seguro: '0', capatazia: '0', transporte: '0',
-    siscomex: '416.46', afrmm: '0', honorarios: '1630', margemPct: '25', margemBRL: '0' };
+    siscomex: '416.46', afrmm: '0', honorarios: '1630', margemPct: '25', margemBRL: '0',
+    /* Triangular: carga do Convênio 52/91 no destino (editável: o CE pode usar outra redução) e DIFAL manual (vazio = automático). */
+    cargaConv: '8.8', difalManual: '' };
   /* Cotação salva antes de um campo existir abre com o valor que o sistema atual
      usa nesse caso (loadQuote) — nunca herda o da cotação anterior. */
   const AUSENTES = { ipiS: '0', modalCntr: 'FCL', mkSF: '2000', mkJT: '1000', outrasAdu: '0' };
@@ -109,8 +111,9 @@ const triNum = v => (typeof v === 'number' && isFinite(v)) ? v : (parseFloat(v) 
    da NF de saída e a operação passa a fechar alguns centavos abaixo do custo. */
 const triCent = v => Math.round((+v || 0) * 100) / 100;
 
-/* Alíquota interna do destino. Com Convênio 52/91 a carga cai para 8,8%; sem
-   UF cadastrada não há palpite possível — quem decide é a TRAVA 2. */
+/* Alíquota interna do destino. Com Convênio 52/91 a carga cai para 8,8% (parâmetro
+   editável: cargaConv5291); sem UF cadastrada não há palpite possível — quem
+   decide é a TRAVA 2. O DIFAL do 52/91 NÃO é "carga − 4%": ver bloco 5. */
 function triInternaDestino(uf, tabela, conv5291, cargaConv){
   if (conv5291) return triNum(cargaConv != null ? cargaConv : TRI_PADRAO.cargaConv5291);
   const v = tabela ? tabela[uf] : undefined;
@@ -292,13 +295,27 @@ function triCalcular(e){
   const internaDestino = internaTabela === null ? null
     : ((convGlobal && !itensConv) ? cargaConv : internaTabela);
 
-  let difalPct = 0;
+  /* 52/91 no destino (SEFAZ-CE, conferido na OP20: R$ 7.795,40 sobre NF de R$ 110.730,10): a base é reduzida
+     na proporção carga ÷ interna e se aplica a diferença CHEIA (interna − interestadual):
+       DIFAL% = (carga 52/91 ÷ interna da UF) × (interna − 4%)   → CE: (8,8 ÷ 20) × 16% = 7,04%
+     A conta antiga (carga − 4% = 4,8%) fica só em opcoes.difal5291Legado, para recalcular cotações aprovadas.
+     DIFAL manual (difalManualPct > 0) vale por cima do automático. */
+  let difalPct = 0, difalFormula = '';
+  const manualPct = triNum(e.difalManualPct);
   if (internaTabela !== null) {
     const cheia = Math.max(triPct(internaTabela) - icmsInterPct, 0);
-    const reduzida = Math.max(triPct(cargaConv) - icmsInterPct, 0);
+    const reducao = internaTabela > 0 ? Math.min(cargaConv / internaTabela, 1) : 0;
+    const reduzida = op.difal5291Legado ? Math.max(triPct(cargaConv) - icmsInterPct, 0) : reducao * cheia;
     difalPct = itensConv
       ? itens.reduce((a, it) => a + it.share * (it.conv5291 ? reduzida : cheia), 0)
       : (convGlobal ? reduzida : cheia);
+    const pc = v => triCent(v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+    const n1 = v => (+v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+    const todos52 = convGlobal || (itensConv && itens.every(it => it.conv5291));
+    difalFormula = !conv ? `DIFAL ${e.ufDestino} · ${pc(difalPct)} (${n1(internaTabela)}% − ${n1(icmsInterPct * 100)}%)`
+      : todos52 ? `DIFAL 52/91 ${e.ufDestino} · ${pc(difalPct)} ((${n1(cargaConv)} ÷ ${n1(internaTabela)}) × ${n1(internaTabela - icmsInterPct * 100)}%)`
+      : `DIFAL ${e.ufDestino} ponderado · ${pc(difalPct)} (52/91 ${pc(reduzida)} e cheio ${pc(cheia)}, pelo FOB)`;
+    if (manualPct > 0) { difalPct = triPct(manualPct); difalFormula = `DIFAL manual · ${pc(difalPct)} (automático seria ${difalFormula.split(' · ')[1]})`; }
   }
   // Interna efetiva reconstituída da ponderação — é ela que a base dupla usa.
   const internaPct = difalPct + icmsInterPct;
@@ -338,8 +355,7 @@ function triCalcular(e){
   reg('5. DIFAL', `Alíquota interna ${e.ufDestino || '?'}`, internaDestino,
       conv ? 'carga reduzida do Convênio 52/91' : 'tabela por UF',
       conv ? TRI_FONTES.conv5291 : TRI_FONTES.icmsInterno);
-  reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100),
-      `${triCent(internaPct*100)}% interna − ${triCent(icmsInterPct*100)}% interestadual`, TRI_FONTES.difal);
+  reg('5. DIFAL', 'DIFAL %', triCent(difalPct * 100), difalFormula || 'sem DIFAL', TRI_FONTES.difal);
   reg('5. DIFAL', 'Base do DIFAL', baseDifal,
       op.difalBaseDupla ? '(NF JeT→cliente − ICMS destacado) ÷ (1 − interna) — base dupla, Conv. 236/2021' : 'NF da JeT ao cliente — base simples',
       TRI_FONTES.difal);
@@ -429,7 +445,7 @@ function triCalcular(e){
     bloco2: { nfEntrada },
     bloco3: { pisoSaida, nfSaida, icmsDestacado, markup },
     bloco4: { baseSaida, PISsai, COFsai, IPIsai, creditos, resultante, creditoAcumulado },
-    bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, baseDifal, DIFAL, FECOP,
+    bloco5: { ufDestino: e.ufDestino, internaDestino, difalPct: difalPct * 100, difalFormula, cargaConv5291: cargaConv, difalManual: manualPct > 0, baseDifal, DIFAL, FECOP,
             markupJet, nfJetCliente, icmsJetLiquido,
               clienteContribuinte: contribuinte, difalNoCusto, baseDupla: !!op.difalBaseDupla },
     bloco6: { parcelas: parcelasCusto, custo, freteTerrestre },
@@ -520,6 +536,7 @@ function triCalcular(e){
         icmsEntradaEfetivo: Nf('icmsEnt'), icmsInterestadual: Nf('icmsDest'),
         despesasNacionalizacao: exps.reduce((a, x) => a + x.v, 0) + Nf('siscomex') + Nf('afrmm') + Nf('honorarios') + Nf('capatazia'),
         markupComercialBrl: Nf('mkSF'), markupJetBrl: Nf('mkJT'), ufDestino: V(f, 'ufDestino'), tabelaIcmsInterno: ICMS_INTERNO,
+        cargaConv5291: Nf('cargaConv') > 0 ? Nf('cargaConv') : undefined, difalManualPct: Nf('difalManual'), opcoes: o.difal5291Legado ? { difal5291Legado: true } : undefined,
         clienteContribuinte: false, freteTerrestreBrl: Nf('transporte'),
         servicoWindgateBrl: brl ? m : '', servicoWindgatePct: Nf('margemPct'),
         usuario: o.usuario || '', agora: o.agora
@@ -996,6 +1013,50 @@ function triCalcular(e){
     } catch (e) { /* cotação incompleta: fica como está */ }
     return q;
   }
+  /**
+   * Correção do DIFAL 52/91 (24/11): cotação APROVADA, triangular, com item 52/91, mantém o PREÇO; só a margem cai
+   * pelo DIFAL que faltava (ex.: betoneira do Custódio, R$ 40.551,51 → R$ 34.526,69). Uma vez por cotação: o que
+   * era antes fica em q.ajuste5291. Margem em R$ e em % ficam coerentes (quem calcula por % chega ao mesmo preço).
+   */
+  function recalcularMargem5291(q, por, agora) {
+    if (!q || !q.fields || q.status !== 'ok' || q.ajuste5291 || !(q.items || []).some(it => it && it.c5291)) return null;
+    const t = agora || new Date().toISOString(), r2 = v => Math.round(v * 100) / 100, mud = [];
+    const ajustar = (ler, gravar, guardar, nome, custoDe) => {
+      const antes = guardar();
+      const a = ler(true); if (!a || !a.R.tri) return;
+      const m0 = a.R.margem, p0 = a.R.preco;
+      gravar(m0, null); const b = ler(false); const delta = b.R.preco - p0;
+      if (Math.abs(delta) < 0.005) { gravar(null, null, antes); return; }
+      const mT = m0 - delta; gravar(mT, null); const c = ler(false);
+      gravar(mT, mT / custoDe(c) * 100);
+      const conf = ler(false);
+      if (Math.abs(conf.R.preco - p0) > 0.05) { gravar(null, null, antes); mud.push({ cliente: nome, erro: 'preço não fechou: ficou como estava' }); return; }
+      mud.push({ cliente: nome, preco: r2(p0), margemAntes: r2(m0), margemDepois: r2(conf.R.margem), difalAntes: r2(a.R.tri.difal), difalDepois: r2(conf.R.tri.difal), antes });
+    };
+    if (!ehMultiCliente(q)) {
+      if (V(camposDe(q), 'tipoOp') !== 'triangular') return null;
+      const modo0 = q.margemModo === 'brl' ? 'brl' : 'pct';
+      ajustar(legado => ({ R: calcular(q, { modo: legado ? modo0 : 'brl', difal5291Legado: legado }) }),
+        (m, pct, volta) => { if (volta) { q.margemModo = volta.margemModo; q.fields.margemBRL = volta.margemBRL; q.fields.margemPct = volta.margemPct; if (volta.margemModo === undefined) delete q.margemModo; return; }
+          q.margemModo = 'brl'; q.fields.margemBRL = m.toFixed(2); if (pct != null) q.fields.margemPct = String(+pct.toFixed(8)); },
+        () => ({ margemModo: q.margemModo, margemBRL: q.fields.margemBRL, margemPct: q.fields.margemPct }), V(camposDe(q), 'cliente'), c => c.R.tri.custoGrupo);
+    } else {
+      clientesDe(q).filter(c => c && c.tipoOperacao === 'triangular' && (q.items || []).some(it => it && it.c5291 && it.clienteId === c.id)).forEach(c => {
+        const cli = () => q.clientes.find(x => x && x.id === c.id);
+        ajustar(legado => calcularPorCliente(q, legado ? { difal5291Legado: true } : undefined).clientes.find(x => x.id === c.id),
+          (m, pct, volta) => { const x = cli(); if (volta) { Object.assign(x, volta); if (volta.margemModo === undefined) delete x.margemModo; return; }
+            x.margemModo = 'brl'; x.margemRS = m.toFixed(2); if (pct != null) x.margemPct = String(+pct.toFixed(8)); },
+          () => { const x = cli(); return { margemModo: x.margemModo, margemRS: x.margemRS, margemPct: x.margemPct }; }, c.nome, cc => cc.custo);
+      });
+    }
+    if (!mud.length) return null;
+    q.ajuste5291 = { em: t, por: por || 'sistema', motivo: 'DIFAL do Convênio 52/91 = (carga ÷ interna da UF) × (interna − 4%); preço mantido, margem recalculada', clientes: mud };
+    return q.ajuste5291;
+  }
+  /** Todas as cotações aprovadas. Devolve [{ id, ajuste }] do que mudou. */
+  function recalcularAprovadas5291(db, por, agora) {
+    return Object.entries((db && db.quotes) || {}).map(([id, q]) => ({ id, ajuste: recalcularMargem5291(q, por, agora) })).filter(x => x.ajuste);
+  }
   function snapshot(q, R) {
     const f = camposDe(q), fields = {};
     CAMPOS.forEach(k => { fields[k] = f[k]; });
@@ -1446,7 +1507,7 @@ function triCalcular(e){
 
   const STATUS_COTA = { draft: ['rascunho', 'info'], wait: ['aguardando o Samir', 'warn'], ok: ['aprovada', 'ok'] };
 
-  return { ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
+  return { recalcularMargem5291, recalcularAprovadas5291, ICMS_INTERNO, SEM_DIFAL, DEFAULT_EXPS, CAMPOS, PADRAO, ITEM_PADRAO, camposDe, calcular, triCalcular, TRI_PADRAO, TRI_FONTES,
     clienteDoCrm, resumoProposta, conferirPrecosFixos, precoDesem, desemOuts, desemSugerir, desemErros, desemAvisos, definirParcelasCliente, cotacaoSozinho, MAX_PARCELAS, VINCULOS, NOMES_ETAPA, parcelasDe, definirParcelas, saidasPorParcela, coberturaDesembolso, modoCobertura, mudarCobertura, sugerirParcelas, vencimentosDasParcelas, prazoDaParcela, temListaPropria, aliquotasNCM, registroNCM, NCM_TABELA, snapshot, inferirModoMargem, parcelasComEta, entradaIndice, prepararGravacao,
     separarDifal, enviarClientes, devolverCliente, statusDaCotacao, pendenciasRateio, aprovarCliente, revisarAprovacoes, criarOperacoesDaMulti, criarOperacaoDoCliente, linhasDoCliente, sozinhoNoConteiner, simularDesistencia, desistirCliente, codigoDaMae, classesDaChegada, operacaoDaCotacao, negocioDaCotacao, funilDasCotacoes, taxasDaPtax, GRUPOS_RATEIO, REGRAS_RATEIO, RATEIO_PADRAO, multiClienteLigado, adicionarCliente, removerCliente, resumirClientes, clientesDe, ehMultiCliente, itensDoCliente, regraEfetiva, conferirClientes, cotacaoDoCliente, calcularPorCliente, CRONO_OP, PROPOSTA_BLOCOS, PROPOSTA_CUSTOS, propostaBlocosPadrao, propostaBlocos, propostaItens, STATUS_COTA };
 });
