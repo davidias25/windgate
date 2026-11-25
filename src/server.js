@@ -898,30 +898,45 @@ const portalUnico = require('./services/portal-unico.service');
    alterada dela, o `_id` tem de ser o do conteúdo ORIGINAL, senão a mesclagem
    enxerga um registro novo e duplica a operação. */
 const mesclaId = require('../public/hub/js/regras.js').idDeterministico;
+/* Consulta a situação das DUIMPs no Portal Único e aplica a regra da Parte 2.3 (tarefas-auto.aplicarSituacaoDuimp):
+   canal novo avisa pela regra (verde todos · amarelo Samir · vermelho/cinza Samir e Davi), amarelo e vermelho abrem
+   tarefa para a Ívina, e desembaraçada leva a operação (e as filhas) para Logística nacional com a data no histórico.
+   opc.op: só aquela operação ("Atualizar DUIMP" da ficha). opc.automatica: só as que estão em desembaraço. */
+async function consultarDuimps(opc) {
+  const o_ = opc || {}, TA = require('../public/hub/js/tarefas-auto.js'), W0 = require('../public/hub/js/regras.js');
+  await bancoPronto; if (!memoryDB) throw new Error('Banco central indisponível.');
+  let alvo = (memoryDB.ops || []).filter(o => o && o.duimp && !['entregue', 'concluida'].includes(o.status));
+  if (o_.op) { const o = (memoryDB.ops || []).find(x => x && x.id === o_.op); const m = o && o.maeId ? o.maeId : o_.op; alvo = alvo.filter(x => x.id === o_.op || x.id === m); }
+  if (o_.automatica) alvo = alvo.filter(o => o.status === 'chegada' || !(o.duimpSituacao && o.duimpSituacao.desembaraco));
+  const atualizadas = [], erros = [], avancaram = [], canais = [], agora = new Date().toISOString();
+  let recados = 0, tarefas = 0;
+  for (const o of alvo.slice(0, 40)) {
+    // Sempre a versão vigente: supor a 1 lia a DUIMP original depois de uma retificação.
+    try {
+      const num = String(o.duimp).toUpperCase().replace(/[^0-9A-Z]/g, ''), v = (await portalUnico.versaoVigente(num)).versao, r = await portalUnico.consultarDuimp(num, v);
+      if (!o._id) o._id = mesclaId(o);   // operação antiga sem _id: o id do conteúdo ORIGINAL, antes de mudar
+      o.duimpVersao = v;
+      const ap = TA.aplicarSituacaoDuimp(memoryDB, o, { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, versao: v }, agora);
+      recados += ap.recados.length; if (ap.tarefa) tarefas++;
+      if (ap.avancou) avancaram.push(o.id);
+      /* Filhas do contêiner: mesma DUIMP, mesmo desembaraço. */
+      if (W0.ehMae(o) && W0.soData(r.desembaraco)) W0.filhasDe(memoryDB, o.id).filter(f => f.status === 'chegada').forEach(f => { if (!f._id) f._id = mesclaId(f); if (TA.aplicarSituacaoDuimp(memoryDB, f, { desembaraco: r.desembaraco }, agora).avancou) avancaram.push(f.id); });
+      atualizadas.push(o.id); const c = W0.canalDuimp(o); if (c) canais.push({ op: o.id, canal: c.l });
+    } catch (e) { erros.push({ op: o.id, erro: e.message }); if (/60 s/.test(e.message)) break; }
+  }
+  if (atualizadas.length) await dbStore.salvar(memoryDB, DB_FILE_PATH);
+  return { consultadas: alvo.length, atualizadas: atualizadas.length, erros, avisos: recados, tarefas, avancaram, canais };
+}
 app.post('/api/portal-unico/duimps', auth.exigirTokenSeAtiva, async (req, res) => {
   if (!podeOperar(req)) return res.status(403).json({ success: false, message: 'Sem permissão.' });
   if (!portalUnico.configurado() && !portalUnico.emTeste()) return res.json({ success: false, semIntegracao: true, message: 'Falta o certificado A1 no servidor (PORTAL_UNICO_CERT_ARQUIVO e PORTAL_UNICO_CERT_SENHA).' });
-  const alvo = (memoryDB.ops || []).filter(o => o && o.duimp && !['entregue', 'concluida'].includes(o.status));
-  const atualizadas = [], erros = [];
-  for (const o of alvo.slice(0, 40)) {
-    // Sempre a versão vigente: supor a 1 lia a DUIMP original depois de uma retificação.
-    try { const num = String(o.duimp).toUpperCase().replace(/[^0-9A-Z]/g, ''), v = (await portalUnico.versaoVigente(num)).versao;
-      const r = await portalUnico.consultarDuimp(num, v); atualizadas.push(Object.assign({ _id: o._id || mesclaId(o) }, o, { duimpVersao: v, duimpSituacao: { situacao: r.situacao, canal: r.canal, desembaraco: r.desembaraco, registro: r.registro, versao: v, atualizadoEm: r.atualizadoEm } })); }
-    catch (e) { erros.push({ op: o.id, erro: e.message }); if (/60 s/.test(e.message)) break; }
-  }
-  /* Canal que mudou para amarelo, vermelho ou cinza: recado para Davi e Ívina, uma vez por DUIMP e canal. */
-  const W0 = require('../public/hub/js/regras.js'), recados = [], avisados = new Set(), agoraIso = new Date().toISOString();
-  atualizadas.forEach(n => {
-    const velha = (memoryDB.ops || []).find(x => x && x.id === n.id), antes = W0.canalDuimp(velha), depois = W0.canalDuimp(n);
-    if (!depois || !depois.acao || (antes && antes.k === depois.k) || n.maeId) return;
-    const num = String(n.duimp).toUpperCase().replace(/[^0-9A-Z]/g, ''), chave = num + '-' + depois.k; if (avisados.has(chave)) return; avisados.add(chave);
-    ['davi', 'ivina'].forEach(p => { const id = 'canal-' + chave + '-' + p; if ((memoryDB.hubRecados || []).some(r => r && r._id === id) || ((memoryDB._removidos || {})[id])) return;
-      recados.push({ _id: id, texto: `${n.id}: a DUIMP ${n.duimp} está no canal ${depois.l.toLowerCase()}${antes && antes.k ? ' (era ' + antes.l.toLowerCase() + ')' : ''}. Acompanhar com o despachante.`, para: p, prio: 'alta', por: 'Sistema · Portal Único', em: agoraIso, feito: {}, opId: n.id }); });
-  });
-  if (atualizadas.length || recados.length) await gravarParcial(Object.assign({ ops: atualizadas }, recados.length ? { hubRecados: recados } : {}));
-  res.json({ success: true, consultadas: alvo.length, atualizadas: atualizadas.length, erros, avisos: recados.length,
-    canais: atualizadas.map(n => ({ op: n.id, canal: (W0.canalDuimp(n) || {}).l || '' })).filter(x => x.canal) });
+  try { res.json(Object.assign({ success: true }, await consultarDuimps({ op: (req.body || {}).op || '' }))); }
+  catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
+/* Consulta automática enquanto houver operação em desembaraço: a cada 2 h (o Portal Único limita as consultas). */
+setInterval(() => { if (!portalUnico.configurado() || !memoryDB) return; if (!(memoryDB.ops || []).some(o => o && o.duimp && o.status === 'chegada')) return;
+  consultarDuimps({ automatica: true }).then(r => { if (r.atualizadas) console.log(`🛃 DUIMP: ${r.atualizadas} consultada(s)${r.avancaram.length ? ', desembaraçada(s): ' + r.avancaram.join(', ') : ''}.`); }).catch(e => console.warn('⚠️ DUIMP automática:', e.message)); }, 2 * 60 * 60 * 1000).unref();
+
 
 /* ---------- Tempo ativo no sistema ---------- */
 const atividade = require('./services/atividade-store.service');

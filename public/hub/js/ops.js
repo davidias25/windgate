@@ -18,6 +18,13 @@
     </tbody></table></div>`;
   }
   H.tabelaOps = tabelaOps;
+  /* Selo do canal da DUIMP (Parte 2.3): "Canal verde · desembaraçada 13/11". A filha usa a DUIMP do contêiner. */
+  H.seloCanal = (o, so) => {
+    if (!o || !W.seloCanal) return '';
+    const a = W.alvoDe ? W.alvoDe(H.db, o) : o, s = W.seloCanal(a && a.duimpSituacao ? a : o);
+    if (!s || (so && !so.includes(o.status))) return '';
+    return `<span class="pill" title="Canal da DUIMP no Portal Único" style="background:${s.cor}1A;color:${s.cor};font-weight:700">${esc(s.texto)}</span>`;
+  };
 
   function ligar(el) {
     el.querySelectorAll('[data-op]').forEach(x => x.addEventListener('click', e => { e.stopPropagation(); H.ir('ficha', x.dataset.op); }));
@@ -69,7 +76,7 @@
     el.innerHTML = `
       <div class="head"><div><span class="lbl"><a href="#ops" data-voltar>Operações</a> · ${esc(o.id)}${o.maeId ? ` · filha do contêiner <a href="#" data-mae="${esc(o.maeId)}">${esc(o.maeId)}</a>` : ''}</span><h1>${esc(o.id)} · ${W.ehMae(o) ? 'Contêiner compartilhado' : esc(o.cliente || '')}</h1>
         <p class="sub">${esc(o.nome || '')}${o.origemPorto || o.destinoPorto ? ' · ' + esc(o.origemPorto || '?') + ' → ' + esc(o.destinoPorto || '?') : ''}</p></div>
-        <div class="btns">${H.pillStatus(o.status)} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button>${H.pode('fin.excluir') ? `<button class="btn" data-acao="renomear">Editar código</button><button class="btn" data-acao="excluir">Excluir</button>${W.multiClienteLigado(db) && !o.maeId && !W.ehMae(o) ? '<button class="btn" data-acao="virarmae">Virar contêiner compartilhado</button>' : ''}` : ''}</div></div>
+        <div class="btns">${H.pillStatus(o.status)} ${H.seloCanal(o)} ${(o.duimp || (W.alvoDe(db, o) || {}).duimp) && ['chegada', 'embarcado', 'container_enviado_porto', 'logistica'].includes(o.status) && H.pode('fin.excluir') ? '<button class="btn sm" data-acao="duimp">Atualizar DUIMP</button>' : ''} ${H.semaforo(db, o)} <button class="btn blue" data-acao="etapa">Mudar etapa</button>${H.pode('fin.excluir') ? `<button class="btn" data-acao="renomear">Editar código</button><button class="btn" data-acao="excluir">Excluir</button>${W.multiClienteLigado(db) && !o.maeId && !W.ehMae(o) ? '<button class="btn" data-acao="virarmae">Virar contêiner compartilhado</button>' : ''}` : ''}</div></div>
       <div class="box box-b"><div class="steps" aria-label="Etapas">${W.FLUXO.map((k, i) => `<div class="st ${i < idx ? 'done' : i === idx ? 'cur' : ''}"><span class="dot">${i < idx ? '✓' : i + 1}</span>${esc(W.stMeta(k).l)}</div>`).join('')}</div>
         ${o.status === 'travada' ? '<p class="banner" style="margin-top:10px">Operação travada. Registre o motivo e a próxima ação no Resumo.</p>' : ''}</div>
       ${r ? `<div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
@@ -85,6 +92,14 @@
     const bVm = el.querySelector('[data-acao="virarmae"]'); if (bVm) bVm.onclick = () => virarMaeModal(o.id);
     el.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { abaFicha = b.dataset.aba; H.render(); });
     el.querySelector('[data-acao="etapa"]').onclick = () => mudarEtapa(o);
+    const bd = el.querySelector('[data-acao="duimp"]'); if (bd) bd.onclick = async () => {
+      bd.disabled = true; bd.textContent = 'Consultando…';
+      try { const r = await H.api('/api/portal-unico/duimps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: o.id }) }); const j = await r.json();
+        if (j.semIntegracao) H.toast(esc(j.message)); else if (!j.success) H.toast(esc(j.message || 'Falha na consulta'));
+        else { H.toast(j.avancaram && j.avancaram.length ? `Desembaraçada: ${esc(j.avancaram.join(', '))} foi para Logística nacional.` : j.canais && j.canais.length ? 'Canal ' + esc(j.canais[0].canal.toLowerCase()) : 'DUIMP consultada.'); if (H.sincronizar) await H.sincronizar(); }
+      } catch (e) { H.toast('Não consegui consultar o Portal Único agora.'); }
+      H.render();
+    };
     const bRen = el.querySelector('[data-acao="renomear"]'); if (bRen) bRen.onclick = () => renomear(o.id);
     const bExc = el.querySelector('[data-acao="excluir"]'); if (bExc) bExc.onclick = () => excluir(o.id);
     if (!abas.find(a => a[0] === abaFicha)) abaFicha = 'resumo';

@@ -97,7 +97,7 @@
       <div class="box"><div class="box-h"><h2>Situação por operação</h2><span class="note">${ops.length} operação(ões) em andamento</span></div>
         <div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th>Rota</th><th>Navio</th><th>Embarque</th><th>ETA</th><th class="num">Chega em</th><th class="num">Viagem</th><th>Tracking</th></tr></thead><tbody>
         ${pos.map(({ o, p }) => { const d = W.diasEntre(hoje, o.eta);
-          return `<tr class="click" data-op="${esc(o.id)}"><td class="mono"><b>${esc(o.id)}</b><br><small class="note">${esc(o.cliente || '')}</small></td><td>${H.pillStatus(o.status)}</td>
+          return `<tr class="click" data-op="${esc(o.id)}"><td class="mono"><b>${esc(o.id)}</b><br><small class="note">${esc(o.cliente || '')}</small></td><td>${H.pillStatus(o.status)} ${H.seloCanal ? H.seloCanal(o, ['chegada']) : ''}</td>
           <td>${esc((p && p.ori && p.ori.nome) || o.origemPorto || '?')} → ${esc((p && p.dst && p.dst.nome) || o.destinoPorto || '?')}${p ? '' : '<br><span class="pill warn">fora do mapa</span>'}</td><td>${esc((p && p.navio) || o.navio || '—')}</td>
           <td class="mono">${W.dataBR(o.embarque)}</td><td class="mono">${W.dataBR(o.eta)}</td><td class="num">${d == null ? '—' : d < 0 ? 'chegou' : d + ' dias'}</td>
           <td class="num">${p && p.frac != null ? Math.round(p.frac * 100) + '%' : '—'}</td>

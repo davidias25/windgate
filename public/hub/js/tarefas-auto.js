@@ -382,6 +382,49 @@
     return { ok: true, ajuste: v.fr.ajuste };
   }
 
+  /* ---------- DUIMP: canal e avanço automático (Parte 2.3) ----------
+     Cada consulta ao Portal Único passa por aqui. Canal novo: verde avisa todos; amarelo, o Samir; vermelho e
+     cinza, o Samir e o Davi. Amarelo e vermelho abrem tarefa para a Ívina acompanhar com o despachante.
+     Desembaraçada: a operação em Chegada · Desembaraço vai sozinha para Logística nacional, com a data no histórico
+     (que é o "Real" dos marcos). Uma vez por DUIMP e canal. */
+  function aplicarSituacaoDuimp(db, o, sit, agora) {
+    const t = agora || new Date().toISOString(), hoje = hojeSP(t), out = { canal: null, recados: [], tarefa: null, avancou: false };
+    if (!o) return out;
+    const antes = W.canalDuimp ? W.canalDuimp(o) : null;
+    o.duimpSituacao = Object.assign({}, o.duimpSituacao, sit || {}, { atualizadoEm: t });
+    const depois = W.canalDuimp ? W.canalDuimp(o) : null; out.canal = depois;
+    const num = String(o.duimp || '').toUpperCase().replace(/[^0-9A-Z]/g, '') || o.id;
+    if (depois && depois.k && (!antes || antes.k !== depois.k) && !o.maeId) {
+      const para = depois.k === 'verde' ? ['todos'] : depois.k === 'amarelo' ? ['samir'] : ['samir', 'davi'];
+      const texto = `${o.id}: DUIMP ${o.duimp || ''} no canal ${depois.l.toLowerCase()}${antes && antes.k ? ' (era ' + antes.l.toLowerCase() + ')' : ''}.${depois.acao ? ' Acompanhar com o despachante.' : ''}`;
+      para.forEach(p => { const r = recado(db, p, texto, `canal-${num}-${depois.k}-${p}`, o, t); if (r) { r.por = 'Sistema · Portal Único'; out.recados.push(r); } });
+      if (['amarelo', 'vermelho'].includes(depois.k)) {
+        const chave = `CANAL|${num}|${depois.k}`, id = idTarefa(chave);
+        if (!tarefaDe(db, chave) && !removido(db, id)) {
+          const tf = { _id: id, id: 't_' + Date.parse(t) + '_CANAL', t: `Acompanhar a DUIMP da ${o.id} no canal ${depois.l.toLowerCase()} com o despachante`, resp: nomeDe(db, 'ivina'), prazo: somaDias(hoje, 1), hora: '', prio: 'Alta', status: 'aberta', obs: '', por: 'Sistema',
+            doneAt: null, criadaEm: t, vistoEm: null, opId: o.id, copia: [nomeDe(db, 'davi')], auto: { chave, gatilho: 'CANAL', opRef: o._id || o.id, op: o.id, filhas: filhasDe(db, o), origem: 'automatica', motivo: 'canal ' + depois.l.toLowerCase() } };
+          if (!Array.isArray(db.agendaTasks)) db.agendaTasks = [];
+          db.agendaTasks.unshift(tf); out.tarefa = tf;
+          registrar(db, { acao: 'criada', gatilho: 'CANAL', chave, op: o.id, tarefa: id, resp: tf.resp, prazo: tf.prazo, por: 'Sistema · Portal Único', em: t, motivo: tf.auto.motivo });
+        }
+      }
+    }
+    const des = W.soData(o.duimpSituacao.desembaraco || '');
+    if (des && o.status === 'chegada') {
+      if (!Array.isArray(db.opStatusHist)) db.opStatusHist = [];
+      db.opStatusHist.push({ _id: W.novoId(), op: o.id, de: 'chegada', para: 'logistica', em: t, deEm: o.statusEm || '', por: 'Sistema · Portal Único', tipo: 'mudanca', origem: 'portal-unico', motivo: `DUIMP desembaraçada em ${dataBR(des)}`, dataReal: des });
+      o.status = 'logistica'; o.statusEm = t; o.statusPor = 'Sistema · Portal Único'; delete o.statusEstimado;
+      out.avancou = true;
+    }
+    return out;
+  }
+  /** Selo do canal: "Canal verde · desembaraçada 13/11". Sem canal: null. */
+  function seloCanal(o) {
+    const c = W.canalDuimp ? W.canalDuimp(o) : null; if (!c) return null;
+    const s = (o && o.duimpSituacao) || {}, des = W.soData(s.desembaraco || '');
+    return { k: c.k, cor: c.c, texto: `Canal ${c.l.toLowerCase()}${des ? ' · desembaraçada ' + dataBR(des).slice(0, 5) : s.situacao ? ' · ' + String(s.situacao).toLowerCase() : ''}` };
+  }
+
   /* ---------- Torre ---------- */
   /** O que vai para a Torre de cada um: atrasadas (Davi; Samir depois de N dias) e "acompanhando" (cópia). */
   function tarefasNaTorre(db, k, hoje) {
@@ -428,5 +471,5 @@
 
   return { PRAZOS_PADRAO, ROTULOS_PRAZO, GATILHOS, GESTORES, MARCAM_FRETE, configTarefas, nomeDeUsuario: nomeDe, chaveDeUsuario, alvoDe, chaveDe, idTarefa, tarefaDe, freteDe, ehAuto,
     garantirTarefa, avaliarG4, reconciliar, aoGravar, semTarefaAuto, limparTarefasInativas, garantirFreteDasAtivas, escalonar, rodadaDiaria, previaBackfill, aplicarBackfill,
-    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, marcarFreteFechado, SOBRETAXAS, LIMITE_FRETE, freteCotadoUSD, variacaoFrete, decidirAjusteFrete, tarefasNaTorre, tarefasDaOp, rankingTarefas };
+    podeGerir, podeMarcarFrete, podeConcluir, podeReatribuir, excluirTarefa, concluirTarefa, reabrirTarefa, aplicarSituacaoDuimp, seloCanal, marcarFreteFechado, SOBRETAXAS, LIMITE_FRETE, freteCotadoUSD, variacaoFrete, decidirAjusteFrete, tarefasNaTorre, tarefasDaOp, rankingTarefas };
 });

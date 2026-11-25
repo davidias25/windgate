@@ -41,26 +41,35 @@ console.log('\nTorre:');
   console.log('\nBotão "Atualizar DUIMPs" (Portal Único simulado):');
   const db = { users, ops: [
     { _id: 'o500', id: 'OP500', status: 'chegada', duimp: '26BR0000000500-1', duimpSituacao: { canal: 'VERDE', atualizadoEm: '2026-11-10T10:00:00Z' } },
-    { _id: 'o501', id: 'OP501', status: 'chegada', duimp: '26BR0000000501-1' }
-  ], fin: [], agendaTasks: [], hubRecados: [], _removidos: {} };
+    { _id: 'o501', id: 'OP501', status: 'chegada', duimp: '26BR0000000501-1' },
+    { _id: 'o502', id: 'OP502', status: 'chegada', duimp: '26BR0000000502-1', duimpSituacao: { canal: 'VERDE' } }
+  ], fin: [], agendaTasks: [], hubRecados: [], opStatusHist: [], _removidos: {} };
   fs.writeFileSync(process.env.WINDGATE_DB_FILE, JSON.stringify(db));
-  const canalDe = { '26BR00000005001': 'VERMELHO', '26BR00000005011': 'VERDE' }, chamadas = [];
+  const canalDe = { '26BR00000005001': 'VERMELHO', '26BR00000005011': 'VERDE', '26BR00000005021': 'VERDE' }, chamadas = [];
   require('../src/services/portal-unico.service')._usarRequisicao(async (url, o) => {
     const u = new URL(url); chamadas.push(o && o.method || 'GET');
     if (/autenticar$/.test(u.pathname)) return { status: 200, headers: { 'set-token': 'Bearer sim', 'x-csrf-token': 'c' }, corpo: '' };
     const num = Object.keys(canalDe).find(n => url.includes(n));
-    return { status: 200, headers: {}, corpo: JSON.stringify({ versao: '2', situacao: { situacaoDuimp: 'EM ANALISE' }, resultadoAnaliseRisco: { canalConsolidado: canalDe[num] } }) };
+    const desemb = num === '26BR00000005021' ? { dataDesembaraco: '2026-11-13' } : {};
+    return { status: 200, headers: {}, corpo: JSON.stringify(Object.assign({ versao: '2', situacao: { situacaoDuimp: num === '26BR00000005021' ? 'DESEMBARACADA' : 'EM ANALISE' }, resultadoAnaliseRisco: { canalConsolidado: canalDe[num] } }, desemb)) };
   });
   const app = require('../src/server'), srv = app.listen(0), url = `http://127.0.0.1:${srv.address().port}`;
   const clicar = async () => (await fetch(url + '/api/portal-unico/duimps', { method: 'POST' })).json();
   const ler = () => JSON.parse(fs.readFileSync(process.env.WINDGATE_DB_FILE, 'utf8'));
   const r = await clicar(), g = ler();
-  ok(r.success && r.atualizadas === 2 && g.ops.find(o => o.id === 'OP500').duimpSituacao.canal === 'VERMELHO' && g.ops.find(o => o.id === 'OP501').duimpSituacao.canal === 'VERDE', 'o clique consulta as DUIMPs e grava o canal de cada operação');
+  ok(r.success && r.atualizadas === 3 && g.ops.find(o => o.id === 'OP500').duimpSituacao.canal === 'VERMELHO' && g.ops.find(o => o.id === 'OP501').duimpSituacao.canal === 'VERDE', 'o clique consulta as DUIMPs e grava o canal de cada operação');
   const rec = (g.hubRecados || []).filter(x => /canal/.test(x.texto));
-  ok(r.avisos === 2 && rec.length === 2 && rec.some(x => x.para === 'davi') && rec.some(x => x.para === 'ivina') && rec.every(x => /OP500/.test(x.texto) && /canal vermelho \(era verde\)/.test(x.texto)), 'verde → vermelho: recado para Davi e Ívina, dizendo de onde veio');
-  ok(!rec.some(x => /OP501/.test(x.texto)), 'verde não gera recado');
+  const r500 = rec.filter(x => /OP500/.test(x.texto));
+  ok(r500.length === 2 && r500.some(x => x.para === 'samir') && r500.some(x => x.para === 'davi') && r500.every(x => /canal vermelho \(era verde\)/.test(x.texto)), '2.3: verde → vermelho: recado para Samir e Davi, dizendo de onde veio');
+  const tv = (g.agendaTasks || []).find(t => t.auto && t.auto.gatilho === 'CANAL' && t.auto.op === 'OP500');
+  ok(tv && tv.resp === 'Ívina' && /despachante/.test(tv.t), '2.3: vermelho abre tarefa para a Ívina acompanhar com o despachante');
+  const verde = rec.filter(x => /OP501/.test(x.texto));
+  ok(verde.length === 1 && verde[0].para === 'todos', '2.3: canal verde: aviso para todos');
+  const o502 = g.ops.find(o => o.id === 'OP502'), h502 = (g.opStatusHist || []).find(x => x.op === 'OP502');
+  ok(o502.status === 'logistica' && h502 && h502.para === 'logistica' && h502.dataReal === '2026-11-13' && /desembaraçada em 13\/11\/2026/.test(h502.motivo), '2.3: desembaraçada: vai sozinha para Logística nacional, com a data no histórico');
+  ok(!rec.some(x => /OP502/.test(x.texto)), 'continuar no mesmo canal (verde → verde) não gera recado');
   const r2 = await clicar();
-  ok(r2.avisos === 0 && (ler().hubRecados || []).filter(x => /canal/.test(x.texto)).length === 2, 'clicar de novo com o mesmo canal não repete o aviso');
+  ok(r2.avisos === 0 && (ler().hubRecados || []).filter(x => /canal/.test(x.texto)).length === rec.length && (ler().agendaTasks || []).filter(t => t.auto && t.auto.gatilho === 'CANAL').length === 1, 'clicar de novo com o mesmo canal não repete o aviso nem a tarefa');
   ok(chamadas.every(m => m === 'GET' || m === 'POST') && !chamadas.some(m => m === 'PUT' || m === 'DELETE'), 'só consulta: nenhuma chamada de registro ou retificação');
   await new Promise(x => srv.close(x));
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
