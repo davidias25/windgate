@@ -1326,7 +1326,7 @@
   const dataBR = iso => ehISO(iso) ? soData(iso).split('-').reverse().join('/') : '—';
 
   return {
-    COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
+    mesesAte, valorDe, ehEmprestimo, empresaOk, daOperacao, COLECOES_SYNC, OBJETOS_SYNC, novoId, idDeterministico, prepararBanco, fotografarIds, registrarRemocoes, aplicarSincronizacao,
     fotografarConteudo, diferencas, absorver,
     semanaDe, gestorDoMes, resumoSemana, divergencias, saudeFinanceira, desempenhoOperacoes, CHECK_FORNECEDOR, notaFornecedor,
     lerXmlNFe, classificarNota, trimestreDe, mesesDoTrimestre, fechamentoTrimestre, lerOFX, decodificarOFX, consertarAcentos, mesDoExtrato, conciliar,

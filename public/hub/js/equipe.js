@@ -181,6 +181,7 @@
         <div class="box"><div class="box-h"><h2>Ponto · escritório e raio</h2></div><div class="box-b">
           <p class="note" style="margin-bottom:10px">Com o local cadastrado, cada ponto sai marcado como dentro ou fora do escritório. Só a diretoria altera.</p>
           <button class="btn" id="cfPonto">Escritório e raio</button></div></div></div>
+      <div id="cfCaixaMin"></div>
       <div id="cfCambio"></div>
       <div class="box"><div class="box-h"><h2>Prazos por etapa</h2><span class="note">${podePrazos ? 'dias corridos' : 'só quem tem Financeiro ajusta'}</span></div>
         <div class="box-b"><p class="note">Dias corridos que cada etapa deveria levar. A Torre fica em atenção perto do prazo e em atraso depois de estourar. Vazio ou zero = etapa sem prazo (conta os dias, não cobra atraso). <b>Em trânsito</b> e <b>Em produção</b>: estes dias são só o padrão; cada operação usa o próprio prazo quando tem ETA, transit time ou prazo de produção (aba Logística & contêineres).</p></div>
@@ -195,8 +196,21 @@
     el.querySelector('#cfPonto').onclick = () => H.pontoConfigModal ? H.pontoConfigModal() : H.toast('Módulo do ponto não carregado');
     const pz = el.querySelector('#pzOk'); if (pz) pz.onclick = () => salvarPrazos(el, pz);
     padraoCambio(el.querySelector('#cfCambio'));
+    caixaMinimoBox(el.querySelector('#cfCaixaMin'));
   };
 
+  /* Caixa mínimo do Financeiro (Caixa do mês e Torre): padrão R$ 34 mil = 1 mês de despesas fixas. */
+  function caixaMinimoBox(box) {
+    if (!box || !W.caixaMinimo) return;
+    const edita = H.pode('fin.autorizar'), v = W.caixaMinimo(H.db), reg = ((H.db.hubPainel || {})._financeiro) || {};
+    box.innerHTML = `<div class="box"><div class="box-h"><h2>Caixa mínimo</h2><span class="note">${reg.em ? `editado por ${esc(reg.por)} em ${W.dataBR(String(reg.em).slice(0, 10))}` : 'padrão: 1 mês de despesas fixas'}${edita ? '' : ' · só o Samir altera'}</span></div><div class="box-b">
+      <div class="fields"><div class="f"><label class="lbl" for="cfcm">Caixa mínimo (R$)</label><input id="cfcm" inputmode="decimal" value="${String(v).replace('.', ',')}" ${edita ? '' : 'disabled'}></div></div>
+      ${edita ? '<div class="btns" style="margin-top:10px"><button class="btn blue sm" id="cfcmok">Salvar</button></div>' : ''}
+      <p class="note" style="margin-top:8px">No Caixa do mês e na Torre, o fim do mês abaixo deste valor fica vermelho e o gráfico marca o dia em que o caixa cruza o mínimo.</p></div></div>`;
+    const b = box.querySelector('#cfcmok'); if (!b) return;
+    b.onclick = () => { const t = box.querySelector('#cfcm').value.trim(), n = /,/.test(t) ? +t.replace(/\./g, '').replace(',', '.') : +t;
+      const r = W.salvarCaixaMinimo(H.db, n, H.nomeUsuario(H.userKey)); if (!r.ok) return H.toast(esc(r.msg)); H.salvar(); H.toast('Caixa mínimo salvo.'); caixaMinimoBox(box); };
+  }
   /* Reajuste cambial · padrão da casa: vai para cada operação nova; na operação, editável com registro. */
   function padraoCambio(box, rascunho) {
     if (!box || !W.padraoDaCasa) return;

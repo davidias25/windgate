@@ -14,7 +14,12 @@
     const cobs = W.cobrancas(db, hoje);
     el.innerHTML = `
       <div class="head"><div><h1>Desembolso & Cobrança</h1><p class="sub">Gerado do Financeiro: o que o cliente já pagou, o que falta e quando. A regra da casa é conferida sozinha: o cliente nunca paga menos do que já saiu para a fábrica.</p></div>
-        <div class="btns"><select id="dop" class="inp" aria-label="Operação">${opsCom.map(x => `<option ${x.id === opDes ? 'selected' : ''} value="${esc(x.id)}">${esc(x.id)} · ${esc(x.cliente || '')}</option>`).join('')}</select></div></div>
+        <div class="btns"><select id="dop" class="inp" aria-label="Operação">${(() => { /* contêiner compartilhado: as filhas juntas, sob a mãe (mesma regra da Carteira) */
+          const opt = x => `<option ${x.id === opDes ? 'selected' : ''} value="${esc(x.id)}">${esc(x.id)} · ${esc(x.cliente || '')}</option>`, maes = {};
+          opsCom.forEach(x => { if (x.maeId) (maes[x.maeId] = maes[x.maeId] || []).push(x); });
+          const feitas = new Set();
+          return opsCom.map(x => { if (!x.maeId) return opt(x); if (feitas.has(x.maeId)) return ''; feitas.add(x.maeId);
+            const fs = maes[x.maeId]; return `<optgroup label="${esc(x.maeId)} · ${esc(fs.map(f => f.cliente).filter(Boolean).join(' + '))}">${fs.map(opt).join('')}</optgroup>`; }).join(''); })()}</select></div></div>
       ${(dv => dv.length ? `<div class="banner crit" style="margin-bottom:12px"><b>Tipo da operação diferente da cotação aprovada</b> (o favorecido sai pelo tipo; nada foi corrigido sozinho):<br>${dv.map(x => `<b>${esc(x.op)}</b> ${esc(x.cliente)}: cotação ${esc(x.cotacao)}, mas ${esc(x.onde.join('; '))} → hoje o desembolso sai como ${esc(x.usado)}`).join('<br>')}</div>` : '')(W.tiposDivergentes ? W.tiposDivergentes(db) : [])}
       ${o && d ? `<div class="g2 larga">
         <div class="box des" id="desDoc">${(dd => `<div class="des-h"><img src="logo-branca.png" alt="WindGate" class="des-logo" style="background:none;padding:0"><div class="des-r"><small>DESEMBOLSO DO CLIENTE · ATUALIZADO EM ${W.dataBR(dd.atualizado)}</small><b>${esc(dd.op)} · ${esc(dd.cliente)}</b>${dd.obra ? `<small>${esc(dd.obra)}</small>` : ''}<small>VALOR GLOBAL ATUALIZADO</small><span class="des-v">${W.fmtBRL(dd.total)}</span>${Math.abs(dd.reajuste) > 0.004 ? `<small>Contrato ${W.fmtBRL(dd.contrato)} ${dd.reajuste >= 0 ? '+' : '−'} reajuste ${W.fmtBRL(Math.abs(dd.reajuste))}</small>` : ''}</div></div>

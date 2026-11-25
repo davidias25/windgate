@@ -189,7 +189,7 @@
   const MENU = [
     { g: 'Operação', itens: [['torre', 'Torre de Controle'], ['ops', 'Operações & histórico'], ['conteineres', 'Contêineres & free time'], ['mapa', 'Mapa & Tracking'], ['docs', 'Documentos'], ['portais', 'Portais externos'], ['dashops', 'Desempenho da empresa']] },
     { g: 'Comercial', itens: [['pedidos', 'Entrada de pedidos'], ['crm', 'CRM & Funil'], ['cotacoes', 'Cotações & Propostas'], ['contratos', 'Contratos']] },
-    { g: 'Financeiro & Fiscal', itens: [['dashfin', 'Saúde financeira'], ['fin', 'Painel & DRE'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['resop', 'Resultado por operação'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['nfe', 'NF-e (emissão)']] },
+    { g: 'Financeiro & Fiscal', itens: [['financeiro', 'Financeiro · Carteira, Caixa e Indicadores'], ['contas', 'Contas a pagar e receber'], ['lanc', 'Lançamentos'], ['custeio', 'Custeio & margem'], ['cambio', 'Câmbio & dólar'], ['contacorrente', 'Conta-corrente do cliente'], ['desembolso', 'Desembolso & Cobrança'], ['credito', 'Crédito por cliente'], ['fiscal', 'Fiscal & Contabilidade'], ['tributos', 'Tributos & transição'], ['nfe', 'NF-e (emissão)']] },
     { g: 'Inteligência', itens: [['sourcing', 'Sourcing & Fornecedores'], ['catalogo', 'Catálogo & NCM'], ['frete', 'Fretes & Benchmark'], ['compliance', 'Compliance & habilitações']] },
     { g: 'Equipe', itens: [['chat', 'Chat WindGate'], ['reuniao', 'Reunião semanal'], ['produtividade', 'Produtividade & Ranking'], ['rh', 'RH & Pessoas'], ['cultura', 'Cultura WindGate'], ['agenda', 'Agenda & Tarefas'], ['ponto', 'Ponto']] },
     { g: 'Gestão', itens: [['gestao', 'Gestão do Mês'], ['equipe', 'Equipe & Acessos'], ['integracoes', 'Integrações'], ['config', 'Configurações']] }
@@ -219,7 +219,7 @@
   }
 
   /* Telas do Hub por permissão; telas do sistema atual pelas abas liberadas da pessoa. */
-  const TELA_CAP = { fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', nfe: 'nfe.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver', cotacoes: 'fin.resultado' };
+  const TELA_CAP = { financeiro: 'fin.ver', fin: 'fin.ver', contas: 'fin.ver', resop: 'fin.ver', lanc: 'fin.lancar', desembolso: 'fin.ver', crm: 'crm.ver', pedidos: 'pedidos.ver', fiscal: 'fiscal.ver', integracoes: 'fiscal.editar', dashfin: 'fin.ver', rh: 'rh.ver', sourcing: 'sourcing.ver', nfe: 'nfe.ver', custeio: 'fin.resultado', cambio: 'fin.ver', contacorrente: 'fin.ver', credito: 'fin.ver', tributos: 'fin.resultado', contratos: 'fin.ver', cotacoes: 'fin.resultado' };
   /* Telas que vieram do sistema anterior seguem também a lista de abas liberadas da pessoa (users[k].tabs). */
   const TELA_ABA = { cotacoes: 'cotacoes', frete: 'frete', gestao: 'gestao' };
   const ABA_ATUAL = { crm: 'crm', sourcing: 'sourcing', parceiros: 'parceiros' };

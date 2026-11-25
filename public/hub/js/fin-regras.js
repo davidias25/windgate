@@ -514,7 +514,160 @@
     return { porConta, resumo, notas };
   }
 
-  return { caixaHoje, TIPOS_CONTA, ehBanco, contasBancarias, migrarContas, movimentoDaChave, vincularGrupo, desvincularGrupo, vincularUm, sugestoesConciliacao, corrigirDataPagamento, mudarConta, MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
+  /* =====================================================================
+     Financeiro em 3 telas (Parte 3): Carteira · Caixa do mês · Indicadores.
+     Uma função por tela, usada no Financeiro e na Torre: a mesma conta em todo lugar.
+     ===================================================================== */
+  const somaV = xs => xs.reduce((a, l) => a + W.valorDe(l), 0);
+  const ehEstudo = o => /^(ESTUDO|EXPO)/i.test((o && o.id) || '');
+  const CAIXA_MINIMO_PADRAO = 34000;
+  const caixaMinimo = db => { const v = +((((db || {}).hubPainel || {})._financeiro || {}).caixaMinimo); return v > 0 ? v : CAIXA_MINIMO_PADRAO; };
+  const diaMais = (d, n) => { const x = new Date(String(d).slice(0, 10) + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const fimDoMes = d => { const [a, m] = String(d).slice(0, 7).split('-').map(Number); return new Date(Date.UTC(a, m, 0, 12)).toISOString().slice(0, 10); };
+  /** Última passagem da operação para uma das etapas (data). */
+  const passouPara = (db, id, etapas) => (db.opStatusHist || []).filter(x => x && x.op === id && etapas.includes(x.para) && x.em).map(x => String(x.em).slice(0, 10)).sort().pop() || '';
+  /** FCL (contêiner cheio): pela cotação da operação (ou da mãe). */
+  function ehFCL(db, o) { const q = W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null; const m = q && q.fields && q.fields.modalCntr; return m ? m !== 'LCL' : true; }
+
+  /**
+   * Carteira de operações. Por operação: recebido = receita − falta receber; pago = recebido − caixa hoje;
+   * falta pagar = custo − pago; lucro a realizar = falta receber − falta pagar; lucro garantido = recebido − custo
+   * só com tudo pago. Contêiner compartilhado = uma linha da mãe (filhas em `filhas`), sem contar em dobro.
+   * filtro: 'andamento' (padrão) · 'mes' (concluídas no mês) · 'todas'.
+   */
+  function carteiraOps(db, empresa, filtro, hoje) {
+    const h = hoje || W.hojeISO(), f = filtro || 'andamento', emp = empresa || 'todas';
+    const ops = Object.fromEntries((db.ops || []).filter(o => o && o.id).map(o => [o.id, o]));
+    const rs = Object.fromEntries(W.resultadoPorOp(db, emp).map(r => [r.op, r]));
+    const abertos = (db.fin || []).filter(l => l && W.daOperacao(l) && !W.realizado(l) && !W.transferencia(l) && !W.ehEmprestimo(l) && W.empresaOk(l, emp));
+    const linha = (id, ids) => {
+      const zs = ids.map(i => rs[i]).filter(Boolean);
+      const s = k => zs.reduce((a, r) => a + (r[k] || 0), 0);
+      const receita = s('receita'), custo = s('despesa'), lucro = receita - custo, caixa = s('caixa'), faltaReceber = s('rp');
+      const recebido = receita - faltaReceber, pago = recebido - caixa, faltaPagar = custo - pago, lucroRealizar = faltaReceber - faltaPagar;
+      const garantido = pago >= custo - 0.005 && custo > 0 ? recebido - custo : 0;
+      const prox = abertos.filter(l => ids.includes(l.op)).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
+      let proximo = null;
+      if (prox.length) { const d = W.vencDe(prox[0]), t = W.ehReceita(prox[0]), mesmo = prox.filter(l => W.vencDe(l) === d && W.ehReceita(l) === t);
+        proximo = { data: d, receber: t, valor: somaV(mesmo), desc: mesmo.length > 1 ? `${mesmo.length} lançamentos` : (prox[0].descCliente || prox[0].desc || ''), vencido: d < h }; }
+      const o = ops[id] || {}, margem = receita ? lucro / receita : null;
+      return { op: id, cliente: o.cliente || '', status: o.status || '', receita, custo, lucro, margem, caixa, recebido, pago, faltaReceber, faltaPagar, lucroRealizar, garantido, proximo,
+        abaixo: (margem != null && margem < 0.10) || (ehFCL(db, o) && lucro < 30000 && receita > 0) };
+    };
+    const noFiltro = o => {
+      if (f === 'todas') return true;   // inclui estudo e operação sem cadastro (Resultado por operação mostra tudo)
+      if (!o || ehEstudo(o)) return false;
+      if (f === 'mes') return ['entregue', 'concluida'].includes(o.status) && passouPara(db, o.id, ['entregue', 'concluida']).slice(0, 7) === h.slice(0, 7);
+      return W.emAndamento(o);
+    };
+    const grupos = {};
+    Object.keys(rs).forEach(id => { const o = ops[id]; const chave = o && o.maeId && ops[o.maeId] ? o.maeId : id; (grupos[chave] = grupos[chave] || new Set([chave])).add(id); });
+    const linhas = Object.entries(grupos).filter(([id]) => noFiltro(ops[id])).map(([id, set]) => {
+      const ids = [...set], filhasIds = ids.filter(i => i !== id), mae = W.ehMae(ops[id]) || filhasIds.length > 0;
+      const l = linha(id, ids);
+      if (mae) { l.filhas = filhasIds.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true })).map(i => linha(i, [i])); l.cliente = l.filhas.map(x => (ops[x.op] || {}).cliente).filter(Boolean).join(' + ') || l.cliente; l.mae = true; }
+      return l;
+    }).filter(l => l.receita || l.custo).sort((a, b) => b.lucro - a.lucro);
+    const t = k => linhas.reduce((a, l) => a + l[k], 0);
+    const total = { n: linhas.length, receita: t('receita'), custo: t('custo'), lucro: t('lucro'), caixa: t('caixa'), faltaReceber: t('faltaReceber'), faltaPagar: t('faltaPagar'), lucroRealizar: t('lucroRealizar'), garantido: t('garantido') };
+    total.margem = total.receita ? total.lucro / total.receita : null;
+    return { linhas, total, abaixo: linhas.filter(l => l.abaixo) };
+  }
+
+  /**
+   * Caixa do mês: caixa hoje (extratos) + a receber − a pagar das operações − a pagar fixas = fim do mês.
+   * Com operação = operação; sem operação = fixa. Transferências SF ↔ JeT ficam fora. Vencido sem baixa entra
+   * como de hoje (ainda vai entrar/sair) e deixa o caixa "pode estar distorcido".
+   */
+  function caixaDoMes(db, empresa, hoje) {
+    const h = hoje || W.hojeISO(), emp = empresa || 'todas', fim = fimDoMes(h), fimSeg = fimDoMes(diaMais(fim, 1)), minimo = caixaMinimo(db);
+    const cx = caixaHoje(db, emp, h);
+    const abertos = (db.fin || []).filter(l => l && !W.realizado(l) && !W.transferencia(l) && W.empresaOk(l, emp));
+    const ateFim = abertos.filter(l => W.vencDe(l) <= fim);
+    const rec = ateFim.filter(W.ehReceita), pagOps = ateFim.filter(l => !W.ehReceita(l) && W.daOperacao(l)), pagFix = ateFim.filter(l => !W.ehReceita(l) && !W.daOperacao(l));
+    const vencidos = abertos.filter(l => W.vencDe(l) < h);
+    const receber = somaV(rec), pagarOps = somaV(pagOps), pagarFixas = somaV(pagFix), base = cx.temExtrato ? cx.total : 0;
+    const fimMes = base + receber - pagarOps - pagarFixas;
+    /* Linha do caixa dia a dia até o fim do mês seguinte; barras por semana. */
+    const porDia = {};
+    abertos.filter(l => W.vencDe(l) <= fimSeg).forEach(l => { const d = W.vencDe(l) < h ? h : W.vencDe(l); porDia[d] = (porDia[d] || 0) + (W.ehReceita(l) ? 1 : -1) * W.valorDe(l); });
+    const serie = []; let saldo = base, cruza = null;
+    for (let d = h; d <= fimSeg; d = diaMais(d, 1)) { saldo += porDia[d] || 0; serie.push({ data: d, saldo }); if (cruza == null && saldo < minimo) cruza = d; }
+    const semanas = [];
+    for (let d = h; d <= fimSeg; d = diaMais(d, 7)) {
+      const ate = diaMais(d, 6), noIntervalo = l => { const v = W.vencDe(l) < h ? h : W.vencDe(l); return v >= d && v <= ate; };
+      const xs = abertos.filter(noIntervalo); semanas.push({ de: d, ate, entra: somaV(xs.filter(W.ehReceita)), sai: somaV(xs.filter(l => !W.ehReceita(l))) });
+    }
+    const sete = abertos.filter(l => W.vencDe(l) >= h && W.vencDe(l) <= diaMais(h, 6)).sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
+    /* Saídas do mês: quanto já saiu (pago no mês) e o total do mês (pago + em aberto até o fim). */
+    const mes = h.slice(0, 7), pagoNoMes = (db.fin || []).filter(l => l && W.realizado(l) && !W.ehReceita(l) && !W.transferencia(l) && W.empresaOk(l, emp) && String(l.liquidadoEm || W.vencDe(l)).slice(0, 7) === mes);
+    const saidas = k => { const pg = somaV(pagoNoMes.filter(k)), ab = somaV(abertos.filter(l => !W.ehReceita(l) && k(l) && W.vencDe(l).slice(0, 7) <= mes)); return { pago: pg, total: pg + ab }; };
+    return { hoje: h, fim, caixa: cx, receber, receberVencido: somaV(rec.filter(l => W.vencDe(l) < h)), nReceber: rec.length, pagarOps, pagarFixas, fimMes, minimo, abaixoMinimo: fimMes < minimo,
+      vencidos: { n: vencidos.length, pagamentos: vencidos.filter(l => !W.ehReceita(l)).length, recebimentos: vencidos.filter(W.ehReceita).length, valor: somaV(vencidos) },
+      distorcido: vencidos.length > 0, serie, semanas, cruzaMinimo: cruza, proximos7: sete.slice(0, 10), nProximos7: sete.length,
+      saidasMes: { operacoes: saidas(W.daOperacao), fixas: saidas(l => !W.daOperacao(l)) } };
+  }
+
+  /**
+   * Indicadores de gestão (12 cartões, cada um com valor, meta e alerta) e as séries dos 3 gráficos.
+   * Sem dado para calcular: valor null (a tela mostra "—", nunca um número inventado).
+   */
+  function indicadoresGestao(db, empresa, hoje, ptaxHoje) {
+    const h = hoje || W.hojeISO(), emp = empresa || 'todas', mes = h.slice(0, 7);
+    const s = W.saudeFinanceira(db, h, emp), fixas = s.fixasMes || 0;
+    const ops = Object.fromEntries((db.ops || []).filter(o => o && o.id).map(o => [o.id, o]));
+    const rs = Object.fromEntries(W.resultadoPorOp(db, emp).map(r => [r.op, r]));
+    const contratoNoMes = m => W.fechadasNoMes(db, m).filter(id => rs[id]);
+    const lucroMes = m => contratoNoMes(m).reduce((a, id) => a + rs[id].resultado, 0);
+    const receitaMes = m => contratoNoMes(m).reduce((a, id) => a + rs[id].receita, 0);
+    const meses12 = W.mesesAte(mes, 12), ult3 = W.mesesAte(mes, 3);
+    const lucroFechado = lucroMes(mes);
+    const rec3 = ult3.reduce((a, m) => a + receitaMes(m), 0), luc3 = ult3.reduce((a, m) => a + lucroMes(m), 0), margem3 = rec3 ? luc3 / rec3 : null;
+    const cart = carteiraOps(db, emp, 'andamento', h);
+    /* Concluídas: custo real (despesas lançadas) × custo da cotação. */
+    const concl = Object.values(ops).filter(o => ['entregue', 'concluida'].includes(o.status) && !W.ehMae(o) && !ehEstudo(o) && rs[o.id]);
+    const prevReal = concl.map(o => { const q = W.cotacaoDaOp ? W.cotacaoDaOp(db, o) : null, c = q && W.custoCotacao ? W.custoCotacao(q) : null; return c && c.total > 0 ? { op: o.id, previsto: c.total, real: rs[o.id].despesa } : null; }).filter(Boolean);
+    const pv = prevReal.reduce((a, x) => a + x.previsto, 0), rl = prevReal.reduce((a, x) => a + x.real, 0), desvio = pv ? rl / pv - 1 : null;
+    const exp = W.exposicaoCambio ? W.exposicaoCambio(db, ptaxHoje, h) : null, exposicao = exp && exp.impactoSemContrato != null ? exp.impactoSemContrato : null;
+    const lim3 = W.mesesAte(mes, 3)[0] + '-01';
+    const prazos = Object.values(ops).filter(o => !W.ehMae(o) && !ehEstudo(o)).map(o => { const e = passouPara(db, o.id, ['entregue', 'concluida']), c = W.dataContratoDaOp ? W.dataContratoDaOp(db, o) : ''; return e && e >= lim3 && c ? W.diasEntre(c, e) : null; }).filter(x => x != null && x >= 0);
+    const prazoMedio = prazos.length ? Math.round(prazos.reduce((a, b) => a + b, 0) / prazos.length) : null;
+    const abertasR = (db.fin || []).filter(l => l && W.ehReceita(l) && !W.realizado(l) && !W.transferencia(l) && !W.ehEmprestimo(l) && W.empresaOk(l, emp));
+    const totR = somaV(abertasR), venc5 = somaV(abertasR.filter(l => (W.diasEntre(W.vencDe(l), h) || 0) > 5)), inad = totR ? venc5 / totR : null;
+    const crm = W.indicadoresCrm ? W.indicadoresCrm(db, h, 90) : null;
+    const propostas = (db.crmOps || []).filter(n => n && W.negocioAberto && W.negocioAberto(n) && W.faseDe && W.faseDe(n) === 'proposta');
+    const funil = crm ? propostas.reduce((a, n) => a + (+n.valor || 0), 0) * (crm.conversao != null ? crm.conversao : 0.5) : null;
+    const d = W.dre(db, mes, emp), porSocio = d && d.porSocio != null ? d.porSocio : null;
+    const atrasados = (db.fin || []).filter(l => l && !W.ehReceita(l) && !W.realizado(l) && W.empresaOk(l, emp) && W.vencDe(l) < h && (W.ehEmprestimo(l) || /imposto|tribut|inss|dctf|darf|das\b|fgts/i.test((l.categoria || '') + ' ' + (l.naturezaContabil || '') + ' ' + (l.desc || ''))));
+    const impVenc = atrasados.filter(l => !W.ehEmprestimo(l));
+    const cor = (ruim, atencao) => (ruim ? 'vermelho' : atencao ? 'ambar' : 'verde');
+    const cards = [
+      { k: 'lucroMes', l: 'Lucro bruto fechado no mês', v: lucroFechado, tipo: 'brl', meta: fixas ? 2 * fixas : null, ctx: fixas ? 'meta 2× fixas' : 'contratos do mês', cor: fixas ? cor(lucroFechado < 2 * fixas) : 'neutro', ir: 'resop' },
+      { k: 'equilibrio', l: 'Ponto de equilíbrio', v: fixas && margem3 > 0 ? fixas / margem3 : null, tipo: 'brl', ctx: 'vender por mês para empatar', cor: 'neutro' },
+      { k: 'margem3', l: 'Margem média s/ receita', v: margem3, tipo: 'pct', meta: 0.15, ctx: '3 meses · meta 15%', cor: margem3 == null ? 'neutro' : cor(margem3 < 0.15) },
+      { k: 'abaixo', l: 'Ops abaixo do mínimo', v: cart.abaixo.length, tipo: 'n', ctx: cart.abaixo.slice(0, 3).map(x => x.op).join(' · ') || 'nenhuma', cor: cor(cart.abaixo.length > 0), ir: 'carteira' },
+      { k: 'desvio', l: 'Desvio previsto × real', v: desvio, tipo: 'pctSinal', meta: 0.05, ctx: `${prevReal.length} concluída(s) · limite +5%`, cor: desvio == null ? 'neutro' : cor(desvio > 0.05) },
+      { k: 'exposicao', l: 'Exposição cambial', v: exposicao, tipo: 'brl', meta: 20000, ctx: exp ? `US$ ${Math.round(exp.usdSemContrato || 0).toLocaleString('pt-BR')} sem câmbio` : 'sem PTAX', cor: exposicao == null ? 'neutro' : cor(exposicao > 20000), ir: 'cambio' },
+      { k: 'prazo', l: 'Prazo médio', v: prazoMedio, tipo: 'dias', meta: 110, ctx: 'contrato → entrega · 3 meses', cor: prazoMedio == null ? 'neutro' : cor(prazoMedio > 110) },
+      { k: 'inad', l: 'Inadimplência', v: inad, tipo: 'pct', meta: 0.10, ctx: 'vencido +5 dias ÷ a receber', cor: inad == null ? 'neutro' : cor(inad > 0.10), ir: 'contas' },
+      { k: 'concentracao', l: 'Concentração', v: s.concentracaoTop5 || null, tipo: 'pct', meta: 0.60, ctx: '5 maiores clientes · 12 meses', cor: s.concentracaoTop5 == null ? 'neutro' : cor(s.concentracaoTop5 > 0.60) },
+      { k: 'funil', l: 'Funil ponderado', v: funil, tipo: 'brl', meta: fixas ? 2 * fixas : null, ctx: `${propostas.length} proposta(s) × conversão 3 meses`, cor: funil == null || !fixas ? 'neutro' : cor(funil < 2 * fixas), ir: 'crm' },
+      { k: 'socio', l: 'Lucro por sócio no mês', v: porSocio, tipo: 'brl', ctx: 'lucro antes do IR ÷ 2', cor: 'neutro', ir: 'fin' },
+      { k: 'atraso', l: 'Impostos e dívidas em atraso', v: somaV(atrasados), tipo: 'brl', ctx: `${impVenc.length} imposto(s) · ${atrasados.length - impVenc.length} empréstimo(s)`, cor: cor(impVenc.length > 0, atrasados.length > 0), ir: 'contas' }];
+    const graficos = {
+      lucroFixas: meses12.map(m => ({ mes: m, lucro: lucroMes(m), fixas: (s.porMes.find(x => x.mes === m) || {}).despesas || 0 })),
+      margemMes: meses12.map(m => { const r = receitaMes(m); return { mes: m, margem: r ? lucroMes(m) / r : null }; }),
+      previstoReal: prevReal.slice(-12) };
+    return { cards, graficos, fixasMes: fixas };
+  }
+  /** Caixa mínimo (Configurações). */
+  function salvarCaixaMinimo(db, valor, por, agora) {
+    const v = +valor; if (!(v >= 0)) return { ok: false, msg: 'Valor inválido.' };
+    db.hubPainel = db.hubPainel || {}; db.hubPainel._financeiro = Object.assign({}, db.hubPainel._financeiro, { caixaMinimo: v, por: por || '', em: agora || new Date().toISOString() });
+    return { ok: true };
+  }
+
+  return { carteiraOps, caixaDoMes, indicadoresGestao, caixaMinimo, salvarCaixaMinimo, CAIXA_MINIMO_PADRAO, fimDoMes, caixaHoje, TIPOS_CONTA, ehBanco, contasBancarias, migrarContas, movimentoDaChave, vincularGrupo, desvincularGrupo, vincularUm, sugestoesConciliacao, corrigirDataPagamento, mudarConta, MOTIVOS_SEM_NOTA, MOTIVO_EXIGE_OBS, motivosSemNota, NATUREZAS, naturezas, TIPOS_CONTRAPARTE, SEM_DOCUMENTO, TIPOS_COMPROVANTE,
     situacaoLanc: situacao, contraparteOk, notaOk, comprovanteOk, classificado, somaNotas, contasAtivas, contaDoLanc, saldosExtrato, parecido,
     normalizarLeitura, empresaDoDoc, sugerirComprovante, legendaDoComprovante, aplicarComprovante, sugerirNotas, casarTransferencias, fechamento, PENDENCIAS,
     notaTexto, COLUNAS_PACOTE, linhasPacote };

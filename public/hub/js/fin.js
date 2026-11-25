@@ -1,7 +1,11 @@
 /* Hub 2.0 — Financeiro: painel do mês, DRE, contas, lançamentos e resultado por operação. */
 (function () {
   const H = window.HUB, W = H.W, esc = H.esc;
-  const F = { mes: W.hojeISO().slice(0, 7), empresa: 'todas', q: '', tipo: '', status: '', op: '' };
+  const F = { mes: W.hojeISO().slice(0, 7), empresa: 'todas', q: '', tipo: '', status: '', op: '', vencidos: false };
+  /* Atalho das telas novas (Caixa do mês, Torre do Matheus): Lançamentos já filtrado em "vencidos sem baixa". */
+  H.lancVencidos = () => { Object.assign(F, { vencidos: true, q: '', status: '', tipo: '', op: '' }); H.ir('lanc'); };
+  H.finEmpresa = () => F.empresa;
+  H.setFinEmpresa = e => { F.empresa = e; };
   const CATEGORIAS = ['', 'Empréstimo', 'Estudo impo', 'Imposto geral', 'Imposto importação', 'Transferência'];
   const mesExt = m => { const [a, b] = m.split('-'); return ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][+b - 1] + '/' + a; };
 
@@ -159,14 +163,15 @@
     if (!H.pode('fin.lancar')) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
     const db = H.db;
     const q = F.q.trim().toLowerCase();
+    const hj = W.hojeISO();
     const lista = db.fin.filter(l => l && (F.empresa === 'todas' || (l.empresa || 'WindGate') === F.empresa)
-      && (q ? W.lancBatePesquisa(db, l, q) : W.mesDe(W.vencDe(l)) === F.mes)
+      && (F.vencidos ? (!W.realizado(l) && !W.transferencia(l) && W.vencDe(l) < hj) : q ? W.lancBatePesquisa(db, l, q) : W.mesDe(W.vencDe(l)) === F.mes)
       && (!F.tipo || l.tipo === F.tipo) && (!F.status || l.status === F.status) && (!F.op || l.op === F.op))
       .sort((a, b) => W.vencDe(a).localeCompare(W.vencDe(b)));
     const ops = [...new Set(db.fin.map(l => l && l.op).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
     const ent = lista.filter(W.ehReceita).reduce((s, l) => s + (+l.valor || 0), 0), sai = lista.filter(l => !W.ehReceita(l)).reduce((s, l) => s + (+l.valor || 0), 0);
     el.innerHTML = `
-      <div class="head"><div><h1>Lançamentos</h1><p class="sub">${q ? 'Busca em todos os meses' : 'Vencimentos de ' + mesExt(F.mes)}${H.pode('fin.ver') ? ` · entradas ${W.fmtBRL(ent)} · saídas ${W.fmtBRL(sai)}` : ''}</p></div>${filtrosTopo()}</div>
+      <div class="head"><div><h1>Lançamentos</h1><p class="sub">${F.vencidos ? 'Vencidos sem baixa, de todos os meses <button class="btn ghost sm" id="lvx">✕ tirar filtro</button>' : q ? 'Busca em todos os meses' : 'Vencimentos de ' + mesExt(F.mes)}${H.pode('fin.ver') ? ` · entradas ${W.fmtBRL(ent)} · saídas ${W.fmtBRL(sai)}` : ''}</p></div>${filtrosTopo()}</div>
       <div class="box"><div class="filters">
         <input type="search" id="lq" placeholder="Buscar em todos os meses: descrição, operação, valor…" value="${esc(F.q)}">
         <select id="lt" class="inp"><option value="">Receitas e despesas</option><option ${F.tipo === 'Receita' ? 'selected' : ''}>Receita</option><option ${F.tipo === 'Despesa' ? 'selected' : ''}>Despesa</option></select>
@@ -180,22 +185,26 @@
     el.querySelector('#lt').onchange = e => { F.tipo = e.target.value; H.render(); };
     el.querySelector('#ls').onchange = e => { F.status = e.target.value; H.render(); };
     el.querySelector('#lo').onchange = e => { F.op = e.target.value; H.render(); };
+    const lvx = el.querySelector('#lvx'); if (lvx) lvx.onclick = () => { F.vencidos = false; H.render(); };
   };
 
   /* ================= RESULTADO POR OPERAÇÃO ================= */
   H.telas.resop = function (el) {
     if (!H.podeFin()) { el.innerHTML = '<div class="banner">Acesso restrito ao Financeiro.</div>'; return; }
-    const rs = W.resultadoPorOp(H.db, F.empresa);
-    const tot = rs.reduce((a, r) => ({ rec: a.rec + r.receita, desp: a.desp + r.despesa, res: a.res + r.resultado, sr: a.sr + r.saldoReceber }), { rec: 0, desp: 0, res: 0, sr: 0 });
-    const opMap = Object.fromEntries(H.db.ops.map(o => [o.id, o]));
+    /* Mesma regra da Carteira: contêiner compartilhado = uma linha da mãe com o total; ▸ abre as filhas. */
+    const cart = W.carteiraOps(H.db, F.empresa, 'todas', W.hojeISO()), rs = cart.linhas.slice().sort((a, b) => String(b.op).localeCompare(String(a.op), 'pt-BR', { numeric: true }));
+    const tot = { rec: cart.total.receita, desp: cart.total.custo, res: cart.total.lucro, sr: cart.total.faltaReceber };
+    const abertas = H.resopAbertas = H.resopAbertas || {};
+    const linha = (r, filha) => `<tr class="click" data-op="${esc(r.op)}"><td class="mono">${filha ? '&nbsp;&nbsp;↳ ' : ''}${r.filhas ? `<button class="btn ghost sm" data-abre="${esc(r.op)}" aria-label="Abrir clientes" style="padding:0 6px">${abertas[r.op] ? '▾' : '▸'}</button> ` : ''}<b>${esc(r.op)}</b><br><small class="note">${esc(r.cliente || '')}</small></td><td>${r.status ? H.pillStatus(r.status) : '<span class="note">—</span>'}</td>
+        <td class="num">${W.fmtBRL(r.receita)}</td><td class="num">${W.fmtBRL(r.custo)}</td><td class="num ${r.lucro < 0 ? 'neg' : 'pos'}"><b>${W.fmtBRL(r.lucro)}</b></td>
+        <td class="num">${r.margem == null ? '—' : (r.margem * 100).toFixed(1) + '%'}</td><td class="num">${W.fmtBRL(r.faltaReceber)}</td><td class="num ${r.caixa < 0 ? 'neg' : ''}">${W.fmtBRL(r.caixa)}</td></tr>`;
     el.innerHTML = `
-      <div class="head"><div><h1>Resultado por operação</h1><p class="sub">Operação inteira, todos os meses: receita, custos, margem e o que ainda falta receber.</p></div>${filtrosTopo()}</div>
+      <div class="head"><div><h1>Resultado por operação</h1><p class="sub">Operação inteira, todos os meses: receita, custos, margem e o que ainda falta receber. Contêiner compartilhado numa linha só (▸ abre os clientes).</p></div>${filtrosTopo()}</div>
       <div class="box"><div class="tw"><table><thead><tr><th>Operação</th><th>Etapa</th><th class="num">Receita</th><th class="num">Custos</th><th class="num">Resultado</th><th class="num">Margem s/ receita</th><th class="num">Falta receber</th><th class="num">Caixa hoje</th></tr></thead><tbody>
-      ${rs.map(r => `<tr class="click" data-op="${esc(r.op)}"><td class="mono"><b>${esc(r.op)}</b><br><small class="note">${esc((opMap[r.op] || {}).cliente || '')}</small></td><td>${opMap[r.op] ? H.pillStatus(opMap[r.op].status) : '<span class="note">—</span>'}</td>
-        <td class="num">${W.fmtBRL(r.receita)}</td><td class="num">${W.fmtBRL(r.despesa)}</td><td class="num ${r.resultado < 0 ? 'neg' : 'pos'}"><b>${W.fmtBRL(r.resultado)}</b></td>
-        <td class="num">${r.margem == null ? '—' : (r.margem * 100).toFixed(1) + '%'}</td><td class="num">${W.fmtBRL(r.saldoReceber)}</td><td class="num ${r.caixa < 0 ? 'neg' : ''}">${W.fmtBRL(r.caixa)}</td></tr>`).join('')}
+      ${rs.map(r => linha(r) + (r.filhas && abertas[r.op] ? r.filhas.map(f => linha(f, true)).join('') : '')).join('')}
       </tbody><tfoot><tr><td colspan="2">Total</td><td class="num">${W.fmtBRL(tot.rec)}</td><td class="num">${W.fmtBRL(tot.desp)}</td><td class="num">${W.fmtBRL(tot.res)}</td><td class="num">${tot.rec ? (tot.res / tot.rec * 100).toFixed(1) + '%' : '—'}</td><td class="num">${W.fmtBRL(tot.sr)}</td><td></td></tr></tfoot></table></div></div>`;
     ligarTopo(el);
+    el.querySelectorAll('[data-abre]').forEach(b => b.onclick = e => { e.stopPropagation(); abertas[b.dataset.abre] = !abertas[b.dataset.abre]; H.render(); });
     el.querySelectorAll('[data-op]').forEach(x => x.onclick = () => H.ir('ficha', x.dataset.op));
   };
 
@@ -337,6 +346,7 @@
     };
   }
   H.editarLanc = editarLanc;
+  H.darBaixa = l => darBaixa(l);
 
   /* ---------- Dados fiscais do lançamento (fechamento trimestral) ----------
      Contraparte, notas vinculadas (uma nota pode cobrir várias parcelas) ou o
