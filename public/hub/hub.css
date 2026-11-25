@@ -374,3 +374,11 @@ tr.clic:hover td{background:var(--surface-2)}
 .bp-rec:hover{background:var(--blue-soft)}
 .bp-vazio{padding:12px;color:var(--faint)}
 .bp-rod{padding:6px 12px 2px;border-top:1px solid var(--line);font-size:11px}
+/* Ponto em destaque (Parte 4C): selo fixo no topo */
+.selo-ponto{border:0;border-radius:99px;padding:6px 12px;font-weight:700;font-size:12.5px;white-space:nowrap;cursor:pointer}
+.selo-ponto.vermelho{background:var(--crit-soft);color:var(--crit)}
+.selo-ponto.verde{background:var(--ok-soft);color:var(--ok)}
+.selo-ponto.ambar{background:var(--warn-soft);color:var(--warn)}
+.selo-ponto.pisca{animation:seloPisca 1.2s ease-in-out infinite}
+@keyframes seloPisca{50%{box-shadow:0 0 0 4px var(--crit-soft);opacity:.75}}
+@media (prefers-reduced-motion:reduce){.selo-ponto.pisca{animation:none;outline:2px solid currentColor}}

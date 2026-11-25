@@ -310,6 +310,7 @@
     render();
     clearInterval(tSync); tSync = setInterval(sincronizar, 15000);
     if (H.chatIniciar) H.chatIniciar();
+    if (H.pontoBoot && !H.perfil().externo) H.pontoBoot();   // ponto em destaque: selo, janela do dia e lembretes
   }
 
   function sair(msg) {

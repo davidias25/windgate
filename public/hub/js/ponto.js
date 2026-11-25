@@ -301,4 +301,115 @@
       } catch (e) { if (e.message !== '401') H.toast('Falha ao salvar'); }
     };
   };
+  /* =====================================================================
+     Ponto em destaque (Parte 4C): janela ao abrir o Hub sem entrada, selo fixo no topo de todas as telas,
+     card na Torre e lembretes (08:15, 13:30, 18:00 e ao fechar). A hora que vale é a do servidor; o estado
+     vem de /api/ponto/meu-estado (só os horários da própria pessoa).
+     ===================================================================== */
+  const P4 = { estado: null, janelaFechadaEm: null, lembrados: {}, equipe: null, equipeEm: 0, ocupado: false };
+  const horaAgora = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  async function estadoP4() {
+    try { const r = await H.api('/api/ponto/meu-estado'); if (r.ok) P4.estado = await r.json(); } catch (e) { /* sem servidor: o selo some */ }
+    return P4.estado;
+  }
+  /** Bate o ponto de fora da tela do ponto (selo, janela, card). Sem localização, pergunta antes. */
+  async function baterP4(tipo, extra) {
+    if (P4.ocupado || !tipo) return;
+    P4.ocupado = true;
+    try {
+      const pos = await posicao();
+      let corpo;
+      if (pos.erro) {
+        if (!confirm(`${pos.erro}. Registrar sem localização? O registro fica marcado para a diretoria.`)) return;
+        corpo = { tipo, motivoSemLocal: pos.erro };
+      } else corpo = { tipo, lat: pos.lat, lon: pos.lon, precisao: pos.precisao };
+      Object.assign(corpo, extra || {});
+      const r = await H.api('/api/ponto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 409) return H.toast(esc(j.message || 'Registro repetido'));
+      if (!r.ok) throw new Error(j.message || 'Falha ao registrar');
+      H.toast(`Ponto registrado às <b>${esc(j.hora)}</b> · ${esc(W.rotuloPonto(j.tipo))}${j.semLocalizacao ? ' (sem localização)' : ''}`);
+      st.estado = null; await estadoP4(); desenharSelo(); if (H.fecharModal) H.fecharModal(); if (['torre', 'ponto'].includes(H.estado.tela)) H.render();
+    } catch (e) { if (e.message !== '401') H.toast(esc(e.message || 'Erro ao registrar') + ' — o ponto NÃO foi gravado.'); }
+    finally { P4.ocupado = false; }
+  }
+  H.baterPonto = baterP4;
+
+  /* Selo fixo no topo, ao lado dos alertas. */
+  function desenharSelo() {
+    const topo = document.querySelector('header.top'); if (!topo || !P4.estado || !P4.estado.cienciaEm) return;
+    let b = document.getElementById('seloPonto');
+    if (!b) { b = document.createElement('button'); b.id = 'seloPonto'; b.className = 'selo-ponto'; const sino = document.getElementById('bell'); topo.insertBefore(b, sino || null); b.onclick = () => { const s = W.seloPonto(P4.estado, horaAgora()); if (s.tipo) baterP4(s.tipo); else H.ir('ponto'); }; }
+    const s = W.seloPonto(P4.estado, horaAgora());
+    b.className = 'selo-ponto ' + s.cor + (s.pisca ? ' pisca' : '');
+    b.textContent = s.texto; b.title = s.tipo ? 'Clique para registrar: ' + W.rotuloPonto(s.tipo) : 'Ponto do dia';
+  }
+
+  /* Janela do primeiro acesso do dia sem entrada. Pode fechar; volta a cada nova abertura do Hub até bater. */
+  function janelaEntrada() {
+    const e = P4.estado; if (!e || !e.cienciaEm || (e.horas && e.horas.entrada) || !W.diaUtilPonto(e.hoje)) return;
+    const nome = ((H.user && H.user.nome) || H.userKey).split(' ')[0], ho = e.homeOffice || {};
+    const m = H.modal('Ponto de entrada', `<div style="text-align:center"><h2 style="margin:4px 0 6px">Bom dia, ${esc(nome)}</h2>
+      <p class="note" id="p4local">Verificando a localização…</p>
+      <button class="btn pri" id="p4ent" style="width:100%;padding:16px;font-size:16px;font-weight:700;margin-top:12px">Bater ponto de entrada</button>
+      <button class="btn" id="p4ho" style="width:100%;margin-top:8px">Estou em home office${ho.limite ? ` (${ho.usados || 0} de ${ho.limite} no mês)` : ''}</button>
+      <p class="note" style="margin-top:10px">A localização é pedida só agora, no clique. Os registros são acessados somente pela diretoria.</p></div>`, '<button class="btn" data-x>Fechar</button>');
+    m.querySelector('#p4ent').onclick = () => baterP4('entrada');
+    m.querySelector('#p4ho').onclick = () => baterP4('entrada', { homeOffice: true });
+    /* Local detectado: só "escritório" ou "fora", decidido pelo servidor ao registrar; aqui, só se o navegador já tem permissão. */
+    const alvo = m.querySelector('#p4local');
+    try { navigator.permissions && navigator.permissions.query({ name: 'geolocation' }).then(p => { if (alvo) alvo.textContent = p.state === 'granted' ? 'Localização liberada: o registro diz se é escritório ou fora.' : 'A localização será pedida ao registrar.'; }).catch(() => { if (alvo) alvo.textContent = ''; }); } catch (x) { if (alvo) alvo.textContent = ''; }
+  }
+
+  /* Dia anterior sem saída: "incompleto", pede justificativa (vira um ajuste ligado ao dia). */
+  function janelaIncompleto() {
+    const d = P4.estado && P4.estado.incompleto; if (!d) return false;
+    const m = H.modal('Dia incompleto no ponto', `<p>Em <b>${esc(W.dataBR(d))}</b> há entrada e não há saída. Conte o que aconteceu (ex.: "saí às 18:10 e esqueci de bater").</p>
+      <div class="fields" style="margin-top:8px"><div class="f w4"><label class="lbl" for="p4just">Justificativa</label><textarea id="p4just" rows="3" maxlength="500"></textarea></div></div>`,
+      '<button class="btn" data-x>Depois</button><button class="btn blue" id="p4jok">Registrar justificativa</button>');
+    m.querySelector('#p4jok').onclick = () => { const j = m.querySelector('#p4just').value.trim(); if (!j) return H.toast('Escreva a justificativa'); baterP4('ajuste', { justificativa: `[${W.dataBR(d)}] ${j}`, refData: d }); };
+    return true;
+  }
+
+  /* Lembretes: um por tipo por dia, com notificação do navegador quando permitida. */
+  function lembrar() {
+    const e = P4.estado; if (!e || !e.cienciaEm) return;
+    desenharSelo();
+    const l = W.lembretePonto(e, horaAgora(), e.hoje); if (!l) return;
+    const chave = e.hoje + l.k; if (P4.lembrados[chave]) return; P4.lembrados[chave] = true;
+    H.toast(esc(l.texto) + ' <b>Clique no selo do topo.</b>');
+    try { if (window.Notification && Notification.permission === 'granted') new Notification('WindGate · Ponto', { body: l.texto }); } catch (x) {}
+  }
+
+  /* Card na Torre: horários do dia e os botões Almoço e Saída. */
+  H.pontoCardTorre = () => {
+    const e = P4.estado; if (!e) return '<p class="note">Carregando o ponto…</p>';
+    const hs = e.horas || {}, s = W.seloPonto(e, horaAgora());
+    return `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;text-align:center">${[['entrada', 'Entrada'], ['almoco', 'Almoço'], ['volta', 'Volta'], ['saida', 'Saída']].map(([k, l]) => `<div style="background:var(--surface-2);border-radius:8px;padding:6px"><div class="note">${l}</div><b class="mono">${esc(hs[k] || '—')}</b></div>`).join('')}</div>
+      <div class="btns" style="margin-top:8px">${!hs.entrada ? '<button class="btn pri sm" data-pontobtn="entrada">Bater entrada</button>' : ''}${hs.entrada && !hs.almoco ? '<button class="btn sm" data-pontobtn="almoco">Almoço</button>' : ''}${hs.almoco && !hs.volta ? '<button class="btn sm" data-pontobtn="volta">Volta do almoço</button>' : ''}${hs.entrada && !hs.saida ? '<button class="btn sm" data-pontobtn="saida">Saída</button>' : ''}</div>
+      ${s.cor === 'vermelho' ? `<p class="note" style="color:var(--crit);margin-top:6px">${esc(s.texto)}</p>` : ''}`;
+  };
+  document.addEventListener('click', ev => { const b = ev.target && ev.target.closest && ev.target.closest('[data-pontobtn]'); if (b) { ev.preventDefault(); baterP4(b.dataset.pontobtn); } });
+
+  /* Ponto da equipe (Torre do Samir e do Davi): o servidor só responde a eles. Cache de 5 minutos. */
+  H.pontoEquipeHoje = () => {
+    if (!W.podeVerEquipe || !(W.perfilDe(H.db, H.userKey).id === 'diretoria' || W.perfilDe(H.db, H.userKey).id === 'operacoes')) return null;
+    if (Date.now() - P4.equipeEm > 300000) { P4.equipeEm = Date.now(); H.api('/api/ponto/equipe-hoje').then(r => r.ok ? r.json() : null).then(j => { if (j && j.equipe) { P4.equipe = j.equipe; if (H.estado.tela === 'torre') H.render(); } }).catch(() => {}); }
+    return P4.equipe;
+  };
+
+  /* Ao entrar no Hub: estado, selo, janela do dia (ou dia incompleto) e o relógio dos lembretes. */
+  let tP4 = null;
+  H.pontoBoot = async function () {
+    if (!H.token) return;
+    await estadoP4(); if (!P4.estado) return;
+    desenharSelo();
+    if (P4.estado.cienciaEm && !janelaIncompleto()) janelaEntrada();
+    try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission().catch(() => {}); } catch (x) {}
+    clearInterval(tP4); tP4 = setInterval(async () => { if (!H.token) return clearInterval(tP4); await estadoP4(); lembrar(); }, 60000);
+    lembrar();
+  };
+  /* Fechar o Hub depois das 17h com entrada e sem saída: o navegador pergunta antes de sair. */
+  window.addEventListener('beforeunload', ev => { const e = P4.estado; if (e && e.horas && e.horas.entrada && !e.horas.saida && horaAgora() >= '17:00') { ev.preventDefault(); ev.returnValue = ''; } });
+
 })();

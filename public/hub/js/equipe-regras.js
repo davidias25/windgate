@@ -227,7 +227,65 @@
     return { ok: true, corpo: { lat, lon, raio, rotulo: String(c.rotulo || '').trim().slice(0, 120) } };
   }
 
+  /* ---------- Ponto em destaque (Parte 4C) ---------- */
+  const minutos = hhmm => { const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || '')); return m ? +m[1] * 60 + +m[2] : null; };
+  const diaUtilPonto = data => { const d = new Date(String(data).slice(0, 10) + 'T12:00:00Z').getUTCDay(); return d !== 0 && d !== 6; };
+  /**
+   * Selo do topo. estado: { ultimoTipo, horas: { entrada, almoco, volta, saida } }; hora: 'HH:MM' de São Paulo.
+   * Vermelho "Bater ponto de entrada" (pisca a partir das 08:15) · verde "Ponto · entrada 08:02" · âmbar "Voltar do almoço"
+   * · vermelho "Bater ponto de saída" a partir das 18:00. Clicar bate o ponto da vez (tipo).
+   */
+  function seloPonto(estado, hora) {
+    const e = estado || {}, hs = e.horas || {}, m = minutos(hora) || 0, u = e.ultimoTipo;
+    if (!hs.entrada && (!u || u === 'saida' && !hs.entrada)) return { tipo: 'entrada', texto: 'Bater ponto de entrada', cor: 'vermelho', pisca: m >= minutos('08:15') };
+    if (u === 'almoco') return { tipo: 'volta', texto: 'Voltar do almoço', cor: 'ambar', pisca: m >= minutos('13:30') };
+    if (u === 'saida') return { tipo: null, texto: `Ponto · saída ${hs.saida || ''}`.trim(), cor: 'verde', pisca: false };
+    if (m >= minutos('18:00')) return { tipo: 'saida', texto: 'Bater ponto de saída', cor: 'vermelho', pisca: true };
+    return { tipo: u === 'entrada' ? 'almoco' : 'saida', texto: `Ponto · entrada ${hs.entrada || ''}`.trim(), cor: 'verde', pisca: false };
+  }
+  /** Lembrete da vez (08:15 entrada, 13:30 volta do almoço, 18:00 saída), ou null. Fim de semana: nenhum. */
+  function lembretePonto(estado, hora, data) {
+    if (data && !diaUtilPonto(data)) return null;
+    const e = estado || {}, hs = e.horas || {}, m = minutos(hora) || 0, u = e.ultimoTipo;
+    if (!hs.entrada && m >= minutos('08:15')) return { k: 'entrada', texto: 'Você ainda não bateu o ponto de entrada.' };
+    if (u === 'almoco' && m >= minutos('13:30')) return { k: 'volta', texto: 'Lembrete: bater a volta do almoço.' };
+    if (hs.entrada && u !== 'saida' && m >= minutos('18:00')) return { k: 'saida', texto: 'Lembrete: bater o ponto de saída.' };
+    return null;
+  }
+  /** Horários do dia da pessoa (primeiro de cada tipo). */
+  function horasDoDia(registros, usuario, data) {
+    const out = {};
+    (registros || []).filter(r => r && r.usuario === usuario && r.data === data).forEach(r => { if (['entrada', 'almoco', 'volta', 'saida'].includes(r.tipo) && !out[r.tipo]) out[r.tipo] = r.hora; });
+    return out;
+  }
+  /**
+   * Dia útil anterior com entrada e sem saída: fica "incompleto" e pede justificativa (um ajuste com refData).
+   * Olha até 10 dias para trás; devolve a data mais recente ainda sem justificativa, ou null.
+   */
+  function diaIncompleto(registros, usuario, hoje) {
+    const meus = (registros || []).filter(r => r && r.usuario === usuario);
+    for (let i = 1; i <= 10; i++) {
+      const d = new Date(String(hoje).slice(0, 10) + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - i); const data = d.toISOString().slice(0, 10);
+      const doDia = meus.filter(r => r.data === data);
+      if (!doDia.some(r => r.tipo === 'entrada')) continue;
+      if (doDia.some(r => r.tipo === 'saida')) continue;
+      if (meus.some(r => r.tipo === 'ajuste' && r.refData === data)) continue;
+      return data;
+    }
+    return null;
+  }
+  /** Ponto da equipe hoje (Torre do Samir e do Davi): entrada e local de cada um; sem entrada = "sem ponto". */
+  function pontoEquipeHoje(registros, usuarios, data) {
+    const out = {};
+    (usuarios || []).forEach(k => {
+      const e = (registros || []).find(r => r && r.usuario === k && r.data === data && r.tipo === 'entrada');
+      out[k] = e ? { entrada: e.hora, local: e.homeOffice ? 'home office' : e.semLocalizacao ? 'sem localização' : e.dentroDoRaio === true ? 'escritório' : e.dentroDoRaio === false ? 'fora' : '' } : { entrada: null, local: '' };
+    });
+    return out;
+  }
+
   return {
+    seloPonto, lembretePonto, horasDoDia, diaIncompleto, pontoEquipeHoje, diaUtilPonto,
     ABAS_LEGADO, podeGerirEquipe, podeVerEquipe, podeRelatorioPonto, podeConcederTudo, podeAjustarPrazos,
     pinValido, corValida, editarUsuario, chaveDeNome, novoUsuario,
     nomeBackup, textoBackup, importarBackup,

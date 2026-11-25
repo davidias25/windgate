@@ -290,7 +290,10 @@ app.post('/api/ponto', auth.exigirToken, async (req, res) => {
       ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim(),
       userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
       // Só o ajuste carrega justificativa; os demais nascem do clique.
-      justificativa: tipo === 'ajuste' ? String(b.justificativa || '').slice(0, 500) : ''
+      justificativa: tipo === 'ajuste' ? String(b.justificativa || '').slice(0, 500) : '',
+      /* Parte 4C: "Estou em home office" na janela do dia; ajuste de dia incompleto aponta o dia (refData). */
+      homeOffice: tipo === 'entrada' && b.homeOffice === true,
+      refData: tipo === 'ajuste' && /^\d{4}-\d{2}-\d{2}$/.test(String(b.refData || '')) ? String(b.refData) : ''
     };
     if (tipo === 'ajuste' && !reg.justificativa) {
       return res.status(400).json({ success: false, message: 'Ajuste exige justificativa.' });
@@ -315,12 +318,18 @@ app.get('/api/ponto/meu-estado', auth.exigirToken, async (req, res) => {
   const dados = await pontoStore.carregar();
   const hoje = pontoStore.agoraSP().data;
   const meus = dados.registros.filter(r => r.usuario === req.usuario.k && r.data === hoje);
-  const ultimo = meus[meus.length - 1];
+  const ultimo = meus.filter(r => !['outro', 'ajuste'].includes(r.tipo)).pop() || meus[meus.length - 1];
+  /* Parte 4C: os horários do dia (só os da própria pessoa), o home office do mês e o dia anterior sem saída. */
+  const ER = require('../public/hub/js/equipe-regras.js');
+  const limites = Object.assign({}, LIMITES_HO, (((memoryDB || {}).hubPainel || {})._rh || {}).limitesHO);
   res.json({
     success: true,
     hoje,
     ultimoTipo: ultimo ? ultimo.tipo : null,
     ultimaHora: ultimo ? ultimo.hora : null,
+    horas: ER.horasDoDia(dados.registros, req.usuario.k, hoje),
+    homeOffice: { usados: homeOfficeDoMes(dados.registros, req.usuario.k, hoje.slice(0, 7)), limite: +limites[req.usuario.k] || null },
+    incompleto: ER.diaIncompleto(dados.registros, req.usuario.k, hoje),
     quantidadeHoje: meus.length,
     cienciaEm: (dados.ciencias || {})[req.usuario.k] || null,
     ehDiretoria: auth.ehDiretoria(req.usuario.k)
@@ -337,6 +346,32 @@ app.post('/api/ponto/ciencia', auth.exigirToken, async (req, res) => {
   }
   res.json({ success: true, em: dados.ciencias[req.usuario.k] });
 });
+
+/* Ponto da equipe hoje (Torre do Samir e do Davi): só a hora da entrada e o local de cada um, sem coordenadas. */
+const podePontoEquipe = k => auth.ehDiretoria(k) || acesso.perfil(memoryDB, k) === 'operacoes';
+function equipeDoPonto() {
+  return Object.keys((memoryDB || {}).users || {}).filter(k => { const p = acesso.perfil(memoryDB, k); return p && !['diretoria', 'contador'].includes(p) && !((memoryDB.users[k] || {}).inativo); });
+}
+app.get('/api/ponto/equipe-hoje', auth.exigirToken, async (req, res) => {
+  if (!podePontoEquipe(req.usuario.k)) return res.status(403).json({ success: false, message: 'Só Samir e Davi.' });
+  const dados = await pontoStore.carregar(), hoje = pontoStore.agoraSP().data;
+  res.json({ success: true, hoje, equipe: require('../public/hub/js/equipe-regras.js').pontoEquipeHoje(dados.registros, equipeDoPonto(), hoje) });
+});
+/* 09:30 (São Paulo, dia útil): quem não bateu a entrada vira recado para o Samir e o Davi. Uma vez por dia. */
+async function alertaPonto930(agora) {
+  if (!memoryDB) return null;
+  const t = pontoStore.agoraSP(agora), ER = require('../public/hub/js/equipe-regras.js');
+  if (!ER.diaUtilPonto(t.data) || String(t.hora) < '09:30') return null;
+  const id = 'ponto930-' + t.data;
+  if ((memoryDB.hubRecados || []).some(r => r && String(r._id).startsWith(id))) return null;
+  const dados = await pontoStore.carregar(), eq = ER.pontoEquipeHoje(dados.registros, equipeDoPonto(), t.data);
+  const sem = Object.keys(eq).filter(k => !eq[k].entrada).map(k => ((memoryDB.users[k] || {}).nome || k).split(' ')[0]);
+  if (!sem.length) return [];
+  const texto = `Sem ponto de entrada às 09:30: ${sem.join(', ')}.`;
+  await gravarParcial({ hubRecados: ['samir', 'davi'].map(p => ({ _id: id + '-' + p, texto, para: p, prio: 'alta', ate: t.data, por: 'Sistema · Ponto', em: new Date().toISOString(), feito: {} })) });
+  return sem;
+}
+setInterval(() => alertaPonto930().catch(e => console.warn('⚠️ Ponto 09:30:', e.message)), 5 * 60 * 1000).unref();
 
 /* ---------- daqui para baixo, SÓ a diretoria ---------- */
 

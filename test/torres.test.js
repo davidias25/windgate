@@ -77,5 +77,24 @@ console.log('\nAbas e Personalizar:');
   ok(t.every(x => x.k === 'receber' || x.valor == null), 'Travando da Ívina: sem valor de custo (só cobrança de cliente)');
 }
 
+console.log('\nPonto em destaque (Parte 4C):');
+{
+  const E = require('../public/hub/js/equipe-regras.js');
+  const s0 = E.seloPonto({ ultimoTipo: null, horas: {} }, '08:10'), s1 = E.seloPonto({ ultimoTipo: null, horas: {} }, '08:20');
+  ok(s0.cor === 'vermelho' && s0.texto === 'Bater ponto de entrada' && !s0.pisca && s1.pisca && s1.tipo === 'entrada', 'sem entrada: vermelho "Bater ponto de entrada", pisca a partir das 08:15; clicar bate a entrada');
+  const s2 = E.seloPonto({ ultimoTipo: 'entrada', horas: { entrada: '08:02' } }, '10:00');
+  ok(s2.cor === 'verde' && s2.texto === 'Ponto · entrada 08:02', 'depois da entrada: verde "Ponto · entrada 08:02"');
+  ok(E.seloPonto({ ultimoTipo: 'almoco', horas: { entrada: '08:02', almoco: '12:00' } }, '13:00').texto === 'Voltar do almoço', 'no almoço: âmbar "Voltar do almoço"');
+  const s3 = E.seloPonto({ ultimoTipo: 'volta', horas: { entrada: '08:02' } }, '18:01');
+  ok(s3.cor === 'vermelho' && s3.tipo === 'saida' && /saída/.test(s3.texto), 'depois das 18:00: vermelho "Bater ponto de saída"');
+  ok(E.lembretePonto({ horas: {} }, '08:16', '2026-11-18').k === 'entrada' && E.lembretePonto({ ultimoTipo: 'almoco', horas: { entrada: '08:00' } }, '13:31', '2026-11-18').k === 'volta'
+    && E.lembretePonto({ ultimoTipo: 'volta', horas: { entrada: '08:00' } }, '18:00', '2026-11-18').k === 'saida' && E.lembretePonto({ horas: {} }, '08:16', '2026-11-21') === null, 'lembretes 08:15, 13:30 e 18:00; nada no fim de semana');
+  const regs = [{ usuario: 'ivina', data: '2026-11-17', tipo: 'entrada', hora: '08:30' }, { usuario: 'ivina', data: '2026-11-16', tipo: 'entrada', hora: '08:10' }, { usuario: 'ivina', data: '2026-11-16', tipo: 'saida', hora: '18:00' }];
+  ok(E.diaIncompleto(regs, 'ivina', '2026-11-18') === '2026-11-17', 'dia com entrada e sem saída: "incompleto"');
+  ok(E.diaIncompleto(regs.concat([{ usuario: 'ivina', data: '2026-11-18', tipo: 'ajuste', refData: '2026-11-17' }]), 'ivina', '2026-11-18') === null, 'justificado com ajuste do dia: sai da pendência');
+  const eq = E.pontoEquipeHoje([{ usuario: 'ivina', data: '2026-11-18', tipo: 'entrada', hora: '08:31', dentroDoRaio: true }], ['ivina', 'matheus'], '2026-11-18');
+  ok(eq.ivina.entrada === '08:31' && eq.ivina.local === 'escritório' && eq.matheus.entrada === null, 'ponto da equipe: entrada e local; quem não bateu fica "sem ponto"');
+}
+
 console.log(`\n${passou} verificações passaram, ${falhou} falharam.`);
 process.exitCode = falhou ? 1 : 0;

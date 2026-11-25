@@ -24,13 +24,14 @@ process.env.SUPABASE_DISABLED = '1';
 process.env.PONTO_DIRETORIA = 'samir';
 process.env.WINDGATE_PONTO_FILE = path.join(TMP, 'ponto.json');
 
-const PINS = { samir: '1111', davi: '2222', ivina: '3333', matheus: '4444' };
+const PINS = { samir: '1111', davi: '2222', ivina: '3333', matheus: '4444', oneide: '5555' };
 fs.writeFileSync(process.env.WINDGATE_DB_FILE, JSON.stringify({
   users: {
     samir:   { nome: 'Samir Fernandes', pin: PINS.samir,   fin: true,  tabs: ['painel', 'fin', 'ponto'] },
     davi:    { nome: 'Davi',            pin: PINS.davi,    fin: true,  tabs: ['painel', 'fin', 'ponto'] },
     ivina:   { nome: 'Ívina',           pin: PINS.ivina,   fin: false, tabs: ['painel', 'ponto'] },
-    matheus: { nome: 'Matheus',         pin: PINS.matheus, fin: false, tabs: ['painel', 'ponto'] }
+    matheus: { nome: 'Matheus',         pin: PINS.matheus, fin: false, tabs: ['painel', 'ponto'] },
+    oneide:  { nome: 'Oneide',          pin: PINS.oneide,  fin: false, tabs: ['ponto'] }
   },
   ops: [], fin: [], crm: [], docs: [], settings: { schema: 15 }, _removidos: {}
 }));
@@ -303,6 +304,28 @@ function secao(t){ console.log(`\n--- ${t} ---`); }
       assert(incompletos.length >= 1, '★ dia sem par entrada/saída sai marcado como incompleto');
       assert(incompletos.every(d => d.minutos === 0 || d.primeira),
         'e não inventa horário para fechar a conta');
+    }
+
+    secao('CENÁRIO 4C — ponto em destaque: horários do dia, home office e ponto da equipe');
+    {
+      const iv = await entrar('ivina');
+      const est = await req('GET', '/api/ponto/meu-estado', { token: iv.token });
+      assert(est.json.horas && /^\d{2}:\d{2}$/.test(est.json.horas.entrada || ''), '★ o selo recebe a hora da entrada da própria pessoa');
+      assert(est.json.homeOffice && est.json.homeOffice.limite === 4, 'limite de home office da Ívina (4 no mês) para a janela do dia');
+      assert(est.json.lat === undefined && !JSON.stringify(est.json).includes('-9.66'), 'e continua sem coordenada nenhuma');
+      const negado = await req('GET', '/api/ponto/equipe-hoje', { token: iv.token });
+      assert(negado.status === 403, '★ ponto da equipe: 403 para a Ívina');
+      const dv = await entrar('davi');
+      const eq = await req('GET', '/api/ponto/equipe-hoje', { token: dv.token });
+      assert(eq.status === 200 && eq.json.equipe.ivina && /^\d{2}:\d{2}$/.test(eq.json.equipe.ivina.entrada || ''), '★ Davi vê a entrada de cada um na Torre (só hora e local)');
+      assert(!eq.texto.includes('-9.66') && !eq.texto.includes('-35.7'), 'sem coordenada');
+      const on = await entrar('oneide'); await req('POST', '/api/ponto/ciencia', { token: on.token });
+      const ho = await req('POST', '/api/ponto', { token: on.token, corpo: { tipo: 'entrada', homeOffice: true, lat: -3.73, lon: -38.52, precisao: 20 } });
+      assert(ho.status === 200, '"Estou em home office" registra a entrada' + (ho.status !== 200 ? ' — ' + ho.status + ' ' + ho.texto : ''));
+      const eq2 = await req('GET', '/api/ponto/equipe-hoje', { token: dv.token });
+      assert(eq2.json.equipe.oneide && eq2.json.equipe.oneide.local === 'home office', '★ e aparece como home office no ponto da equipe');
+      const aj = await req('POST', '/api/ponto', { token: on.token, corpo: { tipo: 'ajuste', justificativa: 'saí 18:10 e esqueci', refData: '2026-11-17' } });
+      assert(aj.status === 200, 'ajuste de dia incompleto com a data do dia');
     }
 
   } finally {
