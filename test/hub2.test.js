@@ -202,7 +202,10 @@ function bancoReal() {
     d.fin.push({ _id: 'fm', tipo: 'Despesa', valor: 10, status: 'Realizado', vencimento: '2026-10-07', liquidadoEm: '2026-10-07', por: 'Matheus', criadoEm: '2026-10-07T09:00:00Z', baixaPor: 'Matheus' });
     d.agendaTasks.push({ _id: 't1', t: 'Cotar frete', resp: 'Matheus', status: 'feita', doneAt: '2026-10-08' }, { _id: 't2', t: 'Atrasada', resp: 'Matheus', status: 'aberta', prazo: '2026-10-01' });
     const dm = W.desempenho(d, 'Matheus', '2026-10', '2026-10-24'), di = W.desempenho(d, 'Ívina', '2026-10', '2026-10-24'), dd = W.desempenho(d, 'Davi', '2026-10', '2026-10-24');
-    ok(dm.lanc === 1 && dm.baixas === 1 && dm.feitas === 1 && dm.atrasadas === 1, 'desempenho Matheus: 1 lançamento, 1 baixa, 1 tarefa feita, 1 atrasada');
+    /* Parte 4B: lançamento vencido sem baixa nem aviso conta como tarefa atrasada de quem lança (Matheus). */
+    const vencidosSemBaixa = d.fin.filter(l => l && !W.realizado(l) && !W.transferencia(l) && !l.cobradoSamirEm && W.vencDe(l) && W.vencDe(l) < '2026-10-24').length;
+    ok(dm.lanc === 1 && dm.baixas === 1 && dm.feitas === 1 && dm.atrasadas === 1 + vencidosSemBaixa, `desempenho Matheus: 1 lançamento, 1 baixa, 1 tarefa feita, 1 atrasada + ${vencidosSemBaixa} lançamento(s) vencido(s) sem baixa`);
+    ok(dd.atrasadas === d.agendaTasks.filter(t => t.resp === 'Davi' && t.status !== 'feita' && t.prazo && t.prazo < '2026-10-24').length, 'para quem não lança (Davi), lançamento vencido não conta');
     ok(di.coletados === 1 && dd.etapas === 1, 'desempenho: documento coletado conta para a Ívina, etapa avançada para o Davi');
     ok(W.fechadasNoMes(d, '2026-10').includes('OP20'), 'importação fechada no mês: OP20 entrou em contrato em outubro');
     {

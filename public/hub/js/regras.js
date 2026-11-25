@@ -724,7 +724,10 @@
     const baixas = (db.fin || []).filter(l => l && l.baixaPor === nome && no(l.liquidadoEm)).length;
     const tarefas = (db.agendaTasks || []).filter(t => t && t.resp === nome);
     const feitas = tarefas.filter(t => t.status === 'feita' && no(t.doneAt)).length;
-    const atrasadas = tarefas.filter(t => t.status !== 'feita' && t.prazo && t.prazo < h).length;
+    /* Quem lança (perfil frete: Matheus): lançamento vencido sem baixa nem aviso ao Samir conta como tarefa atrasada. */
+    const k = Object.keys(db.users || {}).find(x => ((db.users[x] || {}).nome || x) === nome || x === String(nome || '').toLowerCase());
+    const lancVenc = k && perfilDe(db, k).id === 'frete' ? (db.fin || []).filter(l => l && !realizado(l) && !transferencia(l) && !l.cobradoSamirEm && vencDe(l) && vencDe(l) < h).length : 0;
+    const atrasadas = tarefas.filter(t => t.status !== 'feita' && t.prazo && t.prazo < h).length + lancVenc;
     const opsResp = (db.ops || []).filter(o => o && ativa(o) && String(o.resp || '').split(/[\s/,]+/).includes(nome));
     const opsAtrasadas = opsResp.filter(o => prazoInfo(db, o, h).sit === 'atrasado').length;
     return { nome, etapas, coletados, revisados, lanc, baixas, feitas, atrasadas, ops: opsResp.length, opsAtrasadas };

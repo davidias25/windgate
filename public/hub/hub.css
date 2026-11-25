@@ -184,7 +184,8 @@ tfoot td{font-weight:700;background:var(--surface-2)}
 /* ---------- Torre de Controle por função ---------- */
 .torre{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
 .torre .tp{margin:0;min-width:0}
-.torre .tp.larga{grid-column:1/-1}
+.torre .tp.larga,.torre > .box.larga{grid-column:1/-1}
+.torre > .box{margin:0;min-width:0}
 .torre .kpis{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
 .torre .kpis .kpi{border-right:1px solid var(--line)}
 .torre .box-h .btns{display:flex;gap:6px;align-items:center;flex-wrap:wrap}

@@ -32,6 +32,8 @@
     let lista = db.ops.filter(o => o && o.id);
     if (!q) lista = lista.filter(o => modoLista === 'todas' ? true : modoLista === 'ativas' ? W.emAndamento(o) : !W.emAndamento(o));
     if (q) lista = lista.filter(o => [o.id, o.cliente, o.nome, o.navio, o.obs, o.tracking].join(' ').toLowerCase().includes(q));
+    /* Clique numa etapa da Torre: a lista abre filtrada nela. */
+    const etapaF = !q && H.filtroEtapaOps; if (etapaF) lista = lista.filter(o => o.status === etapaF);
     // A filha fica logo abaixo da mãe.
     lista.sort((a, b) => String(b.maeId || b.id).localeCompare(String(a.maeId || a.id), 'pt-BR', { numeric: true }) || (a.maeId ? 1 : 0) - (b.maeId ? 1 : 0) || String(a.id).localeCompare(String(b.id), 'pt-BR', { numeric: true }));
     el.innerHTML = `
@@ -40,12 +42,13 @@
       <div class="box"><div class="filters">
         <input type="search" id="opq" placeholder="Buscar por OP, cliente, produto, navio…" value="${esc(H.buscaGlobal || '')}">
         <div class="seg">${['ativas', 'entregues', 'todas'].map(m => `<button data-m="${m}" class="${modoLista === m && !q ? 'on' : ''}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
-        <span class="note">${lista.length} operação(ões)</span></div>
+        ${etapaF ? `<button class="btn sm" id="opetx">${esc(W.stMeta(etapaF).l)} ✕</button>` : ''}<span class="note">${lista.length} operação(ões)</span></div>
         ${tabelaOps(lista)}</div>`;
     ligar(el);
     const inp = el.querySelector('#opq');
     inp.addEventListener('input', () => { H.buscaGlobal = inp.value; clearTimeout(inp._t); inp._t = setTimeout(() => { H.render(); const n = document.querySelector('#opq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });
-    el.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { modoLista = b.dataset.m; H.buscaGlobal = ''; H.render(); });
+    el.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { modoLista = b.dataset.m; H.buscaGlobal = ''; H.filtroEtapaOps = null; H.render(); });
+    const etx = el.querySelector('#opetx'); if (etx) etx.onclick = () => { H.filtroEtapaOps = null; H.render(); };
   };
 
   /* ================= FICHA DA OPERAÇÃO ================= */
