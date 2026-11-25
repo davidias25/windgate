@@ -1304,11 +1304,24 @@ function triCalcular(e){
     clientesDe(c).map(x => x.id).filter(x => x !== id).forEach(x => removerCliente(c, x));
     return c;
   }
-  /** Custo e margem se o cliente ficasse sozinho no contêiner, com o preço de hoje. */
-  function sozinhoNoConteiner(q, id, precoAtual) {
+  /**
+   * Custo e margem se o cliente ficasse sozinho no contêiner, com o preço de hoje: todos os custos comuns (frete,
+   * seguro, porto, despesas) passam a ser dele, com os impostos que incidem sobre eles e o DIFAL recalculado.
+   * Cliente pequeno sozinho num FCL pode dar margem negativa (OP229.2): é a conta certa, e `abertura` mostra de onde
+   * vem a diferença para o Samir conferir. Com `custoHoje` (o custo dele no rateio), devolve a abertura.
+   */
+  function sozinhoNoConteiner(q, id, precoAtual, custoHoje) {
     if (!ehMultiCliente(q)) return null;
-    const R = calcular(cotacaoSozinho(q, id)), custo = custoCheio(R);
-    return { custo, margem: precoAtual != null ? precoAtual - custo : null };
+    const R = calcular(cotacaoSozinho(q, id)), custo = custoCheio(R), r2 = v => Math.round(v * 100) / 100;
+    const out = { custo, margem: precoAtual != null ? precoAtual - custo : null };
+    if (custoHoje != null) {
+      const hoje = calcularPorCliente(q).clientes.find(c => c.id === id); if (!hoje) return out;
+      const dif = x => (x.tri ? x.tri.difal : 0), Rh = hoje.R;
+      const comuns = (x, cp) => cp ? (cp.frete + cp.seguro + cp.capatazia + cp.terrestre + cp.siscomex + cp.afrmm + cp.honorarios + cp.demais) : (x.comp ? (x.comp.freteInt || 0) + (x.comp.seguro || 0) + (x.comp.terrestre || 0) + (x.comp.portuarias || 0) + (x.comp.honorarios || 0) : 0);
+      const cHoje = comuns(Rh, Rh.custoPor), cSo = comuns(R, null), difal = r2(dif(R) - dif(Rh)), extraComuns = r2(cSo - cHoje), total = r2(custo - custoHoje);
+      out.abertura = { custoHoje: r2(custoHoje), comunsHoje: r2(cHoje), comunsSozinho: r2(cSo), extraComuns, difalHoje: r2(dif(Rh)), difalSozinho: r2(dif(R)), extraDifal: difal, extraImpostos: r2(total - extraComuns - difal), total };
+    }
+    return out;
   }
   /** Impacto de um cliente sair, sem gravar nada: cada um que fica, com o preço fixo. */
   function simularDesistencia(q, id) {

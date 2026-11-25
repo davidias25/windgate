@@ -130,6 +130,10 @@ console.log('\nItem 8: desistência:');
   W.negocioDaCotacao(d, q, { por: 'S', agora: T });
   const rm = W.calcularPorCliente(q), mq = rm.clientes[0], precoM = W.precoDesem(mq.R), soz = W.sozinhoNoConteiner(q, 'c1', precoM);
   ok(soz.custo > mq.custo && perto(soz.margem, precoM - soz.custo), 'mostra custo e margem se ficasse sozinho no contêiner');
+  const az = rm.clientes[1], sa = W.sozinhoNoConteiner(q, 'c2', W.precoDesem(az.R), az.custo), ab = sa.abertura;
+  ok(ab && perto(ab.extraComuns + ab.extraImpostos + ab.extraDifal, sa.custo - az.custo) && ab.extraComuns > 0 && ab.extraDifal > 0,
+    '2.2: "se ficasse sozinho" abre a diferença: custos comuns do contêiner + impostos sobre eles + DIFAL recalculado = custo a mais');
+  ok(perto(ab.comunsSozinho, ab.comunsHoje + W.sozinhoNoConteiner(q, 'c1', precoM, mq.custo).abertura.comunsHoje, 0.05), 'sozinho, os custos comuns são o contêiner inteiro (a parte dele + a do outro)');
   const sim = W.simularDesistencia(q, 'c2');
   ok(sim.dedicado && sim.fica.length === 1 && perto(sim.fica[0].custo, soz.custo) && perto(sim.fica[0].margem, soz.margem) && q.clientes.length === 2, 'mostra o impacto antes, sem gravar');
   const r = W.desistirCliente(d, q, 'c2', { por: 'Samir', agora: T, hoje: HJ });
